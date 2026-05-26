@@ -96,7 +96,7 @@ def send_logon_panel(client_socket):
     # 1. Clear screen
     # Every Write (0xF1) or Erase/Write (0xF5) should be followed by a WCC byte
     buf.append(ERASE_WRITE)
-    buf.extend(write_control_character(reset_mdts=True))
+    buf.extend(write_control_character(reset_mdts=True, keyboard_restore=True))
 
     # 2. Moves cursor to row 0, col 0 and writes title
     buf.extend([SBA])
@@ -152,37 +152,36 @@ def send_logon_panel(client_socket):
 
 def aid_to_string(aid: int):
     aid_codes = {
-        0x60: "Enter",
-        0x61: "PF1",
-        0x62: "PF2",
-        0x63: "PF3",
-        0x64: "PF4",
-        0x65: "PF5",
-        0x66: "PF6",
-        0x67: "PF7",
-        0x68: "PF8",
-        0x69: "PF9",
-        0x6A: "PF10",
-        0x6B: "PF11",
-        0x6C: "PF12",
-        0x6D: "PF13",
-        0x6E: "PF14",
-        0x6F: "PF15",
-        0x70: "PF16",
-        0x71: "PF17",
-        0x72: "PF18",
-        0x73: "PF19",
-        0x74: "PF20",
-        0x75: "PF21",
-        0x76: "PF22",
-        0x77: "PF23",
-        0x78: "PF24",
-        0x79: "Clear",
-        0x7A: "Reset",
-        0x7B: "PA1",
-        0x7C: "PA2",
-        0x7D: "PA3",
-        0x7E: "SysReq",
+        0x60: "No AID",
+        0x7D: "Enter",
+        0x6D: "Clear",
+        0x6C: "PA1",
+        0x6E: "PA2",
+        0x6B: "PA3",
+        0xF1: "PF1",
+        0xF2: "PF2",
+        0xF3: "PF3",
+        0xF4: "PF4",
+        0xF5: "PF5",
+        0xF6: "PF6",
+        0xF7: "PF7",
+        0xF8: "PF8",
+        0xF9: "PF9",
+        0x7A: "PF10",
+        0x7B: "PF11",
+        0x7C: "PF12",
+        0xC1: "PF13",
+        0xC2: "PF14",
+        0xC3: "PF15",
+        0xC4: "PF16",
+        0xC5: "PF17",
+        0xC6: "PF18",
+        0xC7: "PF19",
+        0xC8: "PF20",
+        0xC9: "PF21",
+        0x4A: "PF22",
+        0x4B: "PF23",
+        0x4C: "PF24",
     }
     return aid_codes.get(aid, f"Unknown AID {hex(aid)}")
 
@@ -385,7 +384,12 @@ def run_tn3270_server(host="0.0.0.0", port=23):
         print(f"TN3270 server listening on {host}:{port}")
         while True:
             client_socket, addr = server_socket.accept()
-            handle_client(client_socket, addr)
+            try:
+                handle_client(client_socket, addr)
+            except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+                print(f"Client {addr} disconnected unexpectedly")
+            finally:
+                client_socket.close()
 
 
 if __name__ == "__main__":
