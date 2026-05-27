@@ -1,49 +1,121 @@
-# 3270 TN3270 Server Stub
+# 3270 TN3270 Server
 
-This project implements a basic TN3270 (Telnet 3270) server in Python. It is designed to demonstrate the fundamentals of the TN3270 protocol and provide a starting point for building mainframe-style terminal applications.
+A Python implementation of a TN3270 server that presents an authentic IBM mainframe experience — complete TSO/E logon panel, RACF authentication, and the ISPF Primary Option Menu — over a standard TCP connection. Connect any real 3270 emulator and it just works.
 
-## Features
-- Listens for incoming TN3270 connections on port 23 (configurable)
-- Performs Telnet option negotiation for TN3270 compatibility
-- Sends a simple IBM 3270-style logon panel to clients
-- Parses user input from 3270 fields (USERID and PASSWORD)
-- Handles timeouts and basic session management
+## What you can do
 
-## How It Works
-1. The server starts and listens for incoming connections.
-2. When a client connects, the server negotiates Telnet options required for TN3270.
-3. The server sends a logon panel with input fields for USERID and PASSWORD.
-4. The client fills in the fields and submits the data.
-5. The server parses the input and prints the results to the console.
+1. **Connect** any TN3270 emulator (wc3270, x3270, Vista TN3270, etc.) to `localhost:2323`
+2. **Log in** using a RACF userid and password — the server validates credentials and shows proper error messages for bad passwords or missing userids
+3. **Navigate** the ISPF Primary Option Menu — the keyboard is fully live; type an option number and press Enter
 
-## Limitations
-- This is a stub implementation and does not fully support the 3270 data stream protocol.
-- Only basic field parsing and input handling are implemented.
-- No authentication or backend integration is provided.
-- Not suitable for production use or real mainframe emulation.
+### Logon panel
 
-## Requirements
+The server presents an authentic z/OS V2R5.0 TSO/E LOGON screen. Fill in your userid and password and press Enter.
+
+![TSO/E Logon Panel](docs/screenshots/logon_panel.png)
+
+**Built-in credentials**
+
+| Userid | Password |
+|--------|----------|
+| `IBMUSER` | `SYS1` |
+| `TESTUSER` | `RACF` |
+
+The server follows z/OS RACF conventions: userids and passwords are case-insensitive (uppercased before comparison). A wrong password returns `IKJ56425I PASSWORD NOT CORRECT FOR <userid>`. A missing userid returns `IKJ56700I USERID MUST BE SPECIFIED`.
+
+### ISPF Primary Option Menu
+
+After a successful login you land on the ISPF Primary Option Menu. The keyboard is unlocked — you can type option numbers and press Enter. Entering `X` or pressing PF3 logs you off and returns to the TSO/E logon panel.
+
+![ISPF Primary Option Menu](docs/screenshots/ispf_menu.png)
+
+The full z/OS ISPF 7.1.0 menu is rendered, including the user ID, system ID (SY1), and current time in the status block. Options 0–13 and X are listed. (Sub-menus are not yet implemented — selecting any option returns you to the main menu with a short message.)
+
+## Quick start
+
+### Prerequisites
+
 - Python 3.8+
-- Run as administrator/root if binding to port 23 (or use a higher port)
+- A TN3270 emulator — [wc3270](https://x3270.miraheze.org/wiki/Wc3270) (Windows) or [x3270](https://x3270.miraheze.org/wiki/X3270) (Linux/macOS) are free and work out of the box
 
-## Usage
+### Run the server
+
 ```sh
 python server.py
 ```
 
-Connect using a TN3270 emulator (e.g., x3270, wc3270) to `localhost:23`.
+The server listens on port 2323 by default (no root/administrator required, unlike port 23).
+
+### Connect with wc3270 (Windows)
+
+```sh
+wc3270 localhost:2323
+```
+
+### Connect with x3270 (Linux / macOS)
+
+```sh
+x3270 localhost:2323
+```
+
+### Connect with any emulator
+
+Point your emulator at `localhost`, port `2323`. The server negotiates TN3270E binary mode, EOR, and terminal-type options automatically and supports IBM-3278 model 2–5 terminals.
+
+## How it works
+
+### TN3270 protocol
+
+TN3270 is Telnet extended with IBM 3270 data-stream framing. The server performs the full Telnet option negotiation (BINARY, EOR, TERMINAL-TYPE) before sending any screen data.
+
+### 3270 data stream
+
+Screens are built with authentic 3270 orders:
+
+| Order | Hex | Purpose |
+|-------|-----|---------|
+| ERASE_WRITE | `0xF5` | Clear screen and write new data |
+| SBA | `0x11` | Set Buffer Address — position the write cursor |
+| SF | `0x1D` | Start Field — define a protected or unprotected input field |
+| IC | `0x13` | Insert Cursor — place the cursor in an input field |
+
+The Write Control Character (WCC) sent after ERASE_WRITE uses `0x43` — the correct x3270/wc3270 bit layout (`WCC_RESET_BIT | WCC_KEYBOARD_RESTORE_BIT | WCC_RESET_MDT_BIT`) — so the keyboard unlocks immediately after every screen update.
+
+### Field parsing
+
+When the user presses Enter or a PF key, the emulator sends an AID byte followed by the cursor address and the contents of all modified fields. The server decodes the 12-bit packed buffer addresses and reads each field's EBCDIC text, then strips whitespace and uppercases credential fields before comparing.
+
+## Project structure
+
+```
+server.py   — the entire TN3270 server (single file)
+```
+
+Key functions:
+
+| Function | What it does |
+|----------|-------------|
+| `tn3270_negotiate` | Performs Telnet option handshake |
+| `send_tso_logon` | Builds and sends the TSO/E logon panel |
+| `send_ispf_menu` | Builds and sends the ISPF Primary Option Menu |
+| `read_client_input` | Reads and parses an AID response from the client |
+| `write_control_character` | Encodes a WCC byte with correct x3270 bit positions |
+| `encode_pack_addr` | Converts (row, col) to a 12-bit 3270 buffer address |
+| `handle_client` | Main session loop: logon → ISPF → logoff |
 
 ## Extending
-To build a full TN3270 server, you will need to:
-- Implement full 3270 data stream parsing and generation
-- Manage screen buffers and field attributes
-- Integrate with backend applications or authentication systems
-- Handle multiple sessions and advanced Telnet options
+
+To add real sub-menus, replace the `short_msg` response in `handle_client`'s ISPF loop with a call to a new `send_ispf_option_N` function that builds and sends the appropriate screen, then reads the user's response.
+
+To add more users, extend the `_CREDENTIALS` dict at the top of `server.py`.
 
 ## References
-- [TN3270 Protocol Specification](https://tools.ietf.org/html/rfc2355)
-- [x3270 Emulator](https://x3270.miraheze.org/wiki/Main_Page)
-- [IBM 3270 Data Stream Reference](https://www.ibm.com/docs/en/zos/2.4.0?topic=streams-3270-data-stream)
+
+- [RFC 2355 — TN3270E](https://tools.ietf.org/html/rfc2355)
+- [IBM 3270 Data Stream Programming Reference](https://www.ibm.com/docs/en/zos/2.5.0?topic=reference-3270-data-stream)
+- [x3270 / wc3270 emulator](https://x3270.miraheze.org/wiki/Main_Page)
+- [pmattes/x3270 source (3270ds.h)](https://github.com/pmattes/x3270) — canonical WCC and field-attribute bit definitions
 
 ---
-This project is for educational and prototyping purposes only.
+
+For educational and prototyping purposes.
