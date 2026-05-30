@@ -374,6 +374,8 @@ def read_client_input(client_socket):
     # Strip IAC EOR
     buffer = buffer[:-2]
 
+    if not buffer:
+        return None
     aid = buffer[0]
     print(f"AID: {aid_to_string(aid)}")
 
@@ -443,9 +445,13 @@ def tn3270_negotiate(client_socket):
                 i += 1
                 continue
 
+            if i + 1 >= len(buffer):
+                break  # IAC at recv boundary; wait for next recv
             cmd = buffer[i + 1]
 
             if cmd in (DO, DONT, WILL, WONT):
+                if i + 2 >= len(buffer):
+                    break  # incomplete 3-byte command; wait for more data
                 opt = buffer[i + 2]
                 if cmd == DO:
                     client_socket.sendall(bytes([IAC, WILL, opt]))
@@ -465,6 +471,8 @@ def tn3270_negotiate(client_socket):
                 continue
 
             if cmd == SB:
+                if i + 3 >= len(buffer):
+                    break  # incomplete SB sequence; wait for more data
                 opt = buffer[i + 2]
                 if opt == TERMINAL_TYPE:
                     subopt = buffer[i + 3]
@@ -566,6 +574,8 @@ def run_tn3270_server(host="0.0.0.0", port=2323):
                 handle_client(client_socket, addr)
             except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
                 print(f"Client {addr} disconnected unexpectedly")
+            except Exception as e:
+                print(f"Error handling client {addr}: {e}")
             finally:
                 client_socket.close()
 
