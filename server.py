@@ -359,6 +359,9 @@ def aid_to_string(aid: int):
     return aid_codes.get(aid, f"Unknown AID {hex(aid)}")
 
 
+MAX_BUFFER_SIZE = 65536  # 64 KiB; a legitimate 3270 data stream is at most a few KB
+
+
 def read_client_input(client_socket):
     buffer = bytearray()
     while True:
@@ -366,6 +369,9 @@ def read_client_input(client_socket):
         if not data:
             return None
         buffer.extend(data)
+        if len(buffer) > MAX_BUFFER_SIZE:
+            print(f"WARNING: client buffer exceeded {MAX_BUFFER_SIZE} bytes; closing connection")
+            return None
         if len(buffer) >= 2 and buffer[-2:] == bytes([IAC, EOR]):
             break
 
