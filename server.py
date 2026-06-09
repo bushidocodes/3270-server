@@ -375,15 +375,14 @@ def read_client_input(client_socket):
         if len(buffer) >= 2 and buffer[-2:] == bytes([IAC, EOR]):
             break
 
-    print("RX:", binascii.hexlify(buffer))
-
     # Strip IAC EOR
     buffer = buffer[:-2]
 
     if not buffer:
         return None
     aid = buffer[0]
-    print(f"AID: {aid_to_string(aid)}")
+    # Log only the AID (not the raw bytes) to avoid leaking password data in logs
+    print(f"RX: {len(buffer)} bytes, AID: {aid_to_string(aid)}")
 
     SBA_ORD = 0x11
     SF_ORD = 0x1D
