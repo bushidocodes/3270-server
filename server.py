@@ -56,25 +56,28 @@ class FieldType(Enum):
     NUMERIC = 1
 
 
+_FA_BASE = 0x40  # bit 6: marks byte as a field attribute (valid FA range 0x40-0x7F)
+
+
 def field_attribute(
     display: DisplayIntensity = DisplayIntensity.NORMAL,
     protected: bool = True,
     field_type: FieldType = FieldType.ALPHANUMERIC,
     mdt: bool = False,
 ) -> int:
-    attr = 0x00
+    attr = _FA_BASE
     if display == DisplayIntensity.HIGH:
-        attr |= 0b0100_0000
+        attr |= 0x08          # FA_INT_HIGH_SEL (bits 3-2 = 10)
     elif display == DisplayIntensity.HIGHLIGHTED:
-        attr |= 0b1000_0000
+        attr |= 0x04          # FA_INT_NORM_SEL (bits 3-2 = 01)
     elif display == DisplayIntensity.NON_DISPLAY:
-        attr |= 0b1100_0000
+        attr |= 0x0C          # FA_INT_ZERO_NSEL (bits 3-2 = 11)
     if protected:
-        attr |= 0b0010_0000
+        attr |= 0x20          # FA_PROTECT
     if field_type == FieldType.NUMERIC:
-        attr |= 0b0001_0000
+        attr |= 0x10          # FA_NUMERIC
     if mdt:
-        attr |= 0b0000_0001
+        attr |= 0x01          # FA_MDT
     return attr
 
 
@@ -118,6 +121,12 @@ def _high(buf: bytearray, row: int, col: int, s: str):
 def _normal(buf: bytearray, row: int, col: int, s: str):
     """Write normal-intensity protected text at position."""
     _sba_sf(buf, row, col, protected=True, display=DisplayIntensity.NORMAL)
+    _text(buf, s)
+
+
+def _highlighted(buf: bytearray, row: int, col: int, s: str):
+    """Write highlighted (selected-normal) protected text at position."""
+    _sba_sf(buf, row, col, protected=True, display=DisplayIntensity.HIGHLIGHTED)
     _text(buf, s)
 
 
@@ -223,6 +232,9 @@ def send_tso_logon(client_socket, error_msg: str = None):
 
     # Row 14: Sysout class
     _normal(buf, 14, 42, "OIDcard   ===> None")
+
+    # Row 15: access notice (highlighted intensity — FA_INT_NORM_SEL)
+    _highlighted(buf, 15, 1, "*** Authorized users only. Unauthorized access is prohibited. ***")
 
     # Row 16: Enter/PF key hints
     _normal(buf, 16, 1, "Press ENTER to logon to TSO/E")
