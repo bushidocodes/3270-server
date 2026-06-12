@@ -124,6 +124,12 @@ def _normal(buf: bytearray, row: int, col: int, s: str):
     _text(buf, s)
 
 
+def _highlighted(buf: bytearray, row: int, col: int, s: str):
+    """Write highlighted (selected-normal) protected text at position."""
+    _sba_sf(buf, row, col, protected=True, display=DisplayIntensity.HIGHLIGHTED)
+    _text(buf, s)
+
+
 # Credentials — keys are uppercase userids
 _CREDENTIALS = {
     "IBMUSER": "SYS1",
@@ -226,6 +232,9 @@ def send_tso_logon(client_socket, error_msg: str = None):
 
     # Row 14: Sysout class
     _normal(buf, 14, 42, "OIDcard   ===> None")
+
+    # Row 15: access notice (highlighted intensity — FA_INT_NORM_SEL)
+    _highlighted(buf, 15, 1, "*** Authorized users only. Unauthorized access is prohibited. ***")
 
     # Row 16: Enter/PF key hints
     _normal(buf, 16, 1, "Press ENTER to logon to TSO/E")
