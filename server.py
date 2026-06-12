@@ -56,25 +56,28 @@ class FieldType(Enum):
     NUMERIC = 1
 
 
+_FA_BASE = 0x40  # bit 6: marks byte as a field attribute (valid FA range 0x40-0x7F)
+
+
 def field_attribute(
     display: DisplayIntensity = DisplayIntensity.NORMAL,
     protected: bool = True,
     field_type: FieldType = FieldType.ALPHANUMERIC,
     mdt: bool = False,
 ) -> int:
-    attr = 0x00
+    attr = _FA_BASE
     if display == DisplayIntensity.HIGH:
-        attr |= 0b0100_0000
+        attr |= 0x08          # FA_INT_HIGH_SEL (bits 3-2 = 10)
     elif display == DisplayIntensity.HIGHLIGHTED:
-        attr |= 0b1000_0000
+        attr |= 0x04          # FA_INT_NORM_SEL (bits 3-2 = 01)
     elif display == DisplayIntensity.NON_DISPLAY:
-        attr |= 0b1100_0000
+        attr |= 0x0C          # FA_INT_ZERO_NSEL (bits 3-2 = 11)
     if protected:
-        attr |= 0b0010_0000
+        attr |= 0x20          # FA_PROTECT
     if field_type == FieldType.NUMERIC:
-        attr |= 0b0001_0000
+        attr |= 0x10          # FA_NUMERIC
     if mdt:
-        attr |= 0b0000_0001
+        attr |= 0x01          # FA_MDT
     return attr
 
 

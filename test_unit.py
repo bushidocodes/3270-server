@@ -132,43 +132,43 @@ def test_wcc_returns_single_byte():
 # ── field_attribute ────────────────────────────────────────────────────────────
 
 def test_fa_default():
-    """Default: NORMAL intensity, protected, alphanumeric, no MDT → 0x20."""
-    assert field_attribute() == 0x20
+    """Default: NORMAL intensity, protected, alphanumeric, no MDT → 0x60 (0x40 base | 0x20 protect)."""
+    assert field_attribute() == 0x60
 
 
 def test_fa_non_display_protected():
-    """NON_DISPLAY + protected → 0xE0 (standard password-field attribute)."""
-    assert field_attribute(display=DisplayIntensity.NON_DISPLAY, protected=True) == 0xE0
+    """NON_DISPLAY + protected → 0x6C (0x40 | 0x0C | 0x20)."""
+    assert field_attribute(display=DisplayIntensity.NON_DISPLAY, protected=True) == 0x6C
 
 
 def test_fa_high_protected():
-    """HIGH intensity + protected → 0x60."""
-    assert field_attribute(display=DisplayIntensity.HIGH, protected=True) == 0x60
+    """HIGH intensity + protected → 0x68 (0x40 | 0x08 | 0x20)."""
+    assert field_attribute(display=DisplayIntensity.HIGH, protected=True) == 0x68
 
 
 def test_fa_highlighted_protected():
-    """HIGHLIGHTED + protected → 0xA0."""
-    assert field_attribute(display=DisplayIntensity.HIGHLIGHTED, protected=True) == 0xA0
+    """HIGHLIGHTED + protected → 0x64 (0x40 | 0x04 | 0x20)."""
+    assert field_attribute(display=DisplayIntensity.HIGHLIGHTED, protected=True) == 0x64
 
 
 def test_fa_unprotected_input():
-    """Normal unprotected editable field → 0x00."""
-    assert field_attribute(display=DisplayIntensity.NORMAL, protected=False) == 0x00
+    """Normal unprotected editable field → 0x40 (base only)."""
+    assert field_attribute(display=DisplayIntensity.NORMAL, protected=False) == 0x40
 
 
 def test_fa_mdt_set():
-    """MDT bit set on default protected field → 0x21."""
-    assert field_attribute(mdt=True) == 0x21
+    """MDT bit set on default protected field → 0x61 (0x40 | 0x20 | 0x01)."""
+    assert field_attribute(mdt=True) == 0x61
 
 
 def test_fa_numeric():
-    """Numeric type on protected field → 0x30."""
-    assert field_attribute(field_type=FieldType.NUMERIC) == 0x30
+    """Numeric type on protected field → 0x70 (0x40 | 0x20 | 0x10)."""
+    assert field_attribute(field_type=FieldType.NUMERIC) == 0x70
 
 
 def test_fa_unprotected_numeric_mdt():
-    """Unprotected numeric with MDT → 0x11."""
-    assert field_attribute(protected=False, field_type=FieldType.NUMERIC, mdt=True) == 0x11
+    """Unprotected numeric with MDT → 0x51 (0x40 | 0x10 | 0x01)."""
+    assert field_attribute(protected=False, field_type=FieldType.NUMERIC, mdt=True) == 0x51
 
 
 # ── aid_to_string ──────────────────────────────────────────────────────────────
