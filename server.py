@@ -1,5 +1,6 @@
 import socket
 import binascii
+import threading
 from datetime import datetime
 from enum import Enum
 
@@ -579,22 +580,26 @@ def handle_client(client_socket, addr):
                 short_msg = None
 
 
+def _client_thread(client_socket, addr):
+    try:
+        handle_client(client_socket, addr)
+    except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+        print(f"Client {addr} disconnected unexpectedly")
+    except Exception as e:
+        print(f"Error handling client {addr}: {e}")
+    finally:
+        client_socket.close()
+
+
 def run_tn3270_server(host="0.0.0.0", port=2323):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
         server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server_socket.bind((host, port))
-        server_socket.listen(1)
+        server_socket.listen(socket.SOMAXCONN)
         print(f"TN3270 server listening on {host}:{port}")
         while True:
             client_socket, addr = server_socket.accept()
-            try:
-                handle_client(client_socket, addr)
-            except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
-                print(f"Client {addr} disconnected unexpectedly")
-            except Exception as e:
-                print(f"Error handling client {addr}: {e}")
-            finally:
-                client_socket.close()
+            threading.Thread(target=_client_thread, args=(client_socket, addr), daemon=True).start()
 
 
 if __name__ == "__main__":
