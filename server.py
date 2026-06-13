@@ -157,6 +157,20 @@ ISPF_OPTION_ROW = 2
 ISPF_OPTION_ADDR = ISPF_OPTION_ROW * 80 + (ISPF_OPTION_SF_COL + 1)
 
 
+def redact_fields(fields):
+    """Return a copy of a parsed fields dict with the password field redacted.
+
+    handle_client() logs the parsed fields for debugging, but the dict contains
+    the decoded plaintext password keyed by LOGON_PASSWORD_ADDR. Emitting it to
+    stdout would leak the password on every login, defeating the safe-logging
+    guard in read_client_input(). Mask it before logging.
+    """
+    return {
+        k: ("***" if k == LOGON_PASSWORD_ADDR else v)
+        for k, v in fields.items()
+    }
+
+
 def send_tso_logon(client_socket, error_msg: str = None):
     """Send authentic z/OS TSO/E LOGON panel."""
     buf = bytearray()
@@ -533,7 +547,7 @@ def handle_client(client_socket, addr):
             if result is None:
                 return
             aid, fields = result
-            print(f"AID={hex(aid)}, fields={fields}")
+            print(f"AID={hex(aid)}, fields={redact_fields(fields)}")
 
             aid_str = aid_to_string(aid)
             if aid_str in ("PF3", "PF15"):
@@ -562,7 +576,7 @@ def handle_client(client_socket, addr):
             if result is None:
                 return
             aid, fields = result
-            print(f"AID={hex(aid)}, fields={fields}")
+            print(f"AID={hex(aid)}, fields={redact_fields(fields)}")
 
             aid_str = aid_to_string(aid)
             option = fields.get(ISPF_OPTION_ADDR, "").strip().upper()

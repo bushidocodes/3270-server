@@ -12,7 +12,12 @@ import sys
 from unittest.mock import MagicMock
 
 sys.path.insert(0, ".")
-from server import read_client_input  # noqa: E402
+from server import (  # noqa: E402
+    read_client_input,
+    redact_fields,
+    LOGON_USERID_ADDR,
+    LOGON_PASSWORD_ADDR,
+)
 
 IAC = 0xFF
 EOR = 0xEF
@@ -112,3 +117,39 @@ def test_unknown_aid_no_buffer_dump(capsys):
     assert binascii.hexlify(payload).decode() not in out
     assert "RX:" in out
     assert "AID:" in out
+
+
+# ── Decoded-password redaction (issue #20) ─────────────────────────────────────
+# read_client_input() avoids hex-dumping the buffer, but handle_client() then
+# logs the *decoded* fields dict. redact_fields() must mask the plaintext
+# password before that dict is ever printed.
+
+def test_redact_masks_password_value():
+    """The decoded password string must not survive in the redacted dict."""
+    fields = {LOGON_USERID_ADDR: "SYS1", LOGON_PASSWORD_ADDR: "hunter2"}
+    safe = redact_fields(fields)
+    assert "hunter2" not in safe.values()
+    assert safe[LOGON_PASSWORD_ADDR] == "***"
+
+
+def test_redact_preserves_non_password_fields():
+    """Non-password fields (e.g. userid) must be passed through unchanged."""
+    fields = {LOGON_USERID_ADDR: "SYS1", LOGON_PASSWORD_ADDR: "hunter2"}
+    safe = redact_fields(fields)
+    assert safe[LOGON_USERID_ADDR] == "SYS1"
+
+
+def test_redact_does_not_mutate_original():
+    """Redaction must not clobber the caller's dict — login logic reads it next."""
+    fields = {LOGON_USERID_ADDR: "SYS1", LOGON_PASSWORD_ADDR: "hunter2"}
+    redact_fields(fields)
+    assert fields[LOGON_PASSWORD_ADDR] == "hunter2"
+
+
+def test_redacted_password_not_in_logged_output(capsys):
+    """The string handle_client() logs must not contain the plaintext password."""
+    fields = {LOGON_USERID_ADDR: "SYS1", LOGON_PASSWORD_ADDR: "hunter2"}
+    print(f"AID=0x7d, fields={redact_fields(fields)}")
+    out = capsys.readouterr().out
+    assert "hunter2" not in out
+    assert "SYS1" in out
