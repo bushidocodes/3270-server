@@ -605,7 +605,7 @@ def _client_thread(client_socket, addr):
         client_socket.close()
 
 
-def run_tn3270_server(host="0.0.0.0", port=2323):
+def run_tn3270_server(host="127.0.0.1", port=2323):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
         server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server_socket.bind((host, port))
