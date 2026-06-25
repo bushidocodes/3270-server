@@ -89,46 +89,11 @@ SF = 0x1D
 IC = 0x13
 
 
-def _sba(buf: bytearray, row: int, col: int):
-    buf.append(SBA)
-    buf.extend(encode_pack_addr(row, col))
-
-
-def _sba_sf(
-    buf: bytearray,
-    row: int,
-    col: int,
-    protected: bool = True,
-    display: DisplayIntensity = DisplayIntensity.NORMAL,
-    field_type: FieldType = FieldType.ALPHANUMERIC,
-    mdt: bool = False,
-):
-    buf.append(SBA)
-    buf.extend(encode_pack_addr(row, col))
-    buf.append(SF)
-    buf.append(field_attribute(display=display, protected=protected, field_type=field_type, mdt=mdt))
-
-
-def _text(buf: bytearray, s: str):
-    buf.extend(to_ebcdic(s))
-
-
-def _high(buf: bytearray, row: int, col: int, s: str):
-    """Write high-intensity protected text at position."""
-    _sba_sf(buf, row, col, protected=True, display=DisplayIntensity.HIGH)
-    _text(buf, s)
-
-
-def _normal(buf: bytearray, row: int, col: int, s: str):
-    """Write normal-intensity protected text at position."""
-    _sba_sf(buf, row, col, protected=True, display=DisplayIntensity.NORMAL)
-    _text(buf, s)
-
-
-def _highlighted(buf: bytearray, row: int, col: int, s: str):
-    """Write highlighted (selected-normal) protected text at position."""
-    _sba_sf(buf, row, col, protected=True, display=DisplayIntensity.HIGHLIGHTED)
-    _text(buf, s)
+# The low-level building blocks above (encode_pack_addr, field_attribute,
+# write_control_character, the order constants) are consumed by screen.py, which
+# provides the Screen/Field model that the panels render through. Screens are now
+# authored declaratively in panels/*.dtl and loaded via dtl.load_panel() — see
+# send_tso_logon / send_ispf_menu below.
 
 
 # Credentials — keys are uppercase userids
@@ -171,183 +136,37 @@ def redact_fields(fields):
     }
 
 
+def _send_screen(client_socket, screen):
+    """Render a screen.Screen to the 3270 data stream and send it."""
+    data = screen.render()
+    print("TX:", binascii.hexlify(data))
+    client_socket.sendall(data)
+
+
 def send_tso_logon(client_socket, error_msg: str = None):
-    """Send authentic z/OS TSO/E LOGON panel."""
-    buf = bytearray()
-    buf.append(0xF5)  # ERASE_WRITE
-    buf.extend(write_control_character(reset_mdts=True, keyboard_restore=True))
+    """Send the z/OS TSO/E LOGON panel, rendered from panels/logon.dtl."""
+    # Imported lazily: screen.py imports primitives from this module, so a
+    # top-level import here would create a circular import at load time.
+    from dtl import load_panel
+    from screen import Text
 
-    # Row 0: title bar (centered in 80 cols)
-    title = "-" * 8 + "  z/OS V2R5.0 TSO/E LOGON  " + "-" * 8
-    title_col = (80 - len(title)) // 2
-    _high(buf, 0, title_col, title)
-
-    # Row 2: column headers
-    _normal(buf, 2, 1, "Enter LOGON parameters below:")
-    _normal(buf, 2, 42, "RACF LOGON parameters:")
-
-    # Row 3: separator line
-    _normal(buf, 3, 1, "-" * 37)
-    _normal(buf, 3, 42, "-" * 37)
-
-    # Row 5: Userid
-    _normal(buf, 5, 1, "Userid   ===>")
-    _sba_sf(buf, 5, LOGON_USERID_SF_COL, protected=False, mdt=True)
-    _text(buf, " " * 8)
-    _sba_sf(buf, 5, LOGON_USERID_SF_COL + 9, protected=True)  # field terminator
-
-    # Insert cursor in userid field
-    buf.append(SBA)
-    buf.extend(encode_pack_addr(5, LOGON_USERID_SF_COL + 1))
-    buf.append(IC)
-
-    # Row 6: Password
-    _normal(buf, 6, 1, "Password ===>")
-    _sba_sf(buf, 6, LOGON_PASSWORD_SF_COL, protected=False, display=DisplayIntensity.NON_DISPLAY, mdt=True)
-    _text(buf, " " * 8)
-    _sba_sf(buf, 6, LOGON_PASSWORD_SF_COL + 9, protected=True)
-
-    # Row 7: Procedure
-    _normal(buf, 7, 1, "Procedure===>")
-    _sba_sf(buf, 7, LOGON_PROC_SF_COL, protected=False, mdt=True)
-    _text(buf, "IKJACCNT")
-    _sba_sf(buf, 7, LOGON_PROC_SF_COL + 9, protected=True)
-
-    _normal(buf, 7, 42, "Acct Nmbr    ===>")
-    _sba_sf(buf, 7, 60, protected=False, mdt=True)
-    _text(buf, " " * 8)
-    _sba_sf(buf, 7, 69, protected=True)
-
-    # Row 8: Size
-    _normal(buf, 8, 1, "Size     ===>")
-    _sba_sf(buf, 8, 16, protected=False, field_type=FieldType.NUMERIC, mdt=True)
-    _text(buf, "00150")
-    _sba_sf(buf, 8, 22, protected=True)
-
-    _normal(buf, 8, 42, "Perform      ===>")
-    _sba_sf(buf, 8, 60, protected=False, field_type=FieldType.NUMERIC, mdt=True)
-    _text(buf, " " * 8)
-    _sba_sf(buf, 8, 69, protected=True)
-
-    # Row 9: Command
-    _normal(buf, 9, 1, "Command  ===>")
-    _sba_sf(buf, 9, 16, protected=False, mdt=True)
-    _text(buf, " " * 62)
-    _sba_sf(buf, 9, 79, protected=True)
-
-    # Row 11: Reconnect (right column)
-    _normal(buf, 11, 1, "PDS/E Dsname ===>")
-    _sba_sf(buf, 11, 19, protected=False, mdt=True)
-    _text(buf, " " * 59)
-    _sba_sf(buf, 11, 79, protected=True)
-
-    # Row 12: Mail notify
-    _normal(buf, 12, 42, "Mail      ===> Yes")
-    _normal(buf, 13, 42, "Reconnect ===> Auto")
-
-    # Row 14: Sysout class
-    _normal(buf, 14, 42, "OIDcard   ===> None")
-
-    # Row 15: access notice (highlighted intensity — FA_INT_NORM_SEL)
-    _highlighted(buf, 15, 1, "*** Authorized users only. Unauthorized access is prohibited. ***")
-
-    # Row 16: Enter/PF key hints
-    _normal(buf, 16, 1, "Press ENTER to logon to TSO/E")
-    _normal(buf, 17, 1, "PF1=HELP   PF3=LOGOFF")
-
-    # Row 19: error message (high intensity, centered)
+    screen = load_panel("logon")
     if error_msg:
-        err_col = max(0, (80 - len(error_msg)) // 2)
-        _high(buf, 19, err_col, error_msg)
-
-    # Row 21: bottom message
-    _normal(buf, 21, 1, "ENTER AN END COMMAND TO LOGOFF")
-
-    buf.extend([IAC, EOR])
-    print("TX:", binascii.hexlify(buf))
-    client_socket.sendall(buf)
-
-
-_ISPF_OPTIONS = [
-    ("0", "Settings      ", "Terminal and user parameters"),
-    ("1", "View          ", "Display source data or listings"),
-    ("2", "Edit          ", "Create or change source data"),
-    ("3", "Utilities     ", "Perform utility functions"),
-    ("4", "Foreground    ", "Interactive language processing"),
-    ("5", "Batch         ", "Submit job for language processing"),
-    ("6", "Command       ", "Enter TSO or Workstation commands"),
-    ("7", "Dialog Test   ", "Perform dialog testing"),
-    ("9", "IBM Products  ", "IBM program development products"),
-    ("10", "SCLM          ", "SW Configuration Library Manager"),
-    ("11", "Workplace     ", "ISPF Object/Action Workplace"),
-    ("12", "z/OS System   ", "z/OS system programmer applications"),
-    ("13", "z/OS User     ", "z/OS user applications"),
-]
+        col = max(0, (80 - len(error_msg)) // 2)
+        screen.add(Text(19, col, error_msg, DisplayIntensity.HIGH))
+    _send_screen(client_socket, screen)
 
 
 def send_ispf_menu(client_socket, userid: str, short_msg: str = None):
-    """Send authentic ISPF Primary Option Menu."""
-    buf = bytearray()
-    buf.append(0xF5)  # ERASE_WRITE
-    buf.extend(write_control_character(reset_mdts=True, keyboard_restore=True))
+    """Send the ISPF Primary Option Menu, rendered from panels/ispf.dtl."""
+    from dtl import load_panel
+    from screen import Text
 
-    now = datetime.now()
-    time_str = now.strftime("%H:%M")
-
-    # Row 0: title border (SF at col 0, text fills cols 1-79)
-    inner = " ISPF Primary Option Menu "   # 26 chars
-    pad = (79 - len(inner)) // 2           # 26 dashes each side
-    border = "-" * pad + inner + "-" * (79 - pad - len(inner))
-    _high(buf, 0, 0, border)
-
-    # Row 2: Option ===> label + unprotected input field
-    _normal(buf, 2, 1, "Option ===>")
-    _sba(buf, 2, ISPF_OPTION_SF_COL)
-    buf.append(SF)
-    buf.append(field_attribute(protected=False, mdt=True))
-    _text(buf, " " * 6)
-    _sba_sf(buf, 2, ISPF_OPTION_SF_COL + 7, protected=True)
-
-    # Position cursor in the option field using a separate SBA+IC after the
-    # terminator — same pattern as the working logon panel (IC immediately
-    # after an SF attr byte causes wc3270 to show X SYSTEM keyboard lock).
-    buf.append(SBA)
-    buf.extend(encode_pack_addr(ISPF_OPTION_ROW, ISPF_OPTION_SF_COL + 1))
-    buf.append(IC)
-
+    time_str = datetime.now().strftime("%H:%M")
+    screen = load_panel("ispf", userid=userid.ljust(8), time=time_str)
     if short_msg:
-        _high(buf, 2, 25, short_msg[:54])
-
-    # Rows 4-16: single-column option list (avoids any cross-column text bleed)
-    # Col layout: SF+num at col 1, SF+name at col 4, SF+desc at col 21
-    for i, (num, name, desc) in enumerate(_ISPF_OPTIONS):
-        row = 4 + i
-        _sba_sf(buf, row, 1, protected=True, display=DisplayIntensity.HIGH)
-        _text(buf, f"{num:<2}")
-        _normal(buf, row, 4, f"  {name}")   # name is 14 chars + leading "  " = 16 total
-        _normal(buf, row, 21, f"  {desc}")
-
-    # Row 18: X / exit option
-    _sba_sf(buf, 18, 1, protected=True, display=DisplayIntensity.HIGH)
-    _text(buf, "X ")
-    _normal(buf, 18, 4, "  Exit          ")
-    _normal(buf, 18, 21, "  Terminate ISPF using log/list defaults")
-
-    # Row 20: PF key hints
-    _normal(buf, 20, 1, "Enter X or PF3 to terminate ISPF.")
-
-    # Row 21-22: status block
-    _normal(buf, 21, 1, f"User ID . . :  {userid:<8}")
-    _normal(buf, 21, 41, f"Time. . . . :  {time_str}")
-    _normal(buf, 22, 1, "System ID . :  SY1     ")
-    _normal(buf, 22, 41, "ISPF Ver. . :  7.1.0   ")
-
-    # Row 23: bottom border
-    _high(buf, 23, 0, "-" * 79)
-
-    buf.extend([IAC, EOR])
-    print("TX:", binascii.hexlify(buf))
-    client_socket.sendall(buf)
+        screen.add(Text(2, 25, short_msg[:54], DisplayIntensity.HIGH))
+    _send_screen(client_socket, screen)
 
 
 def aid_to_string(aid: int):
