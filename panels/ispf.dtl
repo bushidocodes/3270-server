@@ -1,0 +1,36 @@
+<!-- ISPF 7.1.0 Primary Option Menu, in Dialog Tag Language (DTL subset).
+     Renders byte-for-byte identically to screens.build_ispf_menu().
+     ${userid} (padded to 8) and ${time} are substituted at load time; the
+     transient short message (row 2) is injected at runtime, not here. -->
+<panel name="ispfmenu" title="ISPF Primary Option Menu">
+  <info row="0" col="0" intensity="high">-------------------------- ISPF Primary Option Menu ---------------------------</info>
+
+  <dtafld row="2" col="1" fldcol="13" datavar="option" entwidth="6" cursor="yes">Option ===></dtafld>
+
+  <selfld row="4" numcol="1" namecol="4" desccol="21" numwidth="2" numintensity="high">
+    <choice num="0"  name="  Settings      ">  Terminal and user parameters</choice>
+    <choice num="1"  name="  View          ">  Display source data or listings</choice>
+    <choice num="2"  name="  Edit          ">  Create or change source data</choice>
+    <choice num="3"  name="  Utilities     ">  Perform utility functions</choice>
+    <choice num="4"  name="  Foreground    ">  Interactive language processing</choice>
+    <choice num="5"  name="  Batch         ">  Submit job for language processing</choice>
+    <choice num="6"  name="  Command       ">  Enter TSO or Workstation commands</choice>
+    <choice num="7"  name="  Dialog Test   ">  Perform dialog testing</choice>
+    <choice num="9"  name="  IBM Products  ">  IBM program development products</choice>
+    <choice num="10" name="  SCLM          ">  SW Configuration Library Manager</choice>
+    <choice num="11" name="  Workplace     ">  ISPF Object/Action Workplace</choice>
+    <choice num="12" name="  z/OS System   ">  z/OS system programmer applications</choice>
+    <choice num="13" name="  z/OS User     ">  z/OS user applications</choice>
+  </selfld>
+
+  <selfld row="18" numcol="1" namecol="4" desccol="21" numwidth="2" numintensity="high">
+    <choice num="X" name="  Exit          ">  Terminate ISPF using log/list defaults</choice>
+  </selfld>
+
+  <info row="20" col="1">Enter X or PF3 to terminate ISPF.</info>
+  <info row="21" col="1">User ID . . :  ${userid}</info>
+  <info row="21" col="41">Time. . . . :  ${time}</info>
+  <info row="22" col="1">System ID . :  SY1     </info>
+  <info row="22" col="41">ISPF Ver. . :  7.1.0   </info>
+  <info row="23" col="0" intensity="high" fill="-" width="79"/>
+</panel>
