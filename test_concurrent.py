@@ -16,19 +16,37 @@ TIMEOUT = 30
 CREDENTIALS = [("IBMUSER", "SYS1"), ("TESTUSER", "RACF")]
 
 
-def recv_until_eor(sock):
-    buf = bytearray()
-    while True:
+def recv_until_eor(sock, initial=b""):
+    """Read one 3270 record terminated by IAC EOR.
+
+    `initial` seeds the buffer with any bytes that negotiate() already read past
+    the end of negotiation (the start of the screen), so nothing is lost.
+    """
+    buf = bytearray(initial)
+    while not (len(buf) >= 2 and buf[-2:] == bytes([IAC, EOR])):
         chunk = sock.recv(4096)
         if not chunk:
             raise ConnectionError("Connection closed")
         buf.extend(chunk)
-        if buf[-2:] == bytes([IAC, EOR]):
-            return bytes(buf[:-2])
+    return bytes(buf[:-2])
 
 
 def negotiate(sock):
-    """Minimal TN3270 negotiation: agree to BINARY + EOR + TERMINAL-TYPE."""
+    """Minimal TN3270 negotiation: agree to BINARY + EOR + TERMINAL-TYPE.
+
+    Drains *all* of the server's Telnet option replies — including the ones it
+    sends after the essentials are agreed — and stops exactly at the start of
+    the 3270 data stream (the first non-IAC byte). This prevents leftover
+    negotiation bytes from sitting ahead of the first screen.
+
+    Returns any screen bytes read in the same recv() as the trailing
+    negotiation, so the caller can prepend them:
+        data = recv_until_eor(sock, negotiate(sock))
+
+    Replies to options are sent only until the essentials are agreed; trailing
+    confirmations are then drained silently, so no extra option replies reach
+    the server's input stream after negotiation completes.
+    """
     sock.sendall(bytes([
         IAC, WILL, BINARY,
         IAC, DO,   BINARY,
@@ -38,59 +56,49 @@ def negotiate(sock):
     ]))
 
     buf = bytearray()
-    got_binary = got_eor = got_term_req = False
+    got_binary = got_eor = got_term = False
     deadline = time.time() + TIMEOUT
 
-    while not (got_binary and got_eor and got_term_req):
+    while True:
+        # Consume every complete Telnet command at the front of the buffer.
+        while buf and buf[0] == IAC:
+            if len(buf) < 2:
+                break  # partial command; need more bytes
+            cmd = buf[1]
+            if cmd in (DO, DONT, WILL, WONT):
+                if len(buf) < 3:
+                    break
+                opt = buf[2]
+                if not (got_binary and got_eor and got_term):
+                    reply = {DO: WILL, DONT: WONT, WILL: DO, WONT: DONT}[cmd]
+                    sock.sendall(bytes([IAC, reply, opt]))
+                if opt == BINARY and cmd in (DO, WILL):
+                    got_binary = True
+                if opt == EOR_OPT and cmd in (DO, WILL):
+                    got_eor = True
+                del buf[:3]
+            elif cmd == SB:
+                se = buf.find(bytes([IAC, SE]), 2)
+                if se == -1:
+                    break  # incomplete subnegotiation
+                if len(buf) >= 4 and buf[2] == TERMINAL_TYPE and buf[3] == 1:
+                    # SEND request → reply with our terminal type (IS)
+                    sock.sendall(bytes([IAC, SB, TERMINAL_TYPE, 0]) + b"IBM-3278-2" + bytes([IAC, SE]))
+                    got_term = True
+                del buf[:se + 2]
+            else:
+                del buf[:2]  # other two-byte command
+
+        # A non-IAC byte at the front means we've reached the 3270 data stream.
+        if buf and buf[0] != IAC:
+            return bytes(buf)
+
         if time.time() > deadline:
             raise TimeoutError("Negotiation timed out")
         chunk = sock.recv(4096)
         if not chunk:
             raise ConnectionError("Closed during negotiation")
         buf.extend(chunk)
-
-        i = 0
-        while i < len(buf):
-            if buf[i] != IAC:
-                i += 1
-                continue
-            if i + 1 >= len(buf):
-                break
-            cmd = buf[i + 1]
-            if cmd in (DO, DONT, WILL, WONT):
-                if i + 2 >= len(buf):
-                    break
-                opt = buf[i + 2]
-                if cmd == DO:
-                    sock.sendall(bytes([IAC, WILL, opt]))
-                elif cmd == DONT:
-                    sock.sendall(bytes([IAC, WONT, opt]))
-                elif cmd == WILL:
-                    sock.sendall(bytes([IAC, DO, opt]))
-                elif cmd == WONT:
-                    sock.sendall(bytes([IAC, DONT, opt]))
-                if opt == BINARY and cmd in (DO, WILL):
-                    got_binary = True
-                if opt == EOR_OPT and cmd in (DO, WILL):
-                    got_eor = True
-                i += 3
-            elif cmd == SB:
-                se = buf.find(bytes([IAC, SE]), i + 2)
-                if se == -1:
-                    break
-                opt = buf[i + 2]
-                if opt == TERMINAL_TYPE and i + 3 < len(buf) and buf[i + 3] == 1:
-                    # Server is asking for our terminal type
-                    term = b"IBM-3278-2"
-                    sock.sendall(bytes([IAC, SB, TERMINAL_TYPE, 0]) + term + bytes([IAC, SE]))
-                    got_term_req = True
-                elif opt == TERMINAL_TYPE and i + 3 < len(buf) and buf[i + 3] == 0:
-                    got_term_req = True
-                i = se + 2
-            else:
-                i += 2
-
-        buf = buf[i:]  # consume processed bytes
 
 
 def build_aid(userid, password):
@@ -152,11 +160,14 @@ def run_client(client_id, results):
             sock.connect((HOST, PORT))
             steps.append("connected")
 
-            negotiate(sock)
+            leftover = negotiate(sock)
             steps.append("negotiated")
 
-            data = recv_until_eor(sock)
-            assert 0xF5 in data, "Expected ERASE_WRITE in logon panel"
+            data = recv_until_eor(sock, leftover)
+            assert data[:1] == bytes([0xF5]), (
+                f"logon panel must start at ERASE_WRITE, not leftover negotiation "
+                f"(got {data[:4].hex()})"
+            )
             steps.append(f"logon_panel({len(data)}b)")
 
             sock.sendall(build_aid(userid, password))
