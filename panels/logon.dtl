@@ -1,0 +1,29 @@
+<!-- z/OS V2R5.0 TSO/E LOGON panel, in Dialog Tag Language (DTL subset).
+     Renders byte-for-byte identically to screens.build_tso_logon().
+     The transient error message (row 19) is injected at runtime, not here. -->
+<panel name="tsologon" title="z/OS V2R5.0 TSO/E LOGON">
+  <info row="0" col="18" intensity="high">--------  z/OS V2R5.0 TSO/E LOGON  --------</info>
+
+  <info row="2" col="1">Enter LOGON parameters below:</info>
+  <info row="2" col="42">RACF LOGON parameters:</info>
+  <info row="3" col="1" fill="-" width="37"/>
+  <info row="3" col="42" fill="-" width="37"/>
+
+  <dtafld row="5" col="1" fldcol="16" datavar="userid" entwidth="8" cursor="yes">Userid   ===></dtafld>
+  <dtafld row="6" col="1" fldcol="16" datavar="password" entwidth="8" hidden="yes">Password ===></dtafld>
+  <dtafld row="7" col="1" fldcol="16" datavar="procedure" entwidth="8" default="IKJACCNT">Procedure===></dtafld>
+  <dtafld row="7" col="42" fldcol="60" datavar="acct" entwidth="8">Acct Nmbr    ===></dtafld>
+  <dtafld row="8" col="1" fldcol="16" datavar="size" entwidth="5" numeric="yes" default="00150">Size     ===></dtafld>
+  <dtafld row="8" col="42" fldcol="60" datavar="perform" entwidth="8" numeric="yes">Perform      ===></dtafld>
+  <dtafld row="9" col="1" fldcol="16" datavar="command" entwidth="62">Command  ===></dtafld>
+  <dtafld row="11" col="1" fldcol="19" datavar="dsname" entwidth="59">PDS/E Dsname ===></dtafld>
+
+  <info row="12" col="42">Mail      ===> Yes</info>
+  <info row="13" col="42">Reconnect ===> Auto</info>
+  <info row="14" col="42">OIDcard   ===> None</info>
+
+  <info row="15" col="1" intensity="highlighted">*** Authorized users only. Unauthorized access is prohibited. ***</info>
+  <info row="16" col="1">Press ENTER to logon to TSO/E</info>
+  <info row="17" col="1">PF1=HELP   PF3=LOGOFF</info>
+  <info row="21" col="1">ENTER AN END COMMAND TO LOGOFF</info>
+</panel>
