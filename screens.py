@@ -72,11 +72,13 @@ def build_tso_logon(error_msg: str = None) -> Screen:
     s.text(15, 1, "*** Authorized users only. Unauthorized access is prohibited. ***", HIGHLIGHTED)
     s.text(16, 1, "Press ENTER to logon to TSO/E")
     s.text(17, 1, "PF1=HELP   PF3=LOGOFF")
+    s.text(21, 1, "ENTER AN END COMMAND TO LOGOFF")
 
+    # Transient overlay is appended last (the DTL-backed server composes it the
+    # same way). Stream order is irrelevant to the display — 3270 buffer
+    # addresses are absolute — but appending keeps both paths byte-identical.
     if error_msg:
         s.text(19, max(0, (80 - len(error_msg)) // 2), error_msg, HIGH)
-
-    s.text(21, 1, "ENTER AN END COMMAND TO LOGOFF")
     return s
 
 
@@ -95,8 +97,6 @@ def build_ispf_menu(userid: str, time_str: str, short_msg: str = None) -> Screen
 
     s.text(2, 1, "Option ===>")
     s.field(2, 13, 6, name="option", cursor=True)
-    if short_msg:
-        s.text(2, 25, short_msg[:54], HIGH)
 
     for i, (num, name, desc) in enumerate(ISPF_OPTIONS):
         row = 4 + i
@@ -115,4 +115,8 @@ def build_ispf_menu(userid: str, time_str: str, short_msg: str = None) -> Screen
     s.text(22, 1, "System ID . :  SY1     ")
     s.text(22, 41, "ISPF Ver. . :  7.1.0   ")
     s.text(23, 0, "-" * 79, HIGH)
+
+    # Transient overlay appended last — see the note in build_tso_logon.
+    if short_msg:
+        s.text(2, 25, short_msg[:54], HIGH)
     return s

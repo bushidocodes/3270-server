@@ -181,9 +181,15 @@ def load_dtl(source: str, **subs) -> Screen:
     return parser.screen
 
 
-def load_panel(name: str, directory: str = "panels", **subs) -> Screen:
-    """Load and parse ``<directory>/<name>.dtl``."""
+def load_panel(name: str, directory: str = None, **subs) -> Screen:
+    """Load and parse ``<directory>/<name>.dtl``.
+
+    ``directory`` defaults to the ``panels`` folder next to this module, so the
+    panels resolve regardless of the process's current working directory.
+    """
     import os
+    if directory is None:
+        directory = os.path.join(os.path.dirname(os.path.abspath(__file__)), "panels")
     path = os.path.join(directory, f"{name}.dtl")
     with open(path, "r", encoding="utf-8") as fh:
         return load_dtl(fh.read(), **subs)

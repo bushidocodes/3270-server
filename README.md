@@ -88,24 +88,53 @@ When the user presses Enter or a PF key, the emulator sends an AID byte followed
 ## Project structure
 
 ```
-server.py   — the entire TN3270 server (single file)
+server.py       — TN3270 protocol: negotiation, session loop, the 3270 primitives
+screen.py       — Screen/Field model: renders to a 3270 data stream, parses responses
+screens.py      — the two panels built as Screen objects (the in-code reference)
+dtl.py          — Dialog Tag Language parser: load_panel() → Screen
+panels/         — the screens authored declaratively
+  logon.dtl       z/OS TSO/E LOGON panel
+  ispf.dtl        ISPF Primary Option Menu
 ```
+
+Screens are **data, not code**. `server.py` no longer hand-assembles bytes; `send_tso_logon`
+and `send_ispf_menu` call `dtl.load_panel("logon" | "ispf")`, which parses the `.dtl` source
+into a `Screen` that renders itself to the 3270 data stream.
 
 Key functions:
 
 | Function | What it does |
 |----------|-------------|
 | `tn3270_negotiate` | Performs Telnet option handshake |
-| `send_tso_logon` | Builds and sends the TSO/E logon panel |
-| `send_ispf_menu` | Builds and sends the ISPF Primary Option Menu |
+| `dtl.load_panel` | Parses a `panels/*.dtl` source into a `Screen` |
+| `screen.Screen.render` | Renders a `Screen` to a 3270 data stream |
+| `screen.Screen.parse` | Maps a client response onto named fields |
 | `read_client_input` | Reads and parses an AID response from the client |
-| `write_control_character` | Encodes a WCC byte with correct x3270 bit positions |
 | `encode_pack_addr` | Converts (row, col) to a 12-bit 3270 buffer address |
 | `handle_client` | Main session loop: logon → ISPF → logoff |
 
+### Declarative screens (DTL)
+
+Panels are written in a pragmatic subset of IBM's **Dialog Tag Language** — the ISO-SGML
+markup ISPF panels are defined in (compiled on z/OS via the `ISPDTLC` utility). A field looks
+like:
+
+```sgml
+<dtafld row="5" col="1" fldcol="16" datavar="userid" entwidth="8" cursor="yes">Userid   ===></dtafld>
+```
+
+Supported tags: `<panel>`, `<info>` (text/instructions, with `fill`+`width` rules),
+`<dtafld>` (prompt + input field), and `<selfld>`/`<choice>` (menu lists). `${name}` tokens
+are substituted at load time (e.g. the live user id and clock on the ISPF status line). Unlike
+authentic DTL, placement is explicit (`row`/`col`) rather than auto-flowed.
+
 ## Extending
 
-To add real sub-menus, replace the `short_msg` response in `handle_client`'s ISPF loop with a call to a new `send_ispf_option_N` function that builds and sends the appropriate screen, then reads the user's response.
+To change a screen, **edit its `.dtl` file** — no Python changes needed. To add a new screen,
+write a `panels/<name>.dtl` and call `load_panel("<name>")`.
+
+To add real sub-menus, replace the `short_msg` response in `handle_client`'s ISPF loop with a
+call that loads and sends a new panel, then reads the user's response.
 
 To add more users, extend the `_CREDENTIALS` dict at the top of `server.py`.
 
@@ -113,6 +142,7 @@ To add more users, extend the `_CREDENTIALS` dict at the top of `server.py`.
 
 - [RFC 2355 — TN3270E](https://tools.ietf.org/html/rfc2355)
 - [IBM 3270 Data Stream Programming Reference](https://www.ibm.com/docs/en/zos/2.5.0?topic=reference-3270-data-stream)
+- [IBM ISPF Dialog Tag Language Guide and Reference](https://www.ibm.com/docs/en/SSLTBW_2.4.0/pdf/f54dt00_v2r4.pdf) — the SGML format the `panels/*.dtl` syntax is modeled on
 - [x3270 / wc3270 emulator](https://x3270.miraheze.org/wiki/Main_Page)
 - [pmattes/x3270 source (3270ds.h)](https://github.com/pmattes/x3270) — canonical WCC and field-attribute bit definitions
 
