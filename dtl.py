@@ -26,6 +26,13 @@ prolog (tolerated and ignored), tag and attribute names are case-insensitive
 Supported tags
 --------------
 ``<panel name title>``           root container; ``title`` → ``Screen.title``
+``<area row col fldgap>``        a flow box: contained elements that omit ``row``
+``<region row col fldgap>``      flow down from this origin (one line each), and
+                                 those that omit ``col`` use it. A field that omits
+                                 ``fldcol`` gets its entry after the prompt
+                                 (``col + len(prompt) + fldgap``). Explicit
+                                 positions always win, so non-flowed panels are
+                                 unaffected.
 ``<info row col intensity>``     protected text (label / instruction / rule).
                                  ``fill`` + ``width`` repeats a character (rules).
 ``<dtafld row col fldcol         a prompt plus an unprotected input field at
@@ -155,6 +162,7 @@ class _DTLParser(HTMLParser):
         self._in_varlist = False  # inside a <varlist>?
         self._in_msgmbr = False   # inside a <msgmbr>?
         self.messages = {}        # <msg> msgid (upper) → message text
+        self._areas = []          # stack of <area>/<region> flow contexts
 
     # ── SGML event handling ──────────────────────────────────────────────────
 
@@ -185,6 +193,15 @@ class _DTLParser(HTMLParser):
             self._in_varlist = True
         elif tag == "vardcl":
             self._emit_vardcl(a)
+        elif tag in ("area", "region"):
+            # A flow box: contained elements that omit row/col flow down from
+            # this origin; a field that omits fldcol gets its entry after the
+            # prompt (col + len(prompt) + fldgap).
+            self._areas.append({
+                "row": self._req_int(a, "row", tag),
+                "col": self._req_int(a, "col", tag),
+                "fldgap": int(a.get("fldgap", 1)),
+            })
         elif tag == "msgmbr":
             self._in_msgmbr = True
         elif tag == "msg":
@@ -221,6 +238,10 @@ class _DTLParser(HTMLParser):
         if tag == "msgmbr":
             self._in_msgmbr = False
             return
+        if tag in ("area", "region"):
+            if self._areas:
+                self._areas.pop()
+            return
         if tag != self._tag:
             return
         # A <dtafldd> child, if present, supplies the prompt; otherwise the
@@ -256,6 +277,8 @@ class _DTLParser(HTMLParser):
             self._in_varlist = False
         elif tag == "msgmbr":  # a self-closing msgmbr declares nothing; close it
             self._in_msgmbr = False
+        elif tag in ("area", "region"):  # a self-closing flow box has no content
+            self.handle_endtag(tag)
 
     # ── element → model ──────────────────────────────────────────────────────
 
@@ -265,19 +288,44 @@ class _DTLParser(HTMLParser):
             raise DTLError(f"<{tag}> missing required attribute '{key}'")
         return int(attrs[key])
 
+    def _resolve_pos(self, a, tag):
+        """Resolve an element's ``(row, col)`` and return it with the active flow
+        box. Explicit ``row``/``col`` win; otherwise they flow from the enclosing
+        ``<area>``/``<region>`` (the row cursor advances one line per element).
+        Outside any flow box, ``row``/``col`` are required."""
+        ctx = self._areas[-1] if self._areas else None
+        if "row" in a:
+            row = int(a["row"])
+            if ctx is not None:
+                ctx["row"] = row + 1
+        elif ctx is not None:
+            row = ctx["row"]
+            ctx["row"] = row + 1
+        else:
+            raise DTLError(f"<{tag}> missing required attribute 'row'")
+        if "col" in a:
+            col = int(a["col"])
+        elif ctx is not None:
+            col = ctx["col"]
+        else:
+            raise DTLError(f"<{tag}> missing required attribute 'col'")
+        return row, col, ctx
+
     def _emit_info(self, a, content):
         if "fill" in a:
             content = a["fill"] * int(a.get("width", 0))
-        self.screen.add(
-            Text(self._req_int(a, "row", "info"), self._req_int(a, "col", "info"),
-                 content, _intensity(a))
-        )
+        row, col, _ = self._resolve_pos(a, "info")
+        self.screen.add(Text(row, col, content, _intensity(a)))
 
     def _add_field(self, a, content, tag, name):
         """Emit a prompt (if any) plus an unprotected input field; return it."""
-        row = self._req_int(a, "row", tag)
-        col = self._req_int(a, "col", tag)
-        fldcol = int(a.get("fldcol", col))
+        row, col, ctx = self._resolve_pos(a, tag)
+        if "fldcol" in a:
+            fldcol = int(a["fldcol"])
+        elif ctx is not None:
+            fldcol = col + len(content) + ctx["fldgap"]  # entry flows after prompt
+        else:
+            fldcol = col
         if content:
             self.screen.add(Text(row, col, content, _intensity(a)))
         field = Field(

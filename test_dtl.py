@@ -219,6 +219,59 @@ def test_msg_missing_msgid_raises():
         load_dtl('<msgmbr><msg>hi</msg></msgmbr>')
 
 
+# ── flow layout (<area>/<region>) ────────────────────────────────────────────
+
+def test_area_flows_rows_and_derives_fldcol():
+    s = load_dtl(
+        '<panel><area row="5" col="1" fldgap="2">'
+        '<dtafld datavar="userid" entwidth="8">Userid   ===></dtafld>'
+        '<dtafld datavar="pw" entwidth="8">Password ===></dtafld>'
+        '</area></panel>'
+    )
+    # Prompts at col 1 on flowing rows 5, 6; entries after the 13-char prompt
+    # plus fldgap=2 → col 16.
+    assert s.items[0] == Text(5, 1, "Userid   ===>", DisplayIntensity.NORMAL)
+    assert (s.items[1].row, s.items[1].col, s.items[1].name) == (5, 16, "userid")
+    assert s.items[2] == Text(6, 1, "Password ===>", DisplayIntensity.NORMAL)
+    assert (s.items[3].row, s.items[3].col, s.items[3].name) == (6, 16, "pw")
+
+
+def test_area_explicit_position_wins_and_continues_flow():
+    s = load_dtl(
+        '<panel><area row="5" col="1">'
+        '<info>first</info>'              # flows to row 5
+        '<info row="9">jump</info>'       # explicit row 9
+        '<info>after</info>'              # flow continues at row 10
+        '</area></panel>'
+    )
+    assert s.items[0] == Text(5, 1, "first", DisplayIntensity.NORMAL)
+    assert s.items[1] == Text(9, 1, "jump", DisplayIntensity.NORMAL)
+    assert s.items[2] == Text(10, 1, "after", DisplayIntensity.NORMAL)
+
+
+def test_regions_lay_out_side_by_side_columns():
+    s = load_dtl(
+        '<panel>'
+        '<region row="2" col="1"><info>left1</info><info>left2</info></region>'
+        '<region row="2" col="40"><info>right1</info><info>right2</info></region>'
+        '</panel>'
+    )
+    assert s.items[0] == Text(2, 1, "left1", DisplayIntensity.NORMAL)
+    assert s.items[1] == Text(3, 1, "left2", DisplayIntensity.NORMAL)
+    assert s.items[2] == Text(2, 40, "right1", DisplayIntensity.NORMAL)
+    assert s.items[3] == Text(3, 40, "right2", DisplayIntensity.NORMAL)
+
+
+def test_missing_row_outside_area_still_raises():
+    with pytest.raises(DTLError):
+        load_dtl('<panel><info col="1">x</info></panel>')
+
+
+def test_logon_area_flow_is_byte_identical():
+    # The <area> wrapping in logon.dtl must not change the rendered bytes.
+    assert load_panel("logon").render() == build_tso_logon().render()
+
+
 # ── SGML conformance (DOCTYPE, case-insensitivity, attribute minimization) ───
 
 def test_doctype_prolog_is_tolerated():

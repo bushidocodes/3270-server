@@ -129,14 +129,20 @@ Supported tags: `<panel>`, `<info>` (text/instructions, with `fill`+`width` rule
 `<dtafld>` (prompt + input field), `<cmdarea>` (the ISPF "Option/Command ===>" line, bound to
 `ZCMD`), `<selfld>`/`<choice>` (menu lists; each `<choice matchval>` registers a selectable
 value the server validates against), `<keyl>`/`<keyi>` (a keylist binding function keys to
-commands), and `<varclass>`/`<varlist>`/`<vardcl>` (typed variable declarations — a field
-inherits `numeric` from its variable's class). ISPF dialog variables are referenced `&`-style —
-`&ZUSER`, `&ZTIME` — and substituted at load time (e.g. the live user id and clock on the ISPF
-status line); `&&` is a literal ampersand and a trailing `.` terminates a reference. Messages
-live separately in a `<msgmbr>` (see `messages/`). As in real DTL the source is SGML: files may
-open with a `<!DOCTYPE DM SYSTEM>` prolog, tag/attribute names are case-insensitive, and boolean
-attributes may be minimized (`<dtafld hidden>`). Unlike authentic DTL, placement is explicit
-(`row`/`col`) rather than auto-flowed.
+commands), `<varclass>`/`<varlist>`/`<vardcl>` (typed variable declarations — a field inherits
+`numeric` from its variable's class), and `<area>`/`<region>` (flow boxes — see below). ISPF
+dialog variables are referenced `&`-style — `&ZUSER`, `&ZTIME` — and substituted at load time
+(e.g. the live user id and clock on the ISPF status line); `&&` is a literal ampersand and a
+trailing `.` terminates a reference. Messages live separately in a `<msgmbr>` (see `messages/`).
+As in real DTL the source is SGML: files may open with a `<!DOCTYPE DM SYSTEM>` prolog,
+tag/attribute names are case-insensitive, and boolean attributes may be minimized
+(`<dtafld hidden>`).
+
+Placement is normally explicit (`row`/`col`), but an `<area>`/`<region>` flow box lets contained
+elements omit positions: they flow down one line each from the box's origin, and a field that
+omits `fldcol` gets its entry after the prompt (`col + len(prompt) + fldgap`). Explicit positions
+still win, so this is opt-in — the bundled panels remain byte-for-byte identical. (Authentic DTL
+auto-flows the whole document; this is a deliberate, smaller step toward that.)
 
 A `<keyl>` is pure metadata — it renders nothing — but the server reads it to resolve function
 keys to commands the way ISPF does, e.g. PF3 → `EXIT`, instead of hard-coding key numbers:
