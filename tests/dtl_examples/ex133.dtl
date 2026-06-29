@@ -1,0 +1,44 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM>
+<VARCLASS NAME=date TYPE='char 8'>
+<VARCLASS NAME=name TYPE='char 20'>
+<VARCLASS NAME=addr TYPE='char 40'>
+<VARCLASS NAME=prod TYPE='char 25'>
+<VARCLASS NAME=comm TYPE='char 55'>
+<VARLIST>
+  <VARDCL NAME=curdate VARCLASS=date>
+  <VARDCL NAME=snamvar VARCLASS=name>
+  <VARDCL NAME=fnamvar VARCLASS=name>
+  <VARDCL NAME=sindvar VARCLASS=addr>
+  <VARDCL NAME=addrvar VARCLASS=addr>
+  <VARDCL NAME=prodvar VARCLASS=prod>
+  <VARDCL NAME=scalvar VARCLASS=comm>
+  <VARDCL NAME=commvar VARCLASS=comm>
+</VARLIST>
+<PANEL NAME=scrfld0 HELP=loghelp>Customer Feedback
+<TOPINST>Complete the following fields, then press Enter.
+<AREA>
+  <DTACOL PMTWIDTH=15>
+    <DIVIDER>
+    <DTAFLD DATAVAR=curdate USAGE=out ENTWIDTH=8 FLDSPACE=27>Date
+  <DTAFLDD>(Current Date)
+    <DIVIDER>
+    <DTAFLD DATAVAR=snamvar ENTWIDTH=20>Surname
+    <DIVIDER>
+    <DTAFLD DATAVAR=fnamvar ENTWIDTH=20>First Names
+    <DIVIDER>
+    <DTAFLD DATAVAR=addrvar ENTWIDTH=40 DESWIDTH=15>Address
+  <DTAFLDD>(Optional)
+      <SCRFLD DISPLEN=80 SINDVAR=sindvar>
+    <DIVIDER>
+    <DTAFLD DATAVAR=prodvar ENTWIDTH=25 DESWIDTH=25>Product
+  <DTAFLDD>(Product Purchased)
+    <DIVIDER>
+    <DTAFLD DATAVAR=commvar ENTWIDTH=55>Comments
+      <SCRFLD DISPLEN=110 SCALE=scalvar>
+  </DTACOL>
+</AREA>
+<CMDAREA scrollvar=scrvar>Command
+</PANEL>

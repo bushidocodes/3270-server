@@ -1,0 +1,17 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<cmdtbl applid=abcd>
+  <cmd name=search>Search
+    <cmdact action=passthru>
+</cmdtbl>
+<keyl name=panlkeys help=pnlkeyh>
+  <keyi key=f1 cmd=help>
+  <keyi key=f2 cmd=search fka=yes>Search
+  <keyi key=f3 cmd=exit fka=yes>Exit
+  <keyi key=f6 cmd=keyshelp fka=yes>Keyshelp
+</keyl>
+<panel name=panl01 keylist=panlkeys>
+⋮
+</panel>

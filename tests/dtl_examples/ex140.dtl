@@ -1,0 +1,27 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM>
+<VARCLASS NAME=namec TYPE='char 25'>
+   <CHECKL>
+      <CHECKI TYPE=alpha>
+   </CHECKL>
+<VARCLASS NAME=officec TYPE='char 4'>
+   <XLATL FORMAT=upper>
+   </XLATL>
+   <CHECKL>
+      <CHECKI TYPE=values PARM1=EQ PARM2='A101 A108 B210 B214'>
+   </CHECKL>
+<VARLIST>
+   <VARDCL NAME=reserver VARCLASS=namec>
+   <VARDCL NAME=office VARCLASS=officec>
+</VARLIST>
+<PANEL NAME=varclass>Conference Room
+   <TOPINST>Enter the required information to reserve a conference room.
+   <AREA>
+      <DTACOL PMTWIDTH=20>
+        <DTAFLD DATAVAR=reserver USAGE=in ENTWIDTH=25>Name
+        <DTAFLD DATAVAR=office USAGE=in ENTWIDTH=4>Office number
+      </DTACOL>
+   </AREA>
+</PANEL>

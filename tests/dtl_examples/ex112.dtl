@@ -1,0 +1,26 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM(
+  <!entity sampvar1 system>
+  <!entity sampabc system>
+  <!entity sampbody system>)>
+&sampvar1;
+<KEYL NAME=keylxmp>
+  <KEYI KEY=f1  CMD=help     FKA=yes>Help
+  <KEYI KEY=f2  CMD=split    FKA=yes>Split
+  <KEYI KEY=f3  CMD=exit     FKA=yes>Exit
+  <KEYI KEY=f5  CMD=search   FKA=no>Display
+  <KEYI KEY=f6  CMD=keyhlp   FKA=yes>Keyshelp
+  <KEYI KEY=f7  CMD=backward FKA=no>Backward
+  <KEYI KEY=f8  CMD=forward  FKA=no>Forward
+  <KEYI KEY=f9  CMD=swap     FKA=yes>Swap
+  <KEYI KEY=f10 CMD=actions  FKA=no>Actions
+  <KEYI KEY=f12 CMD=cancel   FKA=yes>Cancel
+</KEYL>
+<PANEL NAME=keyi KEYLIST=keylxmp>Library Card Registration
+<AB>
+&sampabc;
+</AB>
+&sampbody;
+</PANEL>

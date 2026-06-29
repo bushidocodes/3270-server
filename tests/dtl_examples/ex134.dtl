@@ -1,0 +1,29 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM>
+<VARCLASS NAME=date TYPE='char 8'>
+<VARCLASS NAME=cust TYPE='char 15'>
+<VARCLASS NAME=prod TYPE='char 15'>
+<VARCLASS NAME=comm TYPE='char 30'>
+<VARLIST>
+  <VARDCL NAME=datevar VARCLASS=date>
+  <VARDCL NAME=custvar VARCLASS=cust>
+  <VARDCL NAME=prodvar VARCLASS=prod>
+  <VARDCL NAME=commvar VARCLASS=comm>
+</VARLIST>
+<PANEL NAME=scrfld1 HELP=loghelp>Customer Feedback Display
+<AREA>
+<LSTFLD SCROLLVAR=scrlamt SCRVHELP=scrhelp>
+  <LSTCOL DATAVAR=datevar USAGE=out COLWIDTH=8>Date
+  <LSTCOL DATAVAR=custvar USAGE=out COLWIDTH=15>Customer
+   <SCRFLD DISPLEN=50 SINDVAR=sindvar LCOLIND=cuslcol LCOLDISP=YES
+      RCOLIND=cusrcol RCOLDISP=YES>
+  <LSTCOL DATAVAR=prodvar USAGE=out COLWIDTH=15>Product
+  <LSTCOL DATAVAR=commvar USAGE=out COLWIDTH=30>Comments
+   <SCRFLD DISPLEN=110 SCALE=scalvar LCOLIND=comlcol LCOLDISP=YES
+      RCOLIND=comrcol RCOLDISP=YES>
+ </LSTFLD>
+</AREA>
+<CMDAREA>Command
+</PANEL>

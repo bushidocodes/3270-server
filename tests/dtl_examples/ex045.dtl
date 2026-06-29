@@ -1,0 +1,35 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<varlist>
+  <vardcl name=name varclass=sampcls>
+  <vardcl name=addr varclass=sampcls>
+  <vardcl name=city varclass=sampcls>
+  <vardcl name=stat varclass=statcls>
+  <vardcl name=day  varclass=char1cls>
+  <vardcl name=zipc varclass=zipcls>
+ </varlist>
+<panel name=dcolxmp>Schedule Appointments
+  <topinst>Enter your name and address and
+  choose the most convenient day for your appointment.
+  <area>
+    <dtacol pmtwidth=12 entwidth=30 deswidth=29 selwidth=30>
+      <dtafld datavar=name>Name
+        <dtafldd>Last, First, M.I.
+      <dtafld datavar=addr>Address
+        <dtafldd>If it applies, include apartment number
+      <dtafld datavar=city>City
+      <dtafld datavar=stat entwidth=2>State
+        <dtafldd>Use 2-character abbreviation
+      <dtafld datavar=zipc entwidth=5>Zip code
+      <divider type=solid gutter=3>
+      <selfld name=day pmtloc=before>Weekdays
+        <choice>Monday
+        <choice>Tuesday
+        <choice>Wednesday
+        <choice>Thursday
+        <choice>Friday
+      </selfld>
+    </dtacol>
+  </area>
+</panel>

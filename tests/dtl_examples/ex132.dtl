@@ -1,0 +1,46 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM(
+  <!entity sampvar2 sysem>
+  <!entity sampabc system>)>
+&sampvar2;
+<PANEL NAME=region3 KEYLIST=keylxmp>File-A-Case
+<AB>
+&sampabc;
+</AB>
+<CMDAREA>Enter a command
+<TOPINST COMPACT>
+         Type in client's name and case number (if applicable).
+<TOPINST>Then select an action bar choice.
+<REGION DIR=horiz>
+  <REGION WIDTH=50>
+    <DTAFLD DATAVAR=caseno PMTWIDTH=12 ENTWIDTH=7 DESWIDTH=21>Case No
+       <DTAFLDD>(A 7-digit number)
+    <DTAFLD DATAVAR=name PMTWIDTH=12 ENTWIDTH=25 DESWIDTH=8>Name
+       <DTAFLDD>(Last, First, M.I.)
+    <DTAFLD DATAVAR=address PMTWIDTH=12 ENTWIDTH=25>Address
+    <DIVIDER>
+    <SELFLD NAME=casesel PMTWIDTH=11 PMTLOC=before SELWIDTH=38>Choose
+    one of the following
+       <CHOICE CHECKVAR=case MATCH=civ>Civil
+       <CHOICE CHECKVAR=case MATCH=estate>Real Estate
+       <CHOICE CHECKVAR=case MATCH=environ>Environmental
+    </SELFLD>
+  </REGION>
+  <REGION DEPTH=10>
+    <SELFLD TYPE=multi PMTWIDTH=24 SELWIDTH=26>
+      Check type of offense
+       <CHOICE NAME=patin HELP=patin CHECKVAR=val>Patent Infringement
+       <CHOICE NAME=defa HELP=defame CHECKVAR=def>Defamation
+       <CHOICE NAME=cont HELP=cont CHECKVAR=con>Breach of Valid Contract
+       <CHOICE NAME=priv HELP=priv CHECKVAR=pri>Invasion of Privacy
+       <CHOICE NAME=incr HELP=incr CHECKVAR=icr>Interference with
+               Contractual Relations
+       <CHOICE NAME=disp HELP=disp CHECKVAR=dis>Improper Disposal of
+               Medical By-Products
+       <CHOICE NAME=fraud HELP=fraud CHECKVAR=fra>Fraud
+    </SELFLD>
+  </REGION>
+</REGION>
+</PANEL>

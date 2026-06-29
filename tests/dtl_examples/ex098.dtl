@@ -1,0 +1,25 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM>
+<VARCLASS NAME=choiccls TYPE='char 2'
+<VARCLASS NAME=vccmd TYPE='char 62'>
+  <XLATL FORMAT=upper>
+  </XLATL>
+</VARCLASS>
+<VARLIST>
+  <VARDCL NAME=sample VARCLASS=choiccls>
+  <VARDCL NAME=zcmd  VARCLASS=vccmd>
+</VARLIST>
+<PANEL NAME=cmdarea1>Choose a Virtue
+  <TOPINST>Select a choice.
+  <AREA>
+    <SELFLD NAME=sample PMTWIDTH=10 SELWIDTH=20>Virtues:
+      <CHOICE>Faith
+      <CHOICE>Hope
+      <CHOICE>Charity
+    </SELFLD>
+  </AREA>
+  <BOTINST>Now press Enter.
+ <CMDAREA>Use this area to enter a command
+</PANEL>

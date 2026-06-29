@@ -1,0 +1,24 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<panel name=olists width=42>Nested Ordered Lists
+  <area>
+    <info width=40>
+      <ol>
+        <li>Step one (first level)
+        <li>Step two (first level)
+          <ol>
+            <li>Step one (second level)
+            <li>Step two (second level)
+              <ol compact>
+                <li>Step one (third level)
+                <li>Step two (third level)
+              </ol>
+            <li>Step three (second level)
+          </ol>
+        <li>Step three (first level)
+      </ol>
+    </info>
+  </area>
+</panel>

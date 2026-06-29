@@ -1,0 +1,10 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<panel name=mainpan1 cursor=place>Travel Agency
+    <selfld name=dest selwidth=50 pmtwidth=15>Destinations:
+      <choice>London
+      <choice>Madrid
+      <choice>Paris
+      <choice>Zurich

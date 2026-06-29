@@ -1,0 +1,9 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system
+ [<!entity % SYMBOLS system> %SYMBOLS;]>
+<panel name=chkout width=40 depth=22>Library Checkout Periods
+  <area>
+    <info width=38>
+      <p>&sb; allows you to check out an inventory

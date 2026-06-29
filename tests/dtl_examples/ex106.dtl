@@ -1,0 +1,21 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM>
+<VARCLASS NAME=filecls TYPE='char 8'>
+<VARCLASS NAME=copycls TYPE='char 2'>
+<VARLIST>
+  <VARDCL NAME=file    VARCLASS=filecls>
+  <VARDCL NAME=copynum VARCLASS=copycls>
+</VARLIST>
+<PANEL NAME=dtafldd>Print a File
+<TOPINST>Type in the name of the file you want to print
+and the number of copies, then press Enter.
+<AREA>
+  <DTAFLD DATAVAR=file PMTWIDTH=12 ENTWIDTH=8 DESWIDTH=30>Filename
+    <DTAFLDD>(Maximum of 8 characters)
+  <DTAFLD DATAVAR=copynum PMTWIDTH=12 ENTWIDTH=2 DESWIDTH=8>Copies
+    <DTAFLDD>(1 - 99)
+</AREA>
+<CMDAREA>Enter a command
+</PANEL>

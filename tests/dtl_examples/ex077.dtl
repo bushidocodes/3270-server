@@ -1,0 +1,46 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<VARCLASS NAME=selcls TYPE='char 1'>
+<VARLIST>
+  <VARDCL NAME=day VARCLASS=selcls>
+  <VARDCL NAME=time VARCLASS=selcls>
+</VARLIST>
+<panel name=appmnt>Make an Appointment
+  <area>
+    <info width=74>
+      <p>To schedule an appointment, you must choose one
+      selection from each field.
+      <ol compact>
+        <li>Choose a day from the first field.
+        <li>Choose a time slot from the second field.
+        <li>After you have completed both fields, press
+        Enter to log your appointment and leave the panel.
+      </ol>
+    </info>
+    <divider type=solid gutter=3>
+    <region dir=horiz>
+      <region>
+      <selfld name=day selwidth=20 pmtwidth=9>Weekdays:
+        <choice>Monday
+        <choice>Tuesday
+        <choice>Wednesday
+        <choice>Thursday
+        <choice>Friday
+      </selfld>
+      </region>
+      <divider gutter=8>
+      <region>
+        <selfld name=time selwidth=20 pmtwidth=5>Time:
+          <choice>9:00
+          <choice>10:00
+          <choice>11:00
+          <choice>12:00
+          <choice>1:00
+          <choice>2:00
+          <choice>3:00
+          <choice>4:00
+        </selfld>
+       </region>
+    </region>

@@ -1,0 +1,20 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<panel name=winshop width=48>Window Shopper
+  <area>
+    <info width=46>
+      <p>With Window Shopper, you can order many wonderful things,
+      such as:
+      <ul>
+        <li>Raindrops on roses
+        <li>Whiskers on kittens
+        <li>Bright copper kettles
+        <li>Warm woolen mittens
+        <li>Brown paper packages tied up with string
+      </ul>
+      <p>And many more of your favorite things!
+    </info>
+  </area>
+</panel>

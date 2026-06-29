@@ -1,0 +1,40 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<varclass name=sampcls type ='char 20'>
+<varclass name=statcls type='char 2'>
+<varclass name=numcls  type='numeric 8 2'>
+<varclass name=char1   type='char 1'>
+<varlist>
+  <vardcl name=name varclass=sampcls>
+  <vardcl name=addr varclass=sampcls>
+  <vardcl name=city varclass=sampcls>
+  <vardcl name=stat varclass=statcls>
+  <vardcl name=pay varclass=numcls>
+  <vardcl name=age varclass=char1>
+  <vardcl name=paymeth varclass=char1>
+</varlist>
+<panel name=pmt01>Application Name
+  <area>
+    <dtafld datavar=name entwidth=20 pmtwidth=12>Name
+    <dtafld datavar=addr entwidth=20 pmtwidth=12>Address
+    <dtafld datavar=city entwidth=20 pmtwidth=12>City
+    <dtafld datavar=stat entwidth=2 pmtwidth=12>State
+    <divider>
+      <region dir=horiz>
+        <selfld name=age selwidth=20 pmtloc=before pmtwidth=12>Age
+          <choice>0  - 12
+          <choice>13 - 19
+          <choice>20 - 29
+          <choice>30 - 49
+          <choice>50 - 64
+          <choice>over 65
+        </selfld>
+        <divider gutter=5>
+        <selfld name=paymeth selwidth=24 pmtwidth=20>Method of payment
+          <choice>Cash
+          <choice>Check
+          <choice>Credit card
+        </selfld>
+      </region>

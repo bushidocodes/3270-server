@@ -1,0 +1,27 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+  <vardcl name=fac varclass=sampcls>
+  <vardcl name=man varclass=sampcls>
+  <vardcl name=ped varclass=sampcls>
+  <vardcl name=ch1 varclass=sampcls>
+  <vardcl name=ch2 varclass=sampcls>
+  <vardcl name=ch3 varclass=sampcls>
+  <vardcl name=ch4 varclass=sampcls>
+  <vardcl name=ch5 varclass=sampcls>
+  <vardcl name=ch6 varclass=sampcls>
+</varlist>
+<panel name=multsel>Schedule Appointments
+  <area>
+    <dtacol pmtwidth=45 selwidth=76>
+    <selfld type=multi>Choose the services needed, then press Enter.
+      <choice name=ch1 checkvar=dry>Dry haircut
+      <choice name=ch2 checkvar=cut>Shampoo, haircut, and style
+      <choice name=ch3 checkvar=per>Permanent or body wave
+      <choice name=ch4 checkvar=fac>Facial
+      <choice name=ch5 checkvar=man>Manicure
+      <choice name=ch6 checkvar=ped>Pedicure
+    </selfld>
+    </dtacol>
+  </area>
+</panel>

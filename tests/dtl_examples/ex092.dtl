@@ -1,0 +1,20 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM>
+<VARCLASS NAME=choiccls TYPE='char 2'>
+<VARLIST>
+  <VARDCL NAME=choices VARCLASS=choiccls>
+</VARLIST>
+<PANEL NAME=botinst1 WIDTH=35 DEPTH=22>Four Choices
+<AREA>
+  <SELFLD NAME=choices PMTWIDTH=20 SELWIDTH=33>Choose one:
+    <CHOICE>Raindrops on roses
+    <CHOICE>Whiskers on kittens
+    <CHOICE>Bright copper kettles
+    <CHOICE>Warm woolen mittens
+  </SELFLD>
+</AREA>
+<BOTINST>Press Enter to continue.
+<BOTINST>Press F12 to cancel.
+</PANEL>

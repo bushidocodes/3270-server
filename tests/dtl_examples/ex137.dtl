@@ -1,0 +1,30 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM(
+  <!entity sampvar1 sysem>
+  <!entity sampabc system>)>
+&sampvar1;
+<PANEL NAME=source1 KEYLIST=keylxmp>Library Card Registration
+<AB>
+&sampabc;
+</AB>
+<TOPINST>Type in patron's name and card number (if applicable)
+<TOPINST>Then select an action bar choice.
+<AREA>
+    <DTACOL PMTWIDTH=12 ENTWIDTH=25 DESWIDTH=25 SELWIDTH=25>
+    <DTAFLD DATAVAR=curdate USAGE=out ENTWIDTH=8>Date
+    <DTAFLD DATAVAR=cardno ENTWIDTH=7>Card No.
+      <DTAFLDD>(A 7-digit number)
+    <DTAFLD DATAVAR=name>Name
+      <DTAFLDD>(Last, First, M.I.)
+    <DTAFLD DATAVAR=address>Address
+   </DTACOL>
+  <DIVIDER>
+  <REGION DIR=horiz>
+  <SELFLD NAME=cardsel PMTWIDTH=30 SELWIDTH=38>Choose
+  one of the following
+    <CHOICE CHECKVAR=card MATCH=new>New
+    <CHOICE CHECKVAR=card MATCH=renew>Renewal
+    <CHOICE CHECKVAR=card MATCH=replace>Replacement
+    <SOURCE TYPE=proc>

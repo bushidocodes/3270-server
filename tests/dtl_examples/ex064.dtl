@@ -1,0 +1,26 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<panel name=deptcode width=42>Department Codes
+  <area>
+    <info width=40>
+      <p>Use the following codes for each of the
+      matching departments:
+      <dl>
+        <dt>AP
+        <dd>Appliances
+        <dt>AU
+        <dd>Automotive
+        <dt>GA
+        <dd>Garden shop
+        <dt>HB
+        <dd>Health and beauty
+        <dt>HO
+        <dd>Home decor
+        <dt>SP
+        <dd>Sporting goods
+      </dl>
+    </info>
+  </area>
+</panel>

@@ -1,0 +1,20 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system [
+<!entity actnbar system>
+<!entity vardefs system>]>
+&vardefs;
+<panel name=dfdxmp21>Library Inventory
+&actnbar;
+  <topinst>To add a book to the inventory, complete the fields below,
+           and then press Enter.
+  <area>
+    <dtafld datavar=title usage=in pmtwidth=14>Title
+    <dtafld datavar=author usage=in pmtwidth=14>Author
+    <dtafld datavar=publish pmtwidth=14>Publisher
+    <dtafld datavar=pages usage=in pmtwidth=14>Number of pages
+    <divider type=solid gutter=3>
+    <dtafld datavar=curdate usage=out pmtwidth=20>Today's date is
+  </area>
+</panel>

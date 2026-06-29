@@ -1,0 +1,27 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<pandef id=pandef01 depth=20 width=70 help=help01>
+<panel name=panel01 pandef=pandef01>
+⋮
+</panel>
+<panel name=panel02 pandef=pandef01>
+⋮
+</panel>
+<panel name=panel03 pandef=pandef01 help=help02>
+⋮
+</panel>
+You can also define multiple panel defaults within a single source file, like this:
+<!doctype dm system>
+<pandef id=pandef01 depth=20 width=70 help=help01>
+<pandef id=pandef02 depth=10 width=50 help=help02 keylist=klist01>
+<panel name=panel01 pandef=pandef01>
+⋮
+</panel>
+<panel name=panel02 pandef=pandef02>
+⋮
+</panel>
+<panel name=panel03 pandef=pandef01 help=help02>
+⋮
+</panel>

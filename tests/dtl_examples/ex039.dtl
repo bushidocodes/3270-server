@@ -1,0 +1,28 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<varclass name=titlcls type='char 50'>
+<varclass name=bookcls type='char 20'>
+<varclass name=pagecls type='numeric 5'>
+<varlist>
+  <vardcl name=title   varclass=titlcls>
+  <vardcl name=author  varclass=bookcls>
+  <vardcl name=publish varclass=bookcls>
+  <vardcl name=pages   varclass=pagecls>
+</varlist>
+<panel name=dfdxmp4>Library Inventory
+  <topinst>To add a book to the inventory, complete the fields below,
+  then press Enter.
+  <area>
+    <dtacol pmtwidth=15>
+    <dtafld datavar=title usage=in entwidth=50>Title
+    <dtafld datavar=author usage=in entwidth=20 deswidth=30>Author
+      <dtafldd>Last name, First name, M.I.
+    <dtafld datavar=publish entwidth=20>Publisher
+    <dtafld datavar=pages usage=in entwidth=5 deswidth=15>
+            Total number of pages
+      <dtafldd>(1 - 99999)
+    </dtacol>
+  </area>
+</panel>

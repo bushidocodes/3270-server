@@ -1,0 +1,24 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<panel name=ordnum width=52>Order Numbers
+  <area>
+    <info width=50>
+      <p>The order number assigned to each inventory item
+      represents specific information about the item.
+      <p>Specifically,
+      <parml>
+        <pt>123
+        <pd>The first 3 digits represent the
+        department the item is stocked in.
+        <pt>456
+        <pd>The fourth, fifth, and sixth digits
+        represent the item.
+        <pt>78
+        <pd>The seventh and eighth digits represent
+        the lot number of the item.
+      </parml>
+    </info>
+  </area>
+</panel>

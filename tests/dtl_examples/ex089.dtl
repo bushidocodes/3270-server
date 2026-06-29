@@ -1,0 +1,23 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM>
+<VARCLASS NAME=roomvar TYPE='char 6'>
+  <XLATL FORMAT=upper>
+  </XLATL>
+<VARCLASS NAME=rmtypvar TYPE='char 1'>
+<VARLIST>
+  <VARDCL NAME=room   VARCLASS=roomvar>
+  <VARDCL NAME=rmtype VARCLASS=rmtypvar>
+</VARLIST>
+<PANEL NAME=assigni DEPTH=12 WIDTH=50>Hotel Register
+<AREA>
+  <DTAFLD DATAVAR=room ENTWIDTH=6 DESWIDTH=20 PMTWIDTH=15>Room type
+    <ASSIGNL DESTVAR=rmtype>
+    <ASSIGNI VALUE=SINGLE RESULT=1>
+    <ASSIGNI VALUE=DOUBLE RESULT=2>
+    </ASSIGNL>
+    <DTAFLDD>(Single or Double)
+</AREA>
+<BOTINST>Press Enter to continue.
+</PANEL>

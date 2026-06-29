@@ -1,0 +1,26 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<panel name=fields1>Selections
+  <area>
+    <dtacol selwidth=24 pmtwidth=15>
+    <selfld name=item>Pick an item:
+      <choice>Widget
+      <choice>Doohickey
+      <choice>Gizmo
+    </selfld>
+    <divider>
+    <selfld name=color>Pick a color:
+      <choice>Red
+      <choice>Green
+    </selfld>
+    <divider type=solid gap=no>
+    <selfld name=size>Pick a size:
+      <choice>Minuscule
+      <choice>Behemoth
+    </selfld>
+    </dtacol>
+  </area>
+  <botinst>To exit the application, press F3.
+</panel>

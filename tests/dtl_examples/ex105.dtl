@@ -1,0 +1,27 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM>
+<VARCLASS NAME=date TYPE='char 8'>
+<VARCLASS NAME=name TYPE='char 25'>
+<VARCLASS NAME=password TYPE='char 8'>
+<VARLIST>
+  <VARDCL NAME=curdate VARCLASS=date>
+  <VARDCL NAME=namevar VARCLASS=name>
+  <VARDCL NAME=passvar VARCLASS=password>
+</VARLIST>
+<PANEL NAME=dtafld1 HELP=loghelp>System Logon
+<TOPINST>Complete the following fields, then press Enter.
+<AREA>
+  <DTACOL PMTWIDTH=12>
+    <DIVIDER>
+    <DTAFLD DATAVAR=curdate USAGE=out ENTWIDTH=8 FLDSPACE=27>Date
+  <DTAFLDD>(Current Date)
+    <DIVIDER>
+    <DTAFLD DATAVAR=namevar ENTWIDTH=25 DESWIDTH=25>Name
+      <DTAFLDD>(Last, First)
+    <DIVIDER>
+    <DTAFLD DATAVAR=passvar REQUIRED=yes ENTWIDTH=8 DISPLAY=no>Password
+  </DTACOL>
+</AREA>
+</PANEL>

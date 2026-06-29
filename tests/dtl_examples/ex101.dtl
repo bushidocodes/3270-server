@@ -1,0 +1,25 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<!-- COPYR tag example - PANEL tag -->
+<varclass name=vc1 type='char 10'>
+<varclass name=vc2 type='char 6'>
+<varlist>
+<vardcl name=lst1 varclass=vc1>
+<vardcl name=lst2 varclass=vc2>
+</varlist>
+<copyr>Copyright statement 1
+<copyr>Copyright statement 2
+<panel name=copyrt1 depth=19 width=50>
+This is panel Copyrt1
+<LSTFLD >
+<LSTGRP headline=yes>
+<LSTCOL colwidth=10 datavar=lst1 usage=in varclass=vc1 line=1
+        required=yes autotab=yes align=end help=h1 msg=abcd101>COL1
+<LSTCOL colwidth=6  datavar=lst2 usage=in varclass=vc2 line=2
+        required=yes autotab=yes align=end help=h1 msg=abcd101>COL2
+</LSTGRP>
+</LSTFLD>
+<cmdarea>
+</panel>

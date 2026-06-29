@@ -1,0 +1,13 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM(
+  <!entity sampvar1 sysem>
+  <!entity sampbody system>)>
+&sampvar1;
+<PANDEF ID=panldef1 DEPTH=20 WIDTH=76 HELP=helpaaa KEYLIST=keylxmp>
+<PANDEF ID=panldef2 DEPTH=22 WIDTH=70 HELP=morehlp>
+<PANEL NAME=pandef1 PANDEF=panldef1>First Panel
+&sampbody;
+</PANEL>
+<PANEL NAME=pandef2 PANDEF=panldef1

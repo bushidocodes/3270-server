@@ -1,0 +1,33 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM(
+  <!entity sampvar3 system>)>
+&sampvar3;
+<PANEL NAME=divider DEPTH=22 WIDTH=70>Print a Document
+<AREA>
+  <DTACOL PMTWIDTH=20 ENTWIDTH=8 SELWIDTH=40 DESWIDTH=35>
+    <DTAFLD DATAVAR=file>File name
+      <DTAFLDD>Name of the document to be printed
+    <DIVIDER TYPE=none>
+    <SELFLD NAME=type PMTLOC=before>Type style for printing
+      <CHOICE>Prestige Elite (12 pitch)
+      <CHOICE>Courier (10 pitch)
+      <CHOICE>Essay Standard (proportional)
+      <CHOICE>Essay Bold (proportional)
+    </SELFLD>
+  </DTACOL>
+  <DIVIDER TYPE=solid GUTTER=2 GAP=no>
+  <DTACOL PMTWIDTH=20 ENTWIDTH=2 DESWIDTH=35>
+    <DTAFLD DATAVAR=marg>Left margin
+      <DTAFLDD>Number of spaces in the left margin
+    <DIVIDER TYPE=solid>
+    <DTAFLD DATAVAR=copy>Copies
+      <DTAFLDD>Number of copies
+    <DIVIDER TYPE=solid>
+    <DTAFLD DATAVAR=duplx ENTWIDTH=1>Duplex
+      <DTAFLDD>1 = Yes (Print both sides of paper)
+      <DTAFLDD>2 = No (Print one side only)
+  </DTACOL>
+</AREA>
+</PANEL>

@@ -1,0 +1,52 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM>
+<VARCLASS NAME=chr25 TYPE='char 25'>
+<VARCLASS NAME=chr12 TYPE='char 12'>
+<VARCLASS NAME=chr10 TYPE='char 10'>
+<VARCLASS NAME=chr9  TYPE='char 9'>
+<VARCLASS NAME=chr8  TYPE='char 8'>
+<VARCLASS NAME=chr2  TYPE='char 2'>
+<VARLIST>
+  <VARDCL NAME=name   VARCLASS=chr25>
+  <VARDCL NAME=date   VARCLASS=chr8>
+  <VARDCL NAME=addr   VARCLASS=chr25>
+  <VARDCL NAME=city   VARCLASS=chr10>
+  <VARDCL NAME=state  VARCLASS=chr9>
+  <VARDCL NAME=zip    VARCLASS=chr12>
+  <VARDCL NAME=level  VARCLASS=chr2>
+  <VARDCL NAME=graddate VARCLASS=chr2>
+  <VARDCL NAME=major  VARCLASS=chr10>
+</VARLIST>
+<PANEL NAME=region1 keylist=keylxmp>Application Form
+<TOPINST>Complete all of the fields below, then press Enter.
+<AREA>
+  <REGION INDENT=2>
+    <REGION DIR=horiz>
+    <DTACOL PMTWIDTH=10>
+      <DTAFLD DATAVAR=name ENTWIDTH=25>Name
+      <DTAFLD DATAVAR=date ENTWIDTH=8 DESWIDTH=10>Date
+        <DTAFLDD>(mm/dd/yy)
+    </DTACOL>
+    </REGION>
+      <DTAFLD DATAVAR=addr ENTWIDTH=25 PMTWIDTH=10>Address
+    <REGION DIR=horiz>
+      <DTAFLD DATAVAR=city PMTWIDTH=10 ENTWIDTH=25>City
+      <DTAFLD DATAVAR=state PMTWIDTH=9 ENTWIDTH=2>State
+      <DTAFLD DATAVAR=zip PMTWIDTH=12 ENTWIDTH=5>Zip code
+    </REGION>
+  </REGION>
+  <DIVIDER TYPE=solid GUTTER=3>
+  <REGION DIR=horiz INDENT=2 ALIGN=no>
+    <SELFLD NAME=level SELWIDTH=35 PMTWIDTH=25>Highest education level:
+      <CHOICE>Some high school
+      <CHOICE>High school graduate
+      <CHOICE>Some college
+      <CHOICE>College graduate
+      <CHOICE>Some post-graduate work
+      <CHOICE>Post-graduate degree
+    </SELFLD>
+    <DIVIDER TYPE=solid>
+    <REGION>
+      <GRPHDR FORMAT=none COMPACT STRIP>

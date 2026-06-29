@@ -1,0 +1,10 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<panel name=infopan2 width=42>Information
+  <area>
+    <info width=40>
+      <p>This is a paragraph.
+      This sentence is also part of the paragraph.
+      <p>Here is another paragraph.
