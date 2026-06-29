@@ -38,6 +38,8 @@ Supported tags
                                  unaffected.
 ``<info row col intensity>``     protected text (label / instruction / rule).
                                  ``fill`` + ``width`` repeats a character (rules).
+``<topinst row col>``            top instruction / panel instruction text. Render
+``<paninst row col>``            like ``<info>`` (protected text); semantic DTL tags.
 ``<dtafld row col fldcol         a prompt plus an unprotected input field at
    datavar entwidth ...>``       ``fldcol``. The prompt is the text of a nested
                                  ``<dtafldd>`` child (authentic DTL) or, as a
@@ -121,8 +123,10 @@ _INTENSITY = {
     "highlighted": DisplayIntensity.HIGHLIGHTED,
 }
 
-_CONTENT_TAGS = ("info", "dtafld", "cmdarea", "choice")
+_CONTENT_TAGS = ("info", "topinst", "paninst", "dtafld", "cmdarea", "choice")
 _FIELD_TAGS = ("dtafld", "cmdarea")
+# Tags that render as protected instruction/label text (like <info>).
+_TEXT_TAGS = ("info", "topinst", "paninst")
 
 
 def _truthy(value, default=False):
@@ -281,7 +285,7 @@ class _DTLParser(HTMLParser):
         # element's own text is the prompt (a convenient shorthand).
         content = self._dtafldd if isinstance(self._dtafldd, str) else "".join(self._chars)
         a = self._attrs
-        if tag == "info":
+        if tag in _TEXT_TAGS:
             self._emit_info(a, content)
         elif tag == "dtafld":
             self._emit_dtafld(a, content)
