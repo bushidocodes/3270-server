@@ -193,34 +193,64 @@ def _show_overlay(client_socket, panel_name: str):
             # opens that choice's pull-down; otherwise Enter closes the overlay.
             choice = screen.action_choice_at(cursor)
             if choice and choice.get("pdc"):
-                if _show_pulldown(client_socket, screen, choice) is None:
-                    return
+                action = _show_pulldown(client_socket, screen, choice)
+                if action is None:
+                    return  # client disconnected
+                if _run_pdc_action(client_socket, screen, action):
+                    return  # the action left the overlay (e.g. EXIT)
                 continue
             return
 
 
 def _show_pulldown(client_socket, screen, choice):
-    """Overlay a choice's pull-down menu on the panel and wait for a keypress.
+    """Overlay a choice's pull-down menu and wait for the user to act on it.
 
-    Returns the result of the keypress (truthy) or ``None`` if the client
-    disconnected. Any key closes the pull-down, returning to the panel.
+    Returns the selected pull-down item's action string when the cursor is on an
+    item and Enter is pressed; ``""`` if the pull-down is closed without a
+    selection; or ``None`` if the client disconnected.
     """
     from screen import Text
 
-    texts = [f"{n}. {pdc['label']}" for n, pdc in enumerate(choice["pdc"], 1)]
+    pdc = choice["pdc"]
+    texts = [f"{n}. {p['label']}" for n, p in enumerate(pdc, 1)]
     inner = max(len(t) for t in texts) + 2
     top = choice["row"] + 1
     col = choice["col"]
     border = "+" + "-" * inner + "+"
     screen.add(Text(top, col, border, DisplayIntensity.HIGH))
+    action_by_row = {}
     for n, t in enumerate(texts):
-        screen.add(Text(top + 1 + n, col, "|" + (" " + t).ljust(inner) + "|",
+        row = top + 1 + n
+        screen.add(Text(row, col, "|" + (" " + t).ljust(inner) + "|",
                         DisplayIntensity.HIGH))
+        action_by_row[row] = pdc[n]["action"]
     screen.add(Text(top + 1 + len(texts), col, border, DisplayIntensity.HIGH))
-    # Park the cursor in the pull-down.
-    screen.sound_alarm = False
     _send_screen(client_socket, screen)
-    return read_client_input(client_socket)
+
+    result = read_client_input(client_socket)
+    if result is None:
+        return None
+    aid, _, cursor = result
+    if aid_to_string(aid) == "Enter" and cursor is not None:
+        crow, ccol = divmod(cursor, 80)
+        if crow in action_by_row and col <= ccol <= col + inner + 1:
+            return action_by_row[crow]
+    return ""  # closed without selecting an item
+
+
+def _run_pdc_action(client_socket, screen, action) -> bool:
+    """Run a selected pull-down action. Returns True if it should leave the
+    overlay (an EXIT-family alias), False otherwise (the panel is redisplayed).
+    """
+    act = (action or "").strip().lower()
+    if act.startswith("alias "):
+        target = act.split(None, 1)[1].strip()
+        if target == "help" and screen.help:
+            _show_overlay(client_socket, screen.help)
+            return False
+        if target in ("exit", "end", "return"):
+            return True
+    return False  # passthru / unknown / no selection: just redisplay
 
 
 def aid_to_string(aid: int):
