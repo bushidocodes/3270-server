@@ -124,8 +124,9 @@ like:
 ```
 
 Supported tags: `<panel>`, `<info>` (text/instructions, with `fill`+`width` rules),
-`<dtafld>` (prompt + input field), `<selfld>`/`<choice>` (menu lists), and `<keyl>`/`<keyi>`
-(a keylist binding function keys to commands). ISPF dialog variables are referenced `&`-style —
+`<dtafld>` (prompt + input field), `<cmdarea>` (the ISPF "Option/Command ===>" line, bound to
+`ZCMD`), `<selfld>`/`<choice>` (menu lists), and `<keyl>`/`<keyi>` (a keylist binding function
+keys to commands). ISPF dialog variables are referenced `&`-style —
 `&ZUSER`, `&ZTIME` — and substituted at load time (e.g. the live user id and clock on the ISPF
 status line); `&&` is a literal ampersand and a trailing `.` terminates a reference. Unlike
 authentic DTL, placement is explicit (`row`/`col`) rather than auto-flowed.

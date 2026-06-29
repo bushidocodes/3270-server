@@ -122,10 +122,24 @@ class Screen:
     # Function-key → command map (e.g. {"PF3": "EXIT"}), from a DTL <keyl>.
     # Pure metadata: it is not rendered, so it never affects the data stream.
     keylist: Dict[str, str] = _dc_field(default_factory=dict)
+    # The panel's command-area input field (the ISPF "Option/Command ===>" line),
+    # from a DTL <cmdarea>. None if the panel has no command area.
+    command_field: Optional["Field"] = None
 
     def add(self, item) -> "Screen":
         self.items.append(item)
         return self
+
+    def command_value(self, fields_by_addr: Dict[int, str]) -> Optional[str]:
+        """The text the client typed into the command area, or ``None``.
+
+        Looks the command field up by buffer address in a parsed response so the
+        session loop can read the command by role (like ISPF reading ``ZCMD``)
+        rather than by a hard-coded address constant.
+        """
+        if self.command_field is None:
+            return None
+        return fields_by_addr.get(self.command_field.data_addr)
 
     def command_for(self, key: Optional[str]) -> Optional[str]:
         """The command bound to a function key (e.g. ``"PF3"``) by the keylist.

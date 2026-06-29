@@ -42,7 +42,11 @@ def test_logon_dtl_field_addresses():
 
 def test_ispf_dtl_option_field_and_title():
     s = load_panel("ispf", ZUSER="IBMUSER ", ZTIME="13:45")
-    assert s.field_addr("option") == 2 * 80 + 14
+    # The option line is now a <cmdarea>; its variable defaults to ZCMD and it is
+    # recorded as the command field at the same address as before (2*80 + 14).
+    assert s.field_addr("ZCMD") == 2 * 80 + 14
+    assert s.command_field is not None
+    assert s.command_field.data_addr == 2 * 80 + 14
     assert s.title == "ISPF Primary Option Menu"
 
 
@@ -186,6 +190,41 @@ def test_keyi_key_and_cmd_uppercased_and_resolved():
     assert s.command_for("PF3") == "EXIT"
     assert s.command_for("pf3") == "EXIT"   # lookup is case-insensitive
     assert s.command_for("PF7") is None     # unbound
+
+
+# ── command area (<cmdarea>) ─────────────────────────────────────────────────
+
+def test_cmdarea_renders_like_dtafld_and_records_command_field():
+    cmd = load_dtl(
+        '<panel><cmdarea row="2" col="1" fldcol="13" entwidth="6" cursor="yes">'
+        'Option ===></cmdarea></panel>'
+    )
+    # Same prompt + field bytes as the equivalent <dtafld> (name aside).
+    fld = load_dtl(
+        '<panel><dtafld row="2" col="1" fldcol="13" datavar="ZCMD" entwidth="6" '
+        'cursor="yes">Option ===></dtafld></panel>'
+    )
+    assert cmd.render() == fld.render()
+    assert cmd.command_field is cmd.items[1]
+    assert cmd.command_field.name == "ZCMD"          # default ISPF command var
+    assert cmd.field_addr("ZCMD") == 2 * 80 + 14
+
+
+def test_cmdarea_datavar_override_and_command_value():
+    s = load_dtl(
+        '<panel><cmdarea row="2" col="1" fldcol="13" datavar="OPT" entwidth="6">'
+        'Option ===></cmdarea></panel>'
+    )
+    assert s.command_field.name == "OPT"
+    addr = s.command_field.data_addr
+    assert s.command_value({addr: "3   "}) == "3   "
+    assert s.command_value({}) is None
+
+
+def test_command_value_none_without_cmdarea():
+    s = load_dtl('<panel><info row="0" col="0">hi</info></panel>')
+    assert s.command_field is None
+    assert s.command_value({0: "x"}) is None
 
 
 def test_keyi_outside_keyl_raises():
