@@ -172,6 +172,21 @@ class Screen:
         self.items.append(item)
         return self
 
+    def action_choice_at(self, cursor_addr: Optional[int]) -> Optional[dict]:
+        """The action-bar choice the cursor is on (point-and-shoot), or ``None``.
+
+        ``cursor_addr`` is the linear buffer address from the inbound reply; it
+        is on a choice when it falls within that choice's rendered label.
+        """
+        if cursor_addr is None:
+            return None
+        row, col = divmod(cursor_addr, 80)
+        for choice in self.action_bar:
+            if choice.get("row") == row and \
+                    choice["col"] < col <= choice["col"] + len(choice["label"]):
+                return choice
+        return None
+
     def lookup_command(self, typed: Optional[str]) -> Optional[str]:
         """Resolve a typed command against the command table, honouring each
         command's truncation (e.g. KEYLIST trunc=3 matches KEY/KEYL/…). Returns

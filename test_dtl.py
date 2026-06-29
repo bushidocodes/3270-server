@@ -270,11 +270,30 @@ def test_action_bar_renders_labels_and_records_pulldowns():
     # Labels laid out across row 0: Menu at col 1, Help at col 1+4+3 = 8.
     assert s.items[0] == Text(0, 1, "Menu", DisplayIntensity.HIGH)
     assert s.items[1] == Text(0, 8, "Help", DisplayIntensity.HIGH)
-    # Pull-down structure preserved for future interaction.
+    # Pull-down structure + rendered position preserved for interaction.
     assert s.action_bar == [
-        {"label": "Menu", "pdc": [{"label": "Exit", "action": "exit"}]},
-        {"label": "Help", "pdc": [{"label": "About", "action": "passthru"}]},
+        {"label": "Menu", "row": 0, "col": 1,
+         "pdc": [{"label": "Exit", "action": "exit"}]},
+        {"label": "Help", "row": 0, "col": 8,
+         "pdc": [{"label": "About", "action": "passthru"}]},
     ]
+
+
+def test_action_choice_at_maps_cursor_to_choice():
+    s = load_dtl(
+        '<panel>'
+        '<ab row="0" col="1" gap="3">'
+        '<abc>Menu<pdc action="x">A</pdc></abc>'
+        '<abc>Help<pdc action="y">B</pdc></abc>'
+        '</ab>'
+        '</panel>'
+    )
+    # "Menu" label is rendered at cols 2..5 (attr at col 1); "Help" at cols 9..12.
+    assert s.action_choice_at(0 * 80 + 3)["label"] == "Menu"
+    assert s.action_choice_at(0 * 80 + 9)["label"] == "Help"
+    assert s.action_choice_at(0 * 80 + 1) is None    # on the attribute byte
+    assert s.action_choice_at(0 * 80 + 40) is None    # not on a choice
+    assert s.action_choice_at(None) is None
 
 
 def test_abc_outside_ab_raises():
