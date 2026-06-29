@@ -358,6 +358,17 @@ def tn3270_negotiate(client_socket):
 # rather than hard-coding key numbers.
 _LEAVE_COMMANDS = {"EXIT", "END", "RETURN", "LOGOFF"}
 
+_message_catalog = None
+
+
+def _messages():
+    """Lazily load and cache the TSO message catalog (messages/tsomsgs.dtl)."""
+    global _message_catalog
+    if _message_catalog is None:
+        from dtl import load_message_member  # lazy: avoid circular import
+        _message_catalog = load_message_member("tsomsgs")
+    return _message_catalog
+
 
 def handle_client(client_socket, addr):
     print(f"Connection from {addr}")
@@ -385,11 +396,11 @@ def handle_client(client_socket, addr):
             password_raw = fields.get(LOGON_PASSWORD_ADDR, "").strip().upper()
 
             if not userid_raw:
-                error_msg = "IKJ56700I USERID MUST BE SPECIFIED"
+                error_msg = _messages().format("IKJ56700I")
                 continue
 
             if _CREDENTIALS.get(userid_raw) != password_raw:
-                error_msg = f"IKJ56425I PASSWORD NOT CORRECT FOR {userid_raw}"
+                error_msg = _messages().format("IKJ56425I", USERID=userid_raw)
                 continue
 
             userid = userid_raw

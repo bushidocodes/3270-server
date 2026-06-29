@@ -49,6 +49,10 @@ Supported tags
 ``<vardcl name varclass>``       declares variable ``name`` to be of class
                                  ``varclass``; a field's ``numeric`` is inherited
                                  from it when the field omits ``numeric``.
+``<msgmbr name>``                a message member: container for ``<msg>`` entries
+                                 (parsed by :func:`load_messages`, not a panel).
+``<msg msgid>text``              a message; ``&NAME`` references in ``text`` are
+                                 substituted at display time. See `MessageCatalog`.
 
 ``<dtafld>`` attributes: ``datavar`` (field name sent back), ``entwidth`` (field
 length), ``hidden`` (non-display, e.g. password), ``numeric``, ``default``,
@@ -129,6 +133,8 @@ class _DTLParser(HTMLParser):
         self._varclasses = {}     # <varclass> name (upper) → {"numeric": bool}
         self._vardcls = {}        # <vardcl> name (upper) → {"varclass": name}
         self._in_varlist = False  # inside a <varlist>?
+        self._in_msgmbr = False   # inside a <msgmbr>?
+        self.messages = {}        # <msg> msgid (upper) → message text
 
     # ── SGML event handling ──────────────────────────────────────────────────
 
@@ -159,6 +165,14 @@ class _DTLParser(HTMLParser):
             self._in_varlist = True
         elif tag == "vardcl":
             self._emit_vardcl(a)
+        elif tag == "msgmbr":
+            self._in_msgmbr = True
+        elif tag == "msg":
+            if not self._in_msgmbr:
+                raise DTLError("<msg> outside of a <msgmbr>")
+            if "msgid" not in a:
+                raise DTLError("<msg> missing required attribute 'msgid'")
+            self._tag, self._attrs, self._chars = "msg", a, []
         elif tag in _CONTENT_TAGS:
             self._tag, self._attrs, self._chars = tag, a, []
             self._dtafldd = None
@@ -184,6 +198,9 @@ class _DTLParser(HTMLParser):
         if tag == "varlist":
             self._in_varlist = False
             return
+        if tag == "msgmbr":
+            self._in_msgmbr = False
+            return
         if tag != self._tag:
             return
         # A <dtafldd> child, if present, supplies the prompt; otherwise the
@@ -198,6 +215,8 @@ class _DTLParser(HTMLParser):
             self._emit_cmdarea(a, content)
         elif tag == "choice":
             self._emit_choice(a, content)
+        elif tag == "msg":
+            self.messages[a["msgid"].upper()] = content.strip()
         self._tag, self._attrs, self._chars, self._dtafldd = None, None, [], None
 
     def handle_startendtag(self, tag, attrs):
@@ -211,8 +230,12 @@ class _DTLParser(HTMLParser):
             self._selfld = None
         elif tag == "keyl":  # a self-closing keylist has no items; close it
             self.handle_endtag(tag)
+        elif tag == "msg":  # a self-closing msg has empty text
+            self.handle_endtag(tag)
         elif tag == "varlist":  # a self-closing varlist declares nothing; close it
             self._in_varlist = False
+        elif tag == "msgmbr":  # a self-closing msgmbr declares nothing; close it
+            self._in_msgmbr = False
 
     # ── element → model ──────────────────────────────────────────────────────
 
@@ -346,3 +369,47 @@ def load_panel(name: str, directory: str = None, **subs) -> Screen:
     path = os.path.join(directory, f"{name}.dtl")
     with open(path, "r", encoding="utf-8") as fh:
         return load_dtl(fh.read(), **subs)
+
+
+class MessageCatalog:
+    """Messages parsed from a DTL ``<msgmbr>``, looked up by id.
+
+    Mirrors how ISPF keeps messages in a message library (ISPMLIB), separate
+    from panels: :meth:`format` returns the displayable ``"<id> <text>"`` with
+    any ``&NAME`` references in the text substituted at display time.
+    """
+
+    def __init__(self, messages: dict):
+        self.messages = messages
+
+    def format(self, msgid: str, **subs) -> str:
+        text = self.messages.get(msgid.upper())
+        if text is None:
+            return msgid
+        return f"{msgid} {_substitute(text, subs)}".rstrip()
+
+
+def load_messages(source: str) -> MessageCatalog:
+    """Parse a DTL message member (``<msgmbr>``/``<msg>``) into a catalog.
+
+    The message text is left unsubstituted here; ``&NAME`` references are
+    resolved per-message at display time by :meth:`MessageCatalog.format`.
+    """
+    parser = _DTLParser()
+    parser.feed(source)
+    parser.close()
+    return MessageCatalog(parser.messages)
+
+
+def load_message_member(name: str, directory: str = None) -> MessageCatalog:
+    """Load and parse ``<directory>/<name>.dtl`` as a message member.
+
+    ``directory`` defaults to the ``messages`` folder next to this module —
+    a small nod to ISPF keeping messages (ISPMLIB) apart from panels (ISPPLIB).
+    """
+    import os
+    if directory is None:
+        directory = os.path.join(os.path.dirname(os.path.abspath(__file__)), "messages")
+    path = os.path.join(directory, f"{name}.dtl")
+    with open(path, "r", encoding="utf-8") as fh:
+        return load_messages(fh.read())

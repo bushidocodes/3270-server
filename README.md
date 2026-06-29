@@ -91,10 +91,12 @@ When the user presses Enter or a PF key, the emulator sends an AID byte followed
 server.py       — TN3270 protocol: negotiation, session loop, the 3270 primitives
 screen.py       — Screen/Field model: renders to a 3270 data stream, parses responses
 screens.py      — the two panels built as Screen objects (the in-code reference)
-dtl.py          — Dialog Tag Language parser: load_panel() → Screen
+dtl.py          — Dialog Tag Language parser: load_panel() → Screen, load_message_member() → MessageCatalog
 panels/         — the screens authored declaratively
   logon.dtl       z/OS TSO/E LOGON panel
   ispf.dtl        ISPF Primary Option Menu
+messages/       — message members, kept apart from panels as on z/OS (ISPMLIB vs ISPPLIB)
+  tsomsgs.dtl     TSO/E logon messages (IKJ56425I, IKJ56700I)
 ```
 
 Screens are **data, not code**. `server.py` no longer hand-assembles bytes; `send_tso_logon`

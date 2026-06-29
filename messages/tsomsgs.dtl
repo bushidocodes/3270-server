@@ -1,0 +1,8 @@
+<!-- TSO/E logon messages, as a Dialog Tag Language message member (DTL subset).
+     On z/OS these live in a message library (ISPMLIB), separate from the panels
+     in ISPPLIB. Each <msg> is referenced by id; &USERID is substituted at
+     display time. The displayed text is "<msgid> <text>". -->
+<msgmbr name="IKJ564">
+  <msg msgid="IKJ56425I">PASSWORD NOT CORRECT FOR &USERID</msg>
+  <msg msgid="IKJ56700I">USERID MUST BE SPECIFIED</msg>
+</msgmbr>
