@@ -137,7 +137,8 @@ recognizes named commands, with truncation), `<varclass>`/`<varlist>`/`<vardcl>`
 declarations — a field inherits `numeric` from its class, and a class's `<checkl>`/`<checki>`
 range/value checks validate the field's input, e.g. the logon SIZE field), `<ab>`/`<abc>`/`<pdc>`
 (an action bar with pull-down choices — put the cursor on a choice and press Enter to open its
-pull-down, point-and-shoot style), `<topinst>`/`<paninst>`
+pull-down, point-and-shoot style; or use **F10/F11** to step the cursor left/right across the
+choices), `<topinst>`/`<paninst>`
 (instruction text), and `<area>`/`<region>` (flow boxes — see below). ISPF
 dialog variables are referenced `&`-style — `&ZUSER`, `&ZTIME` — and substituted at load time
 (e.g. the live user id and clock on the ISPF status line); `&&` is a literal ampersand and a

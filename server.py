@@ -178,8 +178,12 @@ def _show_overlay(client_socket, panel_name: str):
     """
     from dtl import load_panel
 
+    abc_idx = None  # which action-bar choice the cursor is parked on, or None
     while True:
         screen = load_panel(panel_name)
+        if abc_idx is not None and screen.action_bar:
+            ch = screen.action_bar[abc_idx % len(screen.action_bar)]
+            screen.cursor_at = (ch["row"], ch["col"] + 1)  # on the choice label
         _send_screen(client_socket, screen)
         result = read_client_input(client_socket)
         if result is None:
@@ -188,6 +192,15 @@ def _show_overlay(client_socket, panel_name: str):
         aid_str = aid_to_string(aid)
         if screen.command_for(aid_str) in _LEAVE_COMMANDS:
             return
+        if screen.action_bar and aid_str in ("PF10", "PF11"):
+            # F10/F11 move the cursor left/right along the action-bar choices
+            # (jumping onto the bar from elsewhere), wrapping around.
+            n = len(screen.action_bar)
+            if abc_idx is None:
+                abc_idx = 0 if aid_str == "PF11" else n - 1
+            else:
+                abc_idx = (abc_idx + 1) % n if aid_str == "PF11" else (abc_idx - 1) % n
+            continue
         if aid_str == "Enter":
             # Point-and-shoot: Enter with the cursor on an action-bar choice
             # opens that choice's pull-down; otherwise Enter closes the overlay.
