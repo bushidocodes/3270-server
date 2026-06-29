@@ -161,3 +161,49 @@ def test_missing_required_attr_raises():
 def test_choice_outside_selfld_raises():
     with pytest.raises(DTLError):
         load_dtl('<panel><choice num="0" name="A">d</choice></panel>')
+
+
+# ── keylist (<keyl>/<keyi>) ──────────────────────────────────────────────────
+
+def test_keyl_builds_keylist_and_emits_no_items():
+    s = load_dtl(
+        '<panel>'
+        '<info row="0" col="0">hi</info>'
+        '<keyl name="K">'
+        '<keyi key="PF1" cmd="HELP">Help</keyi>'
+        '<keyi key="PF3" cmd="EXIT">Exit</keyi>'
+        '</keyl>'
+        '</panel>'
+    )
+    # The keylist is metadata: it adds no renderable items.
+    assert s.items == [Text(0, 0, "hi", DisplayIntensity.NORMAL)]
+    assert s.keylist == {"PF1": "HELP", "PF3": "EXIT"}
+
+
+def test_keyi_key_and_cmd_uppercased_and_resolved():
+    s = load_dtl('<panel><keyl><keyi key="pf3" cmd="exit"/></keyl></panel>')
+    assert s.keylist == {"PF3": "EXIT"}
+    assert s.command_for("PF3") == "EXIT"
+    assert s.command_for("pf3") == "EXIT"   # lookup is case-insensitive
+    assert s.command_for("PF7") is None     # unbound
+
+
+def test_keyi_outside_keyl_raises():
+    with pytest.raises(DTLError):
+        load_dtl('<panel><keyi key="PF3" cmd="EXIT"/></panel>')
+
+
+def test_keyi_missing_key_raises():
+    with pytest.raises(DTLError):
+        load_dtl('<panel><keyl><keyi cmd="EXIT"/></keyl></panel>')
+
+
+def test_panels_define_exit_keylist():
+    # The shipped panels bind PF3/PF15 to EXIT so server.py resolves logoff
+    # from the keylist rather than hard-coded key numbers.
+    for name in ("logon", "ispf"):
+        s = load_panel(name) if name == "logon" else load_panel(
+            name, userid="IBMUSER ", time="13:45"
+        )
+        assert s.command_for("PF3") == "EXIT"
+        assert s.command_for("PF15") == "EXIT"

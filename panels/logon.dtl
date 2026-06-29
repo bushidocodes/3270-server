@@ -26,4 +26,12 @@
   <info row="16" col="1">Press ENTER to logon to TSO/E</info>
   <info row="17" col="1">PF1=HELP   PF3=LOGOFF</info>
   <info row="21" col="1">ENTER AN END COMMAND TO LOGOFF</info>
+
+  <!-- Keylist: PF3/PF15 leave the panel (logoff). Metadata only — the visible
+       "PF1=HELP PF3=LOGOFF" line above is the displayed function-key area. -->
+  <keyl name="TSOLOGON">
+    <keyi key="PF1"  cmd="HELP">Help</keyi>
+    <keyi key="PF3"  cmd="EXIT">Logoff</keyi>
+    <keyi key="PF15" cmd="EXIT">Logoff</keyi>
+  </keyl>
 </panel>

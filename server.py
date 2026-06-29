@@ -155,6 +155,7 @@ def send_tso_logon(client_socket, error_msg: str = None):
         col = max(0, (80 - len(error_msg)) // 2)
         screen.add(Text(19, col, error_msg, DisplayIntensity.HIGH))
     _send_screen(client_socket, screen)
+    return screen
 
 
 def send_ispf_menu(client_socket, userid: str, short_msg: str = None):
@@ -167,6 +168,7 @@ def send_ispf_menu(client_socket, userid: str, short_msg: str = None):
     if short_msg:
         screen.add(Text(2, 25, short_msg[:54], DisplayIntensity.HIGH))
     _send_screen(client_socket, screen)
+    return screen
 
 
 def aid_to_string(aid: int):
@@ -351,6 +353,12 @@ def tn3270_negotiate(client_socket):
     print("Negotiation complete: binary={}, eor={}, term={}".format(got_binary, got_eor, got_term))
 
 
+# ISPF commands that leave the current panel. A panel's <keyl> binds function
+# keys (PF3/PF15) to one of these; the session loop acts on the resolved command
+# rather than hard-coding key numbers.
+_LEAVE_COMMANDS = {"EXIT", "END", "RETURN", "LOGOFF"}
+
+
 def handle_client(client_socket, addr):
     print(f"Connection from {addr}")
     tn3270_negotiate(client_socket)
@@ -361,7 +369,7 @@ def handle_client(client_socket, addr):
         error_msg = None
         userid = None
         while True:
-            send_tso_logon(client_socket, error_msg)
+            screen = send_tso_logon(client_socket, error_msg)
             result = read_client_input(client_socket)
             if result is None:
                 return
@@ -369,8 +377,8 @@ def handle_client(client_socket, addr):
             print(f"AID={hex(aid)}, fields={redact_fields(fields)}")
 
             aid_str = aid_to_string(aid)
-            if aid_str in ("PF3", "PF15"):
-                # Logoff
+            if screen.command_for(aid_str) in _LEAVE_COMMANDS:
+                # Keylist bound this key (PF3/PF15) to EXIT — log off.
                 return
 
             userid_raw = fields.get(LOGON_USERID_ADDR, "").strip().upper()
@@ -390,7 +398,7 @@ def handle_client(client_socket, addr):
         # ISPF menu loop
         short_msg = None
         while True:
-            send_ispf_menu(client_socket, userid, short_msg)
+            screen = send_ispf_menu(client_socket, userid, short_msg)
             result = read_client_input(client_socket)
             if result is None:
                 return
@@ -400,8 +408,8 @@ def handle_client(client_socket, addr):
             aid_str = aid_to_string(aid)
             option = fields.get(ISPF_OPTION_ADDR, "").strip().upper()
 
-            if option == "X" or aid_str in ("PF3", "PF15"):
-                # Logoff — back to logon panel
+            if option == "X" or screen.command_for(aid_str) in _LEAVE_COMMANDS:
+                # X, or a keylist key (PF3/PF15) bound to EXIT — back to logon
                 break
 
             valid_opts = {"0", "1", "2", "3", "4", "5", "6", "7", "9", "10", "11", "12", "13"}
