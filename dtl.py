@@ -39,11 +39,14 @@ Supported tags
                                  ``fill`` + ``width`` repeats a character (rules).
 ``<topinst row col>``            top instruction / panel instruction text. Render
 ``<paninst row col>``            like ``<info>`` (protected text); semantic DTL tags.
-``<p>`` ``<li>`` ``<dt>`` ``<dd>``  flowed text: paragraphs and list items each
-``<pt>`` ``<pd>`` ``<lines>``    render as a protected line (their list containers
-                                 ``<ul>``/``<ol>``/``<dl>``/``<parml>`` are transparent).
-                                 DTL omits end tags, so a block element is closed
-                                 by whatever block tag follows it.
+``<p>`` ``<lines>`` ``<dt>`` ``<dd>``  flowed text: paragraphs and items each render
+``<pt>`` ``<pd>``                as a protected line. DTL omits end tags, so a block
+                                 element is closed by whatever block tag follows it.
+``<ul>`` ``<ol>`` ``<li>``         a list: each ``<li>`` flows as a bullet plus its
+                                 text, indented one level per nesting (``<ul>`` →
+                                 ``o``/``-``/``--`` by depth; ``<ol>`` → ``1.``, ``2.``…).
+Panel title: the text after ``<panel ...>`` (before its first child) renders
+centered on row 0, with the body flowing beneath it.
 ``<dtafld row col fldcol         a prompt plus an unprotected input field at
    datavar entwidth ...>``       ``fldcol``. The prompt is the text of a nested
                                  ``<dtafldd>`` child (authentic DTL) or, as a
@@ -197,16 +200,24 @@ class _DTLParser(HTMLParser):
         self._ab = None           # active <ab> action bar being built, or None
         self._cur_abc = None      # current <abc> action-bar choice, or None
         self._cur_pdc = None      # current <pdc> pull-down choice, or None
+        self._panel_title = None  # capturing the panel's title text, or None
+        self._lists = []          # stack of open <ul>/<ol> ({"type", "n"})
 
     # ── SGML event handling ──────────────────────────────────────────────────
 
     def handle_starttag(self, tag, attrs):
         a = {k: v for k, v in attrs}
+        # The panel's title text (between <panel ...> and its first child) ends
+        # at the first child tag.
+        if self._panel_title is not None:
+            self._finalize_panel_title()
         # Implicit end tags: a new block element closes the open content element
         # (DTL omits most end tags). <dtafldd> is the exception — it's a child
         # that supplies its parent <dtafld>'s prompt, so it must not close it.
         if tag != "dtafldd" and self._tag is not None:
             self._emit_current()
+        if tag in ("ul", "ol"):
+            self._lists.append({"type": tag, "n": 0})
         if tag == "panel":
             self.screen.title = a.get("title")
             self.screen.help = a.get("help")
@@ -220,6 +231,7 @@ class _DTLParser(HTMLParser):
             self._areas.append(
                 {"row": 0, "col": 1, "fldgap": 1, "explicit": True, "parent": None}
             )
+            self._panel_title = []  # capture the title text that follows
         elif tag == "selfld":
             ctx = self._areas[-1] if self._areas else None
             self._selfld = {
@@ -313,7 +325,9 @@ class _DTLParser(HTMLParser):
             self._in_dtafldd, self._dtafldd = False, None
 
     def handle_data(self, data):
-        if self._in_dtafldd and self._dtafldd is not None:
+        if self._panel_title is not None:
+            self._panel_title.append(data)
+        elif self._in_dtafldd and self._dtafldd is not None:
             self._dtafldd.append(data)
         elif self._cur_pdc is not None:
             self._cur_pdc["chars"].append(data)
@@ -323,11 +337,15 @@ class _DTLParser(HTMLParser):
             self._chars.append(data)
 
     def handle_endtag(self, tag):
+        if self._panel_title is not None:
+            self._finalize_panel_title()
         # A container closing flushes any open content child first (end tags are
         # omitted in DTL), while its context is still intact. The element's own
         # end tag is handled below via the normal `tag == self._tag` path.
         if self._tag is not None and tag != self._tag and tag != "dtafldd":
-            self._emit_current()
+            self._emit_current()  # flush at the current list depth, before any pop
+        if tag in ("ul", "ol") and self._lists:
+            self._lists.pop()
         if tag == "panel":
             self._areas.clear()  # drop the panel's implicit flow box
             return
@@ -413,7 +431,9 @@ class _DTLParser(HTMLParser):
         # element's own text is the prompt (a convenient shorthand).
         content = self._dtafldd if isinstance(self._dtafldd, str) else "".join(self._chars)
         a = self._attrs
-        if tag in _TEXT_TAGS:
+        if tag == "li":
+            self._emit_listitem(a, content)
+        elif tag in _TEXT_TAGS:
             self._emit_info(a, content)
         elif tag == "dtafld":
             self._emit_dtafld(a, content)
@@ -432,6 +452,8 @@ class _DTLParser(HTMLParser):
         # Self-closing form, e.g. <dtafld .../> or <info fill="-" width="37"/>
         self.handle_starttag(tag, attrs)
         if tag in _CONTENT_TAGS:
+            self.handle_endtag(tag)
+        elif tag in ("ul", "ol"):  # a self-closing list is empty; pop it
             self.handle_endtag(tag)
         elif tag == "dtafldd":  # empty prompt
             self.handle_endtag(tag)
@@ -496,6 +518,47 @@ class _DTLParser(HTMLParser):
                 f"<{tag}> col {col} outside panel width {self.screen.width}"
             )
         return row, col, ctx
+
+    # Unordered-list bullets by nesting depth (ISPF: o, then -, then --, …).
+    _BULLETS = ("o", "-", "--", "---")
+    _LIST_INDENT = 4   # columns added per nesting level
+
+    def _finalize_panel_title(self):
+        """Emit the panel's title text (centered on row 0) and start the flow
+        below it. Called when the first child tag follows the ``<panel>``."""
+        text = re.sub(r"\s+", " ", "".join(self._panel_title or [])).strip()
+        self._panel_title = None
+        if not text:
+            return
+        if self.screen.title is None:
+            self.screen.title = text
+        col = max(0, (self.screen.width - len(text)) // 2)
+        self.screen.add(Text(0, col, text, DisplayIntensity.NORMAL))
+        if self._areas and self._areas[-1]["row"] < 1:
+            self._areas[-1]["row"] = 1  # flow starts below the title
+
+    def _emit_listitem(self, a, content):
+        """Emit one <li>: a depth-based bullet plus the item text, flowed and
+        indented one level per enclosing <ul>/<ol>."""
+        text = re.sub(r"\s*\n\s*", " ", content).strip()
+        if not text:
+            return
+        ctx = self._areas[-1] if self._areas else None
+        row = ctx["row"] if ctx else 0
+        base = ctx["col"] if ctx else 1
+        depth = max(len(self._lists), 1)
+        bullet_col = base + (depth - 1) * self._LIST_INDENT
+        lst = self._lists[-1] if self._lists else None
+        if lst and lst["type"] == "ol":
+            lst["n"] += 1
+            bullet = f"{lst['n']}."
+        else:
+            bullet = self._BULLETS[min(depth - 1, len(self._BULLETS) - 1)]
+        self.screen.add(Text(row, bullet_col, bullet, DisplayIntensity.NORMAL))
+        self.screen.add(Text(row, bullet_col + self._LIST_INDENT, text,
+                             DisplayIntensity.NORMAL))
+        if ctx:
+            ctx["row"] = row + 1
 
     def _emit_info(self, a, content):
         if "fill" in a:

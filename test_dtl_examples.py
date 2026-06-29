@@ -33,8 +33,9 @@ EXAMPLE_FILES = sorted(glob.glob(os.path.join(_DIR, "*.dtl")))
 # Examples that currently render to a non-empty screen. Bump this as features
 # land so the corpus can only get *more* renderable, never less. 0 before
 # auto-flow; 18 once a panel became an implicit flow box (#51); 87 with implicit
-# end tags + text/list tags (<p>/<li>/<dt>/…) (#52).
-RENDER_BASELINE = 87
+# end tags + text/list tags (#52); 126 with panel-title text + nested-list
+# bullets/indentation.
+RENDER_BASELINE = 126
 
 
 def _load(path):

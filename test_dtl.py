@@ -434,12 +434,55 @@ def test_multiline_paragraph_collapses_to_one_line():
     assert s.items == [Text(0, 1, "line one line two", DisplayIntensity.NORMAL)]
 
 
-def test_list_items_flow_as_lines():
+def test_list_items_flow_with_bullets():
+    s = load_dtl('<panel name="p"><ul><li>apple<li>pear<li>plum</ul></panel>')
+    # Each <li> renders a bullet ("o" at level 1) + the item text, flowed.
+    assert s.items == [
+        Text(0, 1, "o", DisplayIntensity.NORMAL), Text(0, 5, "apple", DisplayIntensity.NORMAL),
+        Text(1, 1, "o", DisplayIntensity.NORMAL), Text(1, 5, "pear", DisplayIntensity.NORMAL),
+        Text(2, 1, "o", DisplayIntensity.NORMAL), Text(2, 5, "plum", DisplayIntensity.NORMAL),
+    ]
+
+
+def test_ordered_list_numbers_items():
+    s = load_dtl('<panel name="p"><ol><li>one<li>two</ol></panel>')
+    assert s.items == [
+        Text(0, 1, "1.", DisplayIntensity.NORMAL), Text(0, 5, "one", DisplayIntensity.NORMAL),
+        Text(1, 1, "2.", DisplayIntensity.NORMAL), Text(1, 5, "two", DisplayIntensity.NORMAL),
+    ]
+
+
+def test_panel_title_text_centered():
+    s = load_dtl('<panel name="p" width="20">My Title<info>body</info></panel>')
+    assert s.title == "My Title"
+    assert s.items[0] == Text(0, (20 - len("My Title")) // 2, "My Title", DisplayIntensity.NORMAL)
+    assert s.items[1] == Text(1, 1, "body", DisplayIntensity.NORMAL)   # flows below title
+
+
+def test_nested_unordered_lists_matches_guide_figure():
+    # IBM DTL Guide "Nested Unordered Lists" figure: a centered title, then o/-/--
+    # bullets by depth with increasing indentation. (Verbatim guide source.)
     s = load_dtl(
-        '<panel name="p"><ul><li>apple<li>pear<li>plum</ul></panel>'
+        '<!doctype dm system>\n'
+        '<panel name=ulists width=42>Nested Unordered Lists\n'
+        '<area>\n'
+        '<info width=40><ul><li>First level, first item<li>First level, second item'
+        '<ul><li>Second level, first item<li>Second level, second item'
+        '<ul><li>Third level, only item</ul></ul>'
+        '<li>Back to the first level</ul></info>\n'
+        '</area>\n'
+        '</panel>'
     )
-    assert [t.text for t in s.items] == ["apple", "pear", "plum"]
-    assert [t.row for t in s.items] == [0, 1, 2]
+    N = DisplayIntensity.NORMAL
+    assert s.items == [
+        Text(0, 10, "Nested Unordered Lists", N),
+        Text(1, 1, "o", N),  Text(1, 5, "First level, first item", N),
+        Text(2, 1, "o", N),  Text(2, 5, "First level, second item", N),
+        Text(3, 5, "-", N),  Text(3, 9, "Second level, first item", N),
+        Text(4, 5, "-", N),  Text(4, 9, "Second level, second item", N),
+        Text(5, 9, "--", N), Text(5, 13, "Third level, only item", N),
+        Text(6, 1, "o", N),  Text(6, 5, "Back to the first level", N),
+    ]
 
 
 def test_implicit_end_does_not_break_explicitly_closed_panels():
