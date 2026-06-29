@@ -125,8 +125,9 @@ like:
 
 Supported tags: `<panel>`, `<info>` (text/instructions, with `fill`+`width` rules),
 `<dtafld>` (prompt + input field), `<cmdarea>` (the ISPF "Option/Command ===>" line, bound to
-`ZCMD`), `<selfld>`/`<choice>` (menu lists), `<keyl>`/`<keyi>` (a keylist binding function keys
-to commands), and `<varclass>`/`<varlist>`/`<vardcl>` (typed variable declarations — a field
+`ZCMD`), `<selfld>`/`<choice>` (menu lists; each `<choice matchval>` registers a selectable
+value the server validates against), `<keyl>`/`<keyi>` (a keylist binding function keys to
+commands), and `<varclass>`/`<varlist>`/`<vardcl>` (typed variable declarations — a field
 inherits `numeric` from its variable's class). ISPF dialog variables are referenced `&`-style —
 `&ZUSER`, `&ZTIME` — and substituted at load time (e.g. the live user id and clock on the ISPF
 status line); `&&` is a literal ampersand and a trailing `.` terminates a reference. Unlike

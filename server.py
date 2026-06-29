@@ -414,8 +414,9 @@ def handle_client(client_socket, addr):
                 # X, or a keylist key (PF3/PF15) bound to EXIT — back to logon
                 break
 
-            valid_opts = {"0", "1", "2", "3", "4", "5", "6", "7", "9", "10", "11", "12", "13"}
-            if option in valid_opts:
+            # Validate against the menu's own declared <choice> values rather
+            # than a hard-coded list (the "X" exit choice is handled above).
+            if option in screen.selections:
                 short_msg = f"OPTION {option} NOT YET IMPLEMENTED"
             elif option:
                 short_msg = f"INVALID OPTION: {option}"
