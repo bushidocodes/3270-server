@@ -25,7 +25,10 @@ prolog (tolerated and ignored), tag and attribute names are case-insensitive
 
 Supported tags
 --------------
-``<panel name title>``           root container; ``title`` → ``Screen.title``
+``<panel name title help          root container. ``title`` → ``Screen.title``;
+   width depth>``                 ``help`` names a help panel; ``width``/``depth``
+                                 give the presentation-space size (default 80x24)
+                                 and bound element positions at load time.
 ``<area row col fldgap>``        a flow box: contained elements that omit ``row``
 ``<region row col fldgap>``      flow down from this origin (one line each), and
                                  those that omit ``col`` use it. A field that omits
@@ -171,6 +174,10 @@ class _DTLParser(HTMLParser):
         if tag == "panel":
             self.screen.title = a.get("title")
             self.screen.help = a.get("help")
+            if "width" in a:
+                self.screen.width = int(a["width"])
+            if "depth" in a:
+                self.screen.depth = int(a["depth"])
         elif tag == "selfld":
             self._selfld = {
                 "row": self._req_int(a, "row", tag),
@@ -310,6 +317,14 @@ class _DTLParser(HTMLParser):
             col = ctx["col"]
         else:
             raise DTLError(f"<{tag}> missing required attribute 'col'")
+        if not (0 <= row < self.screen.depth):
+            raise DTLError(
+                f"<{tag}> row {row} outside panel depth {self.screen.depth}"
+            )
+        if not (0 <= col < self.screen.width):
+            raise DTLError(
+                f"<{tag}> col {col} outside panel width {self.screen.width}"
+            )
         return row, col, ctx
 
     def _emit_info(self, a, content):
@@ -327,12 +342,18 @@ class _DTLParser(HTMLParser):
             fldcol = col + len(content) + ctx["fldgap"]  # entry flows after prompt
         else:
             fldcol = col
+        length = self._req_int(a, "entwidth", tag)
+        if fldcol + length > self.screen.width:
+            raise DTLError(
+                f"<{tag}> field at col {fldcol} width {length} overflows "
+                f"panel width {self.screen.width}"
+            )
         if content:
             self.screen.add(Text(row, col, content, _intensity(a)))
         field = Field(
             row=row,
             col=fldcol,
-            length=self._req_int(a, "entwidth", tag),
+            length=length,
             name=name,
             default=a.get("default", ""),
             numeric=self._resolve_numeric(a, name),

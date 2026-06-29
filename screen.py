@@ -117,6 +117,10 @@ class Screen:
     title: Optional[str] = None
     # Name of this panel's help panel (DTL <panel help="...">), or None.
     help: Optional[str] = None
+    # Presentation-space size (DTL <panel width=... depth=...>); a model-2 24x80
+    # screen by default. Used to bounds-check element positions at load time.
+    width: int = 80
+    depth: int = 24
     erase: bool = True
     reset_mdts: bool = True
     keyboard_restore: bool = True
