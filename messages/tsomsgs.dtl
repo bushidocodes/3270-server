@@ -6,4 +6,7 @@
 <msgmbr name="IKJ564">
   <msg msgid="IKJ56425I">PASSWORD NOT CORRECT FOR &USERID</msg>
   <msg msgid="IKJ56700I">USERID MUST BE SPECIFIED</msg>
+  <!-- Application-defined message referenced by the SIZE field's <checkl>.
+       &VALUE, &MIN, &MAX are supplied by the range check at display time. -->
+  <msg msgid="TSO001">SIZE &VALUE IS NOT IN THE RANGE &MIN TO &MAX</msg>
 </msgmbr>

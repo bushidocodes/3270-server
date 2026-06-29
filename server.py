@@ -416,6 +416,14 @@ def handle_client(client_socket, addr):
                 _show_help(client_socket, screen.help)
                 continue
 
+            # Validate fields against their <varclass> checks (e.g. SIZE range)
+            # before processing the logon, as ISPF validates panel fields.
+            verr = screen.first_validation_error(fields)
+            if verr:
+                msgid, subs = verr
+                error_msg = _messages().format(msgid, **subs)
+                continue
+
             userid_raw = fields.get(LOGON_USERID_ADDR, "").strip().upper()
             password_raw = fields.get(LOGON_PASSWORD_ADDR, "").strip().upper()
 

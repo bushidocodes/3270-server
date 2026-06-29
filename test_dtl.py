@@ -413,6 +413,78 @@ def test_vardcl_makes_field_numeric():
     assert s.items[1].numeric is True   # inherited from the varclass
 
 
+def _range_panel():
+    return load_dtl(
+        '<panel>'
+        '<varclass name="SZ" type="numeric">'
+        '  <checkl checkmsg="M001"><checki type="range">0 100</checki></checkl>'
+        '</varclass>'
+        '<varlist><vardcl name="sz" varclass="SZ"/></varlist>'
+        '<dtafld row="8" col="1" fldcol="16" datavar="sz" entwidth="5">Size</dtafld>'
+        '</panel>'
+    )
+
+
+def test_checkl_attaches_range_validation_to_field():
+    s = _range_panel()
+    assert s.items[1].numeric is True              # still numeric
+    assert "SZ" in s.validations
+    assert s.validations["SZ"]["checkmsg"] == "M001"
+    assert s.validations["SZ"]["checks"] == [{"type": "range", "min": 0, "max": 100}]
+
+
+def test_range_validation_passes_and_fails():
+    s = _range_panel()
+    addr = s.field_addr("sz")
+    assert s.first_validation_error({addr: "50"}) is None       # in range
+    assert s.first_validation_error({addr: ""}) is None         # empty skipped
+    msgid, subs = s.first_validation_error({addr: "999"})       # out of range
+    assert msgid == "M001"
+    assert subs == {"VALUE": "999", "MIN": 0, "MAX": 100}
+    msgid, _ = s.first_validation_error({addr: "abc"})          # not numeric
+    assert msgid == "M001"
+
+
+def test_values_check():
+    s = load_dtl(
+        '<panel>'
+        '<varclass name="YN" type="char">'
+        '  <checkl checkmsg="M2"><checki type="values">YES NO</checki></checkl>'
+        '</varclass>'
+        '<varlist><vardcl name="flag" varclass="YN"/></varlist>'
+        '<dtafld row="1" col="1" fldcol="10" datavar="flag" entwidth="3">F</dtafld>'
+        '</panel>'
+    )
+    addr = s.field_addr("flag")
+    assert s.first_validation_error({addr: "yes"}) is None       # case-insensitive
+    assert s.first_validation_error({addr: "maybe"})[0] == "M2"
+
+
+def test_checkl_outside_varclass_raises():
+    with pytest.raises(DTLError):
+        load_dtl('<panel><checkl><checki type="range">0 1</checki></checkl></panel>')
+
+
+def test_checki_bad_type_raises():
+    with pytest.raises(DTLError):
+        load_dtl(
+            '<panel><varclass name="C"><checkl>'
+            '<checki type="bogus">x</checki></checkl></varclass></panel>'
+        )
+
+
+def test_logon_size_validation_and_byte_identity():
+    s = load_panel("logon")
+    assert "SIZE" in s.validations
+    assert s.validations["SIZE"]["checks"][0]["max"] == 32768
+    # The validation/check tags are metadata — logon still renders identically.
+    assert s.render() == build_tso_logon().render()
+    # And the referenced message formats with the range substitutions.
+    cat = load_message_member("tsomsgs")
+    assert cat.format("TSO001", VALUE="99999", MIN=0, MAX=32768) == \
+        "TSO001 SIZE 99999 IS NOT IN THE RANGE 0 TO 32768"
+
+
 def test_char_varclass_leaves_field_alphanumeric():
     s = load_dtl(
         '<panel>'
