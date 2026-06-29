@@ -2,6 +2,14 @@
      Renders byte-for-byte identically to screens.build_tso_logon().
      The transient error message (row 19) is injected at runtime, not here. -->
 <panel name="tsologon" title="z/OS V2R5.0 TSO/E LOGON">
+  <!-- Typed variables: SIZE and PERFORM are numeric. Declaring them via a
+       <varclass> lets their <dtafld>s omit numeric="yes" and inherit the type. -->
+  <varclass name="NUMFLD" type="numeric"/>
+  <varlist>
+    <vardcl name="size"    varclass="NUMFLD"/>
+    <vardcl name="perform" varclass="NUMFLD"/>
+  </varlist>
+
   <info row="0" col="18" intensity="high">--------  z/OS V2R5.0 TSO/E LOGON  --------</info>
 
   <info row="2" col="1">Enter LOGON parameters below:</info>
@@ -13,8 +21,8 @@
   <dtafld row="6" col="1" fldcol="16" datavar="password" entwidth="8" hidden="yes">Password ===></dtafld>
   <dtafld row="7" col="1" fldcol="16" datavar="procedure" entwidth="8" default="IKJACCNT">Procedure===></dtafld>
   <dtafld row="7" col="42" fldcol="60" datavar="acct" entwidth="8">Acct Nmbr    ===></dtafld>
-  <dtafld row="8" col="1" fldcol="16" datavar="size" entwidth="5" numeric="yes" default="00150">Size     ===></dtafld>
-  <dtafld row="8" col="42" fldcol="60" datavar="perform" entwidth="8" numeric="yes">Perform      ===></dtafld>
+  <dtafld row="8" col="1" fldcol="16" datavar="size" entwidth="5" default="00150">Size     ===></dtafld>
+  <dtafld row="8" col="42" fldcol="60" datavar="perform" entwidth="8">Perform      ===></dtafld>
   <dtafld row="9" col="1" fldcol="16" datavar="command" entwidth="62">Command  ===></dtafld>
   <dtafld row="11" col="1" fldcol="19" datavar="dsname" entwidth="59">PDS/E Dsname ===></dtafld>
 

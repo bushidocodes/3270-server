@@ -192,6 +192,51 @@ def test_keyi_key_and_cmd_uppercased_and_resolved():
     assert s.command_for("PF7") is None     # unbound
 
 
+# ── typed variables (<varclass>/<varlist>/<vardcl>) ──────────────────────────
+
+def test_vardcl_makes_field_numeric():
+    s = load_dtl(
+        '<panel>'
+        '<varclass name="NUMFLD" type="numeric"/>'
+        '<varlist><vardcl name="size" varclass="NUMFLD"/></varlist>'
+        '<dtafld row="8" col="1" fldcol="16" datavar="size" entwidth="5">Size</dtafld>'
+        '</panel>'
+    )
+    assert s.items[1].numeric is True   # inherited from the varclass
+
+
+def test_char_varclass_leaves_field_alphanumeric():
+    s = load_dtl(
+        '<panel>'
+        '<varclass name="C" type="char"/>'
+        '<varlist><vardcl name="x" varclass="C"/></varlist>'
+        '<dtafld row="1" col="1" fldcol="5" datavar="x" entwidth="4">X</dtafld>'
+        '</panel>'
+    )
+    assert s.items[1].numeric is False
+
+
+def test_explicit_numeric_attr_overrides_varclass():
+    s = load_dtl(
+        '<panel>'
+        '<varclass name="C" type="char"/>'
+        '<varlist><vardcl name="x" varclass="C"/></varlist>'
+        '<dtafld row="1" col="1" fldcol="5" datavar="x" entwidth="4" numeric="yes">X</dtafld>'
+        '</panel>'
+    )
+    assert s.items[1].numeric is True   # field attribute wins over the class
+
+
+def test_vardcl_outside_varlist_raises():
+    with pytest.raises(DTLError):
+        load_dtl('<panel><vardcl name="x" varclass="C"/></panel>')
+
+
+def test_varclass_missing_name_raises():
+    with pytest.raises(DTLError):
+        load_dtl('<panel><varclass type="numeric"/></panel>')
+
+
 # ── command area (<cmdarea>) ─────────────────────────────────────────────────
 
 def test_cmdarea_renders_like_dtafld_and_records_command_field():
