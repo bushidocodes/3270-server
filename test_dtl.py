@@ -420,6 +420,33 @@ def test_help_attribute_does_not_change_rendered_bytes():
     assert load_panel("logon").render() == build_tso_logon().render()
 
 
+# ── implicit end tags + text tags (<p>/<li>/<dt>/…) ──────────────────────────
+
+def test_paragraphs_flow_without_end_tags():
+    # DTL omits end tags; each <p> closes the previous one and flows on its line.
+    s = load_dtl('<panel name="p"><p>First para.<p>Second para.</panel>')
+    assert s.items[0] == Text(0, 1, "First para.", DisplayIntensity.NORMAL)
+    assert s.items[1] == Text(1, 1, "Second para.", DisplayIntensity.NORMAL)
+
+
+def test_multiline_paragraph_collapses_to_one_line():
+    s = load_dtl('<panel name="p"><info><p>line one\n   line two</info></panel>')
+    assert s.items == [Text(0, 1, "line one line two", DisplayIntensity.NORMAL)]
+
+
+def test_list_items_flow_as_lines():
+    s = load_dtl(
+        '<panel name="p"><ul><li>apple<li>pear<li>plum</ul></panel>'
+    )
+    assert [t.text for t in s.items] == ["apple", "pear", "plum"]
+    assert [t.row for t in s.items] == [0, 1, 2]
+
+
+def test_implicit_end_does_not_break_explicitly_closed_panels():
+    # Bundled-panel style (explicit </info>) is unaffected by implicit-end logic.
+    assert load_panel("logon").render() == build_tso_logon().render()
+
+
 # ── auto-flow: a panel is an implicit flow box (no row/col needed) ───────────
 
 def test_panel_autoflows_unpositioned_elements():

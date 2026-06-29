@@ -39,6 +39,11 @@ Supported tags
                                  ``fill`` + ``width`` repeats a character (rules).
 ``<topinst row col>``            top instruction / panel instruction text. Render
 ``<paninst row col>``            like ``<info>`` (protected text); semantic DTL tags.
+``<p>`` ``<li>`` ``<dt>`` ``<dd>``  flowed text: paragraphs and list items each
+``<pt>`` ``<pd>`` ``<lines>``    render as a protected line (their list containers
+                                 ``<ul>``/``<ol>``/``<dl>``/``<parml>`` are transparent).
+                                 DTL omits end tags, so a block element is closed
+                                 by whatever block tag follows it.
 ``<dtafld row col fldcol         a prompt plus an unprotected input field at
    datavar entwidth ...>``       ``fldcol``. The prompt is the text of a nested
                                  ``<dtafldd>`` child (authentic DTL) or, as a
@@ -130,10 +135,13 @@ _INTENSITY = {
     "highlighted": DisplayIntensity.HIGHLIGHTED,
 }
 
-_CONTENT_TAGS = ("info", "topinst", "paninst", "dtafld", "cmdarea", "choice")
+# Block tags whose text flows as protected lines (like <info>): paragraphs,
+# list items (<li>/<dt>/<dd>/<pt>/<pd>/<lp>), and preformatted <lines>. Their
+# list containers (<ul>/<ol>/<dl>/<parml>/<sl>) are transparent — ignored.
+_FLOW_TEXT_TAGS = ("p", "li", "dt", "dd", "pt", "pd", "lp", "lines")
+_TEXT_TAGS = ("info", "topinst", "paninst") + _FLOW_TEXT_TAGS
+_CONTENT_TAGS = _TEXT_TAGS + ("dtafld", "cmdarea", "choice")
 _FIELD_TAGS = ("dtafld", "cmdarea")
-# Tags that render as protected instruction/label text (like <info>).
-_TEXT_TAGS = ("info", "topinst", "paninst")
 
 
 def _truthy(value, default=False):
@@ -194,6 +202,11 @@ class _DTLParser(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         a = {k: v for k, v in attrs}
+        # Implicit end tags: a new block element closes the open content element
+        # (DTL omits most end tags). <dtafldd> is the exception — it's a child
+        # that supplies its parent <dtafld>'s prompt, so it must not close it.
+        if tag != "dtafldd" and self._tag is not None:
+            self._emit_current()
         if tag == "panel":
             self.screen.title = a.get("title")
             self.screen.help = a.get("help")
@@ -310,6 +323,11 @@ class _DTLParser(HTMLParser):
             self._chars.append(data)
 
     def handle_endtag(self, tag):
+        # A container closing flushes any open content child first (end tags are
+        # omitted in DTL), while its context is still intact. The element's own
+        # end tag is handled below via the normal `tag == self._tag` path.
+        if self._tag is not None and tag != self._tag and tag != "dtafldd":
+            self._emit_current()
         if tag == "panel":
             self._areas.clear()  # drop the panel's implicit flow box
             return
@@ -380,6 +398,17 @@ class _DTLParser(HTMLParser):
             return
         if tag != self._tag:
             return
+        self._emit_current()
+
+    def _emit_current(self):
+        """Emit the open content element (``self._tag``) and reset capture state.
+
+        Called both on an explicit end tag and implicitly when the next block
+        tag starts — DTL omits most end tags, so an element is closed by what
+        follows it."""
+        tag = self._tag
+        if tag is None:
+            return
         # A <dtafldd> child, if present, supplies the prompt; otherwise the
         # element's own text is the prompt (a convenient shorthand).
         content = self._dtafldd if isinstance(self._dtafldd, str) else "".join(self._chars)
@@ -396,7 +425,8 @@ class _DTLParser(HTMLParser):
             self.messages[a["msgid"].upper()] = content.strip()
         elif tag == "checki":
             self._emit_checki(a, content)
-        self._tag, self._attrs, self._chars, self._dtafldd = None, None, [], None
+        self._tag, self._attrs, self._chars = None, None, []
+        self._dtafldd, self._in_dtafldd = None, False
 
     def handle_startendtag(self, tag, attrs):
         # Self-closing form, e.g. <dtafld .../> or <info fill="-" width="37"/>
@@ -470,8 +500,16 @@ class _DTLParser(HTMLParser):
     def _emit_info(self, a, content):
         if "fill" in a:
             content = a["fill"] * int(a.get("width", 0))
+        elif "\n" in content:
+            # Multi-line flowed text (paragraphs wrap in real DTL): collapse the
+            # line breaks and surrounding whitespace to single spaces so it
+            # renders on one line. Single-line content is left byte-for-byte
+            # untouched, so the bundled panels' exact spacing is preserved.
+            content = re.sub(r"\s*\n\s*", " ", content).strip()
+            if not content:
+                return
         elif not content.strip():
-            return  # empty text element: render nothing, don't consume a flow line
+            return  # empty text element: render nothing, don't consume a line
         row, col, _ = self._resolve_pos(a, "info")
         self.screen.add(Text(row, col, content, _intensity(a)))
 

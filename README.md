@@ -167,10 +167,11 @@ keys to commands the way ISPF does, e.g. PF3 → `EXIT`, instead of hard-coding 
 `tests/dtl_examples/` holds the `<panel>` examples extracted verbatim from IBM's
 [z/OS 2.4 ISPF DTL Guide](https://www.ibm.com/docs/en/SSLTBW_2.4.0/pdf/f54dt00_v2r4.pdf), and
 `test_dtl_examples.py` renders each through our parser. It's a yardstick for how close the subset
-is to the real reference: a panel is now an implicit **flow box** (elements that omit `row`/`col`
-flow down from the top), which took the renderable count from **0 to 18**; the rest still need a
-larger tag set (text/list tags, list fields, …) tracked in the repo's issues. The test ratchets a
-non-regressing renderable count as features land.
+is to the real reference. A panel is an implicit **flow box** (elements that omit `row`/`col` flow
+down from the top), the parser honours DTL's **omitted end tags**, and text/list tags
+(`<p>`/`<li>`/`<dt>`/…) flow as protected lines — together taking the renderable count from **0 to
+87** of 145. The rest still need more tags (list fields, action processing) tracked in the repo's
+issues, and the test ratchets a non-regressing renderable count as features land.
 
 ## Extending
 
