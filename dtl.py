@@ -170,6 +170,7 @@ class _DTLParser(HTMLParser):
         a = {k: v for k, v in attrs}
         if tag == "panel":
             self.screen.title = a.get("title")
+            self.screen.help = a.get("help")
         elif tag == "selfld":
             self._selfld = {
                 "row": self._req_int(a, "row", tag),

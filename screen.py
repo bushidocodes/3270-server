@@ -115,6 +115,8 @@ class Screen:
 
     items: List[object] = _dc_field(default_factory=list)
     title: Optional[str] = None
+    # Name of this panel's help panel (DTL <panel help="...">), or None.
+    help: Optional[str] = None
     erase: bool = True
     reset_mdts: bool = True
     keyboard_restore: bool = True

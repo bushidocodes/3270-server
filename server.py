@@ -171,6 +171,26 @@ def send_ispf_menu(client_socket, userid: str, short_msg: str = None):
     return screen
 
 
+def _show_help(client_socket, help_name: str):
+    """Display a help panel and wait for the user to leave it (PF3/PF15/Enter).
+
+    Mirrors ISPF's PF1 HELP behaviour: the help panel is overlaid, and the user
+    returns to the underlying panel (re-sent by the caller's loop) on exit.
+    """
+    from dtl import load_panel
+
+    while True:
+        screen = load_panel(help_name)
+        _send_screen(client_socket, screen)
+        result = read_client_input(client_socket)
+        if result is None:
+            return
+        aid, _ = result
+        aid_str = aid_to_string(aid)
+        if aid_str == "Enter" or screen.command_for(aid_str) in _LEAVE_COMMANDS:
+            return
+
+
 def aid_to_string(aid: int):
     aid_codes = {
         0x60: "No AID",
@@ -388,9 +408,13 @@ def handle_client(client_socket, addr):
             print(f"AID={hex(aid)}, fields={redact_fields(fields)}")
 
             aid_str = aid_to_string(aid)
-            if screen.command_for(aid_str) in _LEAVE_COMMANDS:
+            cmd = screen.command_for(aid_str)
+            if cmd in _LEAVE_COMMANDS:
                 # Keylist bound this key (PF3/PF15) to EXIT — log off.
                 return
+            if cmd == "HELP" and screen.help:
+                _show_help(client_socket, screen.help)
+                continue
 
             userid_raw = fields.get(LOGON_USERID_ADDR, "").strip().upper()
             password_raw = fields.get(LOGON_PASSWORD_ADDR, "").strip().upper()
@@ -421,9 +445,13 @@ def handle_client(client_socket, addr):
             # field), resolved by role rather than a hard-coded address.
             option = (screen.command_value(fields) or "").strip().upper()
 
-            if option == "X" or screen.command_for(aid_str) in _LEAVE_COMMANDS:
+            cmd = screen.command_for(aid_str)
+            if option == "X" or cmd in _LEAVE_COMMANDS:
                 # X, or a keylist key (PF3/PF15) bound to EXIT — back to logon
                 break
+            if cmd == "HELP" and screen.help:
+                _show_help(client_socket, screen.help)
+                continue
 
             # Validate against the menu's own declared <choice> values rather
             # than a hard-coded list (the "X" exit choice is handled above).

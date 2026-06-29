@@ -25,7 +25,7 @@ The server follows z/OS RACF conventions: userids and passwords are case-insensi
 
 ### ISPF Primary Option Menu
 
-After a successful login you land on the ISPF Primary Option Menu. The keyboard is unlocked — you can type option numbers and press Enter. Entering `X` or pressing PF3 logs you off and returns to the TSO/E logon panel.
+After a successful login you land on the ISPF Primary Option Menu. The keyboard is unlocked — you can type option numbers and press Enter. Entering `X` or pressing PF3 logs you off and returns to the TSO/E logon panel. Pressing **PF1** on either panel shows a help screen (PF3 returns).
 
 ![ISPF Primary Option Menu](docs/screenshots/ispf_menu.png)
 
@@ -95,6 +95,8 @@ dtl.py          — Dialog Tag Language parser: load_panel() → Screen, load_me
 panels/         — the screens authored declaratively
   logon.dtl       z/OS TSO/E LOGON panel
   ispf.dtl        ISPF Primary Option Menu
+  tsohelp.dtl     PF1 help for the logon panel
+  ispfhelp.dtl    PF1 help for the ISPF menu
 messages/       — message members, kept apart from panels as on z/OS (ISPMLIB vs ISPPLIB)
   tsomsgs.dtl     TSO/E logon messages (IKJ56425I, IKJ56700I)
 ```

@@ -219,6 +219,30 @@ def test_msg_missing_msgid_raises():
         load_dtl('<msgmbr><msg>hi</msg></msgmbr>')
 
 
+# ── help panels (<panel help=...>) ───────────────────────────────────────────
+
+def test_panel_help_attribute_parsed():
+    s = load_dtl('<panel name="p" help="phelp"><info row="0" col="0">x</info></panel>')
+    assert s.help == "phelp"
+    assert load_dtl('<panel name="p"></panel>').help is None
+
+
+def test_main_panels_reference_their_help_panels():
+    assert load_panel("logon").help == "tsohelp"
+    assert load_panel("ispf", ZUSER="IBMUSER ", ZTIME="13:45").help == "ispfhelp"
+
+
+def test_help_panels_load_and_return_on_pf3():
+    for name in ("tsohelp", "ispfhelp"):
+        s = load_panel(name)
+        assert s.command_for("PF3") == "EXIT"   # PF3 returns from help
+
+
+def test_help_attribute_does_not_change_rendered_bytes():
+    # Adding help="..." to <panel> is metadata; the logon panel still matches.
+    assert load_panel("logon").render() == build_tso_logon().render()
+
+
 # ── flow layout (<area>/<region>) ────────────────────────────────────────────
 
 def test_area_flows_rows_and_derives_fldcol():

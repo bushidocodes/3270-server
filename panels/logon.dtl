@@ -2,7 +2,7 @@
 <!-- z/OS V2R5.0 TSO/E LOGON panel, in Dialog Tag Language (DTL subset).
      Renders byte-for-byte identically to screens.build_tso_logon().
      The transient error message (row 19) is injected at runtime, not here. -->
-<panel name="tsologon" title="z/OS V2R5.0 TSO/E LOGON">
+<panel name="tsologon" title="z/OS V2R5.0 TSO/E LOGON" help="tsohelp">
   <!-- Typed variables: SIZE and PERFORM are numeric. Declaring them via a
        <varclass> lets their <dtafld>s omit numeric="yes" and inherit the type. -->
   <varclass name="NUMFLD" type="numeric"/>

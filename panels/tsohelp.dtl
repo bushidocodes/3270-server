@@ -1,0 +1,25 @@
+<!DOCTYPE DM SYSTEM>
+<!-- Help panel for the TSO/E LOGON panel. Shown when the user presses PF1
+     (the logon keylist binds PF1 to HELP). PF3 returns to the logon panel. -->
+<panel name="tsohelp" title="TSO/E LOGON - HELP">
+  <info row="0" col="0" intensity="high">------------------------- TSO/E LOGON  -  HELP --------------------------------</info>
+
+  <info row="2" col="1">The TSO/E LOGON panel signs you on to TSO under the z/OS system.</info>
+
+  <info row="4" col="1" intensity="high">Fields:</info>
+  <info row="5" col="3">Userid    Your RACF user identifier (1-8 characters).</info>
+  <info row="6" col="3">Password  Your RACF password. It is not displayed as you type.</info>
+  <info row="7" col="3">Procedure The logon procedure to invoke (default IKJACCNT).</info>
+  <info row="8" col="3">Size      Region size in kilobytes (numeric).</info>
+  <info row="9" col="3">Command   An optional command to run immediately at logon.</info>
+
+  <info row="11" col="1">Type your userid and password, then press ENTER to log on.</info>
+  <info row="13" col="1" intensity="highlighted">Demo users: IBMUSER / SYS1   and   TESTUSER / RACF.</info>
+
+  <info row="22" col="1">PF3=Return</info>
+
+  <keyl name="HELPKEYS">
+    <keyi key="PF3"  cmd="EXIT">Return</keyi>
+    <keyi key="PF15" cmd="EXIT">Return</keyi>
+  </keyl>
+</panel>
