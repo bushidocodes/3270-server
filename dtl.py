@@ -579,10 +579,13 @@ class _DTLParser(HTMLParser):
 
     def _emit_action_bar(self, ab):
         """Lay the action-bar choice labels out across the bar's row (high
-        intensity) and record the choices + their pull-downs on the Screen."""
+        intensity) and record the choices + their pull-downs on the Screen. Each
+        choice keeps its ``row``/``col`` so the server can map a cursor onto it
+        for point-and-shoot."""
         col = ab["col"]
         for choice in ab["choices"]:
             label = choice["label"]
+            choice["row"], choice["col"] = ab["row"], col
             self.screen.add(Text(ab["row"], col, label, DisplayIntensity.HIGH))
             col += len(label) + ab["gap"]
         self.screen.action_bar = ab["choices"]

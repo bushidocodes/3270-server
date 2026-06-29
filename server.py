@@ -184,10 +184,43 @@ def _show_overlay(client_socket, panel_name: str):
         result = read_client_input(client_socket)
         if result is None:
             return
-        aid, _ = result
+        aid, fields, cursor = result
         aid_str = aid_to_string(aid)
-        if aid_str == "Enter" or screen.command_for(aid_str) in _LEAVE_COMMANDS:
+        if screen.command_for(aid_str) in _LEAVE_COMMANDS:
             return
+        if aid_str == "Enter":
+            # Point-and-shoot: Enter with the cursor on an action-bar choice
+            # opens that choice's pull-down; otherwise Enter closes the overlay.
+            choice = screen.action_choice_at(cursor)
+            if choice and choice.get("pdc"):
+                if _show_pulldown(client_socket, screen, choice) is None:
+                    return
+                continue
+            return
+
+
+def _show_pulldown(client_socket, screen, choice):
+    """Overlay a choice's pull-down menu on the panel and wait for a keypress.
+
+    Returns the result of the keypress (truthy) or ``None`` if the client
+    disconnected. Any key closes the pull-down, returning to the panel.
+    """
+    from screen import Text
+
+    texts = [f"{n}. {pdc['label']}" for n, pdc in enumerate(choice["pdc"], 1)]
+    inner = max(len(t) for t in texts) + 2
+    top = choice["row"] + 1
+    col = choice["col"]
+    border = "+" + "-" * inner + "+"
+    screen.add(Text(top, col, border, DisplayIntensity.HIGH))
+    for n, t in enumerate(texts):
+        screen.add(Text(top + 1 + n, col, "|" + (" " + t).ljust(inner) + "|",
+                        DisplayIntensity.HIGH))
+    screen.add(Text(top + 1 + len(texts), col, border, DisplayIntensity.HIGH))
+    # Park the cursor in the pull-down.
+    screen.sound_alarm = False
+    _send_screen(client_socket, screen)
+    return read_client_input(client_socket)
 
 
 def aid_to_string(aid: int):
@@ -253,6 +286,14 @@ def read_client_input(client_socket):
 
     SBA_ORD = 0x11
     SF_ORD = 0x1D
+    # After the AID a normal (non short-read) reply carries the 12-bit cursor
+    # address in the next two bytes, before the first SBA. Decode it for
+    # point-and-shoot; it is absent for short reads (CLEAR/PA) and synthetic
+    # test payloads, where byte 1 is an SBA/SF order instead.
+    cursor = None
+    if len(buffer) >= 3 and buffer[1] not in (SBA_ORD, SF_ORD):
+        cursor = ((buffer[1] & 0x3F) << 6) | (buffer[2] & 0x3F)
+
     results = {}
     i = 1
     while i < len(buffer):
@@ -270,7 +311,7 @@ def read_client_input(client_socket):
         else:
             i += 1
 
-    return aid, results
+    return aid, results, cursor
 
 
 def tn3270_negotiate(client_socket):
@@ -403,7 +444,7 @@ def handle_client(client_socket, addr):
             result = read_client_input(client_socket)
             if result is None:
                 return
-            aid, fields = result
+            aid, fields, _ = result
             print(f"AID={hex(aid)}, fields={redact_fields(fields)}")
 
             aid_str = aid_to_string(aid)
@@ -444,7 +485,7 @@ def handle_client(client_socket, addr):
             result = read_client_input(client_socket)
             if result is None:
                 return
-            aid, fields = result
+            aid, fields, _ = result
             print(f"AID={hex(aid)}, fields={redact_fields(fields)}")
 
             aid_str = aid_to_string(aid)

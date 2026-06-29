@@ -223,17 +223,31 @@ def test_aid_unknown_returns_hex_name():
 # ── read_client_input: field-parsing ──────────────────────────────────────────
 
 def test_parse_aid_only_returns_empty_fields():
-    """Just an AID byte with no SBA data → empty field dict."""
-    aid, fields = read_client_input(_sock(bytes([AID_ENTER])))
+    """Just an AID byte with no SBA data → empty field dict, no cursor."""
+    aid, fields, cursor = read_client_input(_sock(bytes([AID_ENTER])))
     assert aid == AID_ENTER
     assert fields == {}
+    assert cursor is None
+
+
+def test_parse_cursor_address():
+    """AID + 12-bit cursor address + a field → the cursor is decoded."""
+    cur = 0 * 80 + 9            # action-bar choice position
+    addr = 5 * 80 + 17
+    payload = (
+        bytes([AID_ENTER]) + encode_pack_addr(0, 9)   # cursor (no SBA prefix)
+        + _sba_bytes(addr) + "IBMUSER".encode("cp037")
+    )
+    aid, fields, cursor = read_client_input(_sock(payload))
+    assert cursor == cur
+    assert fields == {addr: "IBMUSER"}
 
 
 def test_parse_single_field():
     """AID + SBA + encoded addr + EBCDIC text → correct (aid, {addr: text})."""
     addr = 5 * 80 + 17  # row 5, col 17
     payload = bytes([AID_ENTER]) + _sba_bytes(addr) + "IBMUSER".encode("cp037")
-    aid, fields = read_client_input(_sock(payload))
+    aid, fields, _ = read_client_input(_sock(payload))
     assert aid == AID_ENTER
     assert fields == {addr: "IBMUSER"}
 
@@ -247,7 +261,7 @@ def test_parse_multiple_fields():
         + _sba_bytes(addr1) + "IBMUSER".encode("cp037")
         + _sba_bytes(addr2) + "SYS1".encode("cp037")
     )
-    _, fields = read_client_input(_sock(payload))
+    _, fields, _ = read_client_input(_sock(payload))
     assert fields[addr1] == "IBMUSER"
     assert fields[addr2] == "SYS1"
 
@@ -256,7 +270,7 @@ def test_parse_whitespace_only_field_excluded():
     """A field containing only spaces is stripped and omitted from the result."""
     addr = 5 * 80 + 17
     payload = bytes([AID_ENTER]) + _sba_bytes(addr) + "        ".encode("cp037")
-    _, fields = read_client_input(_sock(payload))
+    _, fields, _ = read_client_input(_sock(payload))
     assert fields == {}
 
 
@@ -265,7 +279,7 @@ def test_parse_truncated_sba_at_buffer_end_skipped():
     payload = bytes([AID_ENTER, SBA])  # SBA has no addr bytes
     result = read_client_input(_sock(payload))
     assert result is not None
-    _, fields = result
+    _, fields, _ = result
     assert fields == {}
 
 
@@ -279,5 +293,5 @@ def test_parse_field_terminated_by_sf_ordinal():
         + "HELLO".encode("cp037")
         + bytes([SF, 0x20])  # SF terminates the field
     )
-    _, fields = read_client_input(_sock(payload))
+    _, fields, _ = read_client_input(_sock(payload))
     assert fields[addr] == "HELLO"
