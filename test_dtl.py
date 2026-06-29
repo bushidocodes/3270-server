@@ -219,6 +219,43 @@ def test_msg_missing_msgid_raises():
         load_dtl('<msgmbr><msg>hi</msg></msgmbr>')
 
 
+# ── panel dimensions + bounds checking (<panel width depth>) ─────────────────
+
+def test_panel_dimensions_default_and_explicit():
+    assert load_dtl('<panel></panel>').width == 80
+    assert load_dtl('<panel></panel>').depth == 24
+    s = load_dtl('<panel width="132" depth="43"></panel>')
+    assert (s.width, s.depth) == (132, 43)
+
+
+def test_row_beyond_depth_raises():
+    with pytest.raises(DTLError):
+        load_dtl('<panel><info row="24" col="0">off-screen</info></panel>')
+
+
+def test_col_beyond_width_raises():
+    with pytest.raises(DTLError):
+        load_dtl('<panel><info row="0" col="80">off-screen</info></panel>')
+
+
+def test_position_valid_within_declared_size():
+    # row 30 is illegal on a 24-deep panel but fine when depth is declared 43.
+    s = load_dtl('<panel depth="43"><info row="30" col="0">ok</info></panel>')
+    assert s.items[0].row == 30
+
+
+def test_field_overflowing_width_raises():
+    with pytest.raises(DTLError):
+        load_dtl(
+            '<panel><dtafld row="0" col="0" fldcol="70" datavar="x" entwidth="20">'
+            'P</dtafld></panel>'
+        )
+
+
+def test_panel_dimensions_do_not_change_bytes():
+    assert load_panel("logon").render() == build_tso_logon().render()
+
+
 # ── help panels (<panel help=...>) ───────────────────────────────────────────
 
 def test_panel_help_attribute_parsed():
