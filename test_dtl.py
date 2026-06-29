@@ -296,6 +296,18 @@ def test_action_choice_at_maps_cursor_to_choice():
     assert s.action_choice_at(None) is None
 
 
+def test_cursor_at_emits_ic_order():
+    from server import SBA, IC, IAC, EOR, encode_pack_addr
+    s = Screen(items=[Text(0, 0, "x")])
+    base = s.render()
+    s.cursor_at = (0, 5)
+    out = s.render()
+    assert out != base                       # adds the cursor placement
+    assert out.endswith(
+        bytes([SBA]) + encode_pack_addr(0, 5) + bytes([IC, IAC, EOR])
+    )
+
+
 def test_abc_outside_ab_raises():
     with pytest.raises(DTLError):
         load_dtl('<panel><abc>Menu</abc></panel>')

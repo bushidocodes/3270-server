@@ -167,6 +167,10 @@ class Screen:
     # choice labels are also emitted as Text items; the pull-down structure is
     # kept here for future point-and-shoot interaction.
     action_bar: List[dict] = _dc_field(default_factory=list)
+    # Optional (row, col) where the cursor should be placed (an extra IC order),
+    # e.g. to land it on an action-bar choice for F10/F11 keyboard navigation.
+    # None leaves cursor placement to the items' own IC (or the default).
+    cursor_at: Optional[Tuple[int, int]] = None
 
     def add(self, item) -> "Screen":
         self.items.append(item)
@@ -269,6 +273,9 @@ class Screen:
         )
         for item in self.items:
             item.render(buf)
+        if self.cursor_at is not None:
+            _emit_sba(buf, self.cursor_at[0], self.cursor_at[1])
+            buf.append(IC)
         buf.extend([IAC, EOR])
         return bytes(buf)
 
