@@ -461,12 +461,19 @@ def handle_client(client_socket, addr):
                 _show_help(client_socket, screen.help)
                 continue
 
-            # Validate against the menu's own declared <choice> values rather
-            # than a hard-coded list (the "X" exit choice is handled above).
+            # A typed value is a menu selection, a command from the panel's
+            # <cmdtbl>, or invalid. (The "X" exit choice is handled above.)
             if option in screen.selections:
                 short_msg = f"OPTION {option} NOT YET IMPLEMENTED"
             elif option:
-                short_msg = f"INVALID OPTION: {option}"
+                action = screen.lookup_command(option)
+                if action and action.lower().startswith("alias ") \
+                        and action.split()[1].upper() in _LEAVE_COMMANDS:
+                    break  # e.g. BYE -> "alias exit" leaves ISPF
+                elif action:
+                    short_msg = f"COMMAND {option} NOT YET IMPLEMENTED"
+                else:
+                    short_msg = f"INVALID OPTION: {option}"
             else:
                 short_msg = None
 

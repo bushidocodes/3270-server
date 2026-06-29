@@ -60,6 +60,10 @@ Supported tags
                                  the panel (rendered as nothing; pure metadata).
 ``<keyi key cmd>desc``           one key binding: function key ``key`` (e.g.
                                  ``PF3``) invokes command ``cmd`` (e.g. ``EXIT``).
+``<cmdtbl applid>``              an application command table (metadata).
+``<cmd name trunc>desc``         a command; ``trunc`` is the min chars to type.
+``<cmdact action>``              the command's action (e.g. ``alias exit``,
+                                 ``passthru``). Recorded in ``Screen.commands``.
 ``<varclass name type>``         a variable class: ``type="numeric"`` makes its
                                  variables numeric-only. May contain a ``<checkl>``.
 ``<checkl checkmsg>``            a validity-check list; ``checkmsg`` names the
@@ -177,6 +181,8 @@ class _DTLParser(HTMLParser):
         self._in_msgmbr = False   # inside a <msgmbr>?
         self.messages = {}        # <msg> msgid (upper) → message text
         self._areas = []          # stack of <area>/<region> flow contexts
+        self._in_cmdtbl = False   # inside a <cmdtbl>?
+        self._cur_cmd = None      # current <cmd> dict awaiting its <cmdact>
 
     # ── SGML event handling ──────────────────────────────────────────────────
 
@@ -206,6 +212,20 @@ class _DTLParser(HTMLParser):
             self._keylist = {}
         elif tag == "keyi":
             self._emit_keyi(a)
+        elif tag == "cmdtbl":
+            self._in_cmdtbl = True
+        elif tag == "cmd":
+            if not self._in_cmdtbl:
+                raise DTLError("<cmd> outside of a <cmdtbl>")
+            name = a.get("name")
+            if not name:
+                raise DTLError("<cmd> missing required attribute 'name'")
+            self._cur_cmd = {"action": "", "trunc": int(a.get("trunc", 0))}
+            self.screen.commands[name.upper()] = self._cur_cmd
+        elif tag == "cmdact":
+            # The command action; read on start, since DTL often omits </cmdact>.
+            if self._cur_cmd is not None:
+                self._cur_cmd["action"] = a.get("action", "")
         elif tag == "varclass":
             self._emit_varclass(a)
         elif tag == "checkl":
@@ -258,6 +278,13 @@ class _DTLParser(HTMLParser):
         if tag == "keyl":
             self.screen.keylist = self._keylist or {}
             self._keylist = None
+            return
+        if tag == "cmdtbl":
+            self._in_cmdtbl = False
+            self._cur_cmd = None
+            return
+        if tag == "cmd":
+            self._cur_cmd = None
             return
         if tag == "varclass":
             self._cur_varclass = None
@@ -320,6 +347,10 @@ class _DTLParser(HTMLParser):
             self._in_varlist = False
         elif tag == "msgmbr":  # a self-closing msgmbr declares nothing; close it
             self._in_msgmbr = False
+        elif tag == "cmdtbl":  # a self-closing command table is empty; close it
+            self.handle_endtag(tag)
+        elif tag == "cmd":  # a self-closing cmd (action only via cmdact); close it
+            self.handle_endtag(tag)
         elif tag in ("area", "region"):  # a self-closing flow box has no content
             self.handle_endtag(tag)
 
