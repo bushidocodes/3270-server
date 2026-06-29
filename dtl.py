@@ -35,7 +35,10 @@ Supported tags
                                  as ``Screen.command_field``.
 ``<selfld row numcol namecol     a list of menu choices; each ``<choice>`` is laid
    desccol numwidth>``           out on its own row, auto-incrementing.
-``<choice num name>desc``        one menu row: number, name, description.
+``<choice num name                one menu row: number, name, description. The
+   matchval>desc``                selection value (``matchval``, default ``num``)
+                                 is recorded in ``Screen.selections`` so the
+                                 dialog can validate a typed option.
 ``<keyl name>``                  a keylist: a set of function-key bindings for
                                  the panel (rendered as nothing; pure metadata).
 ``<keyi key cmd>desc``           one key binding: function key ``key`` (e.g.
@@ -300,6 +303,11 @@ class _DTLParser(HTMLParser):
         self.screen.add(Text(row, sf["namecol"], a.get("name", "")))
         self.screen.add(Text(row, sf["desccol"], content))
         sf["row"] = row + 1
+        # Record the selection value the user types to pick this choice. It
+        # defaults to the displayed number; an explicit ``matchval`` overrides.
+        matchval = a.get("matchval", a.get("num", "")).strip().upper()
+        if matchval:
+            self.screen.selections[matchval] = a.get("name", "").strip()
 
     def _emit_keyi(self, a):
         if self._keylist is None:

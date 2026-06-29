@@ -138,6 +138,34 @@ def test_selfld_lays_out_choices_on_incrementing_rows():
     assert s.items[3] == Text(5, 1, "10", DisplayIntensity.HIGH)
 
 
+def test_choice_matchval_defaults_to_num_and_records_selections():
+    s = load_dtl(
+        '<panel><selfld row="4" numcol="1" namecol="4" desccol="21">'
+        '<choice num="0" name="Settings">  desc</choice>'
+        '<choice num="X" name="Exit">  bye</choice>'
+        '</selfld></panel>'
+    )
+    assert s.selections == {"0": "Settings", "X": "Exit"}
+
+
+def test_choice_explicit_matchval_overrides_num():
+    s = load_dtl(
+        '<panel><selfld row="4" numcol="1" namecol="4" desccol="21">'
+        '<choice num="1" name="View" matchval="V">  desc</choice>'
+        '</selfld></panel>'
+    )
+    assert s.selections == {"V": "View"}        # matchval wins over num
+
+
+def test_ispf_panel_selections_drive_validation():
+    s = load_panel("ispf", ZUSER="IBMUSER ", ZTIME="13:45")
+    # The menu declares 0-7, 9-13 and X — but not 8.
+    for opt in ["0", "3", "13", "X"]:
+        assert opt in s.selections
+    assert "8" not in s.selections
+    assert s.selections["3"] == "Utilities"
+
+
 def test_substitution():
     # &NAME dialog-variable reference, matched case-insensitively.
     s = load_dtl('<panel><info row="1" col="1">Hi &who</info></panel>', WHO="BOB")
