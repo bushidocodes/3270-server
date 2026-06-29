@@ -171,16 +171,15 @@ def send_ispf_menu(client_socket, userid: str, short_msg: str = None):
     return screen
 
 
-def _show_help(client_socket, help_name: str):
-    """Display a help panel and wait for the user to leave it (PF3/PF15/Enter).
-
-    Mirrors ISPF's PF1 HELP behaviour: the help panel is overlaid, and the user
-    returns to the underlying panel (re-sent by the caller's loop) on exit.
+def _show_overlay(client_socket, panel_name: str):
+    """Display an overlay panel (help or sub-panel) and wait for the user to
+    leave it (PF3/PF15/Enter). The underlying panel is re-sent by the caller's
+    loop on return — mirroring ISPF's PF1 HELP and option-select behaviour.
     """
     from dtl import load_panel
 
     while True:
-        screen = load_panel(help_name)
+        screen = load_panel(panel_name)
         _send_screen(client_socket, screen)
         result = read_client_input(client_socket)
         if result is None:
@@ -413,7 +412,7 @@ def handle_client(client_socket, addr):
                 # Keylist bound this key (PF3/PF15) to EXIT — log off.
                 return
             if cmd == "HELP" and screen.help:
-                _show_help(client_socket, screen.help)
+                _show_overlay(client_socket, screen.help)
                 continue
 
             # Validate fields against their <varclass> checks (e.g. SIZE range)
@@ -458,12 +457,16 @@ def handle_client(client_socket, addr):
                 # X, or a keylist key (PF3/PF15) bound to EXIT — back to logon
                 break
             if cmd == "HELP" and screen.help:
-                _show_help(client_socket, screen.help)
+                _show_overlay(client_socket, screen.help)
                 continue
 
             # A typed value is a menu selection, a command from the panel's
             # <cmdtbl>, or invalid. (The "X" exit choice is handled above.)
-            if option in screen.selections:
+            if option == "0":
+                # Option 0 (Settings) opens a real sub-panel (with an action bar).
+                _show_overlay(client_socket, "settings")
+                short_msg = None
+            elif option in screen.selections:
                 short_msg = f"OPTION {option} NOT YET IMPLEMENTED"
             elif option:
                 action = screen.lookup_command(option)

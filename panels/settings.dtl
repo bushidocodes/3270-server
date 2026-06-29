@@ -1,0 +1,32 @@
+<!DOCTYPE DM SYSTEM>
+<!-- ISPF Settings panel (option 0), shown when "0" is selected on the primary
+     menu. Demonstrates an action bar (<ab>/<abc>/<pdc>). PF3 returns to the
+     menu. The action-bar choices are rendered; pull-down selection (point and
+     shoot) is not yet interactive. -->
+<panel name="settings" title="ISPF Settings" help="ispfhelp">
+  <ab row="0" col="1" gap="3">
+    <abc>Log/List<pdc action="passthru">Log Data Set defaults</pdc></abc>
+    <abc>Function keys<pdc action="passthru">Keylist settings</pdc></abc>
+    <abc>Colors<pdc action="passthru">CUA attributes</pdc></abc>
+    <abc>Help<pdc action="alias help">Help for settings</pdc></abc>
+  </ab>
+  <info row="1" col="0" intensity="high" fill="-" width="79"/>
+
+  <info row="2" col="1" intensity="high">ISPF Settings</info>
+
+  <info row="4" col="1">Terminal type . . . . : 3278</info>
+  <info row="5" col="1">Screen format . . . . : DATA</info>
+  <info row="6" col="1">Command line at bottom: NO</info>
+  <info row="7" col="1">Panel display CUA . . : YES</info>
+
+  <info row="9"  col="1">Options:</info>
+  <info row="10" col="3">Command delimiter . . : ;</info>
+  <info row="11" col="3">Tab to point-and-shoot: YES</info>
+
+  <paninst row="22" col="1">PF3=Return to the Primary Option Menu</paninst>
+
+  <keyl name="SETKEYS">
+    <keyi key="PF3"  cmd="EXIT">Return</keyi>
+    <keyi key="PF15" cmd="EXIT">Return</keyi>
+  </keyl>
+</panel>

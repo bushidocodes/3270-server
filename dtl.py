@@ -64,6 +64,10 @@ Supported tags
 ``<cmd name trunc>desc``         a command; ``trunc`` is the min chars to type.
 ``<cmdact action>``              the command's action (e.g. ``alias exit``,
                                  ``passthru``). Recorded in ``Screen.commands``.
+``<ab row col gap>``             an action bar; its ``<abc>`` choice labels are
+``<abc>label</abc>``             laid out across ``row``. Each ``<abc>`` holds
+``<pdc action>label</pdc>``      ``<pdc>`` pull-down choices (kept in
+                                 ``Screen.action_bar`` for future interaction).
 ``<varclass name type>``         a variable class: ``type="numeric"`` makes its
                                  variables numeric-only. May contain a ``<checkl>``.
 ``<checkl checkmsg>``            a validity-check list; ``checkmsg`` names the
@@ -183,6 +187,9 @@ class _DTLParser(HTMLParser):
         self._areas = []          # stack of <area>/<region> flow contexts
         self._in_cmdtbl = False   # inside a <cmdtbl>?
         self._cur_cmd = None      # current <cmd> dict awaiting its <cmdact>
+        self._ab = None           # active <ab> action bar being built, or None
+        self._cur_abc = None      # current <abc> action-bar choice, or None
+        self._cur_pdc = None      # current <pdc> pull-down choice, or None
 
     # ── SGML event handling ──────────────────────────────────────────────────
 
@@ -226,6 +233,23 @@ class _DTLParser(HTMLParser):
             # The command action; read on start, since DTL often omits </cmdact>.
             if self._cur_cmd is not None:
                 self._cur_cmd["action"] = a.get("action", "")
+        elif tag == "ab":
+            self._ab = {"row": int(a.get("row", 0)), "col": int(a.get("col", 1)),
+                        "gap": int(a.get("gap", 3)), "choices": []}
+        elif tag == "abc":
+            if self._ab is None:
+                raise DTLError("<abc> outside of an <ab>")
+            self._cur_abc = {"chars": [], "pdc": []}
+        elif tag == "pdc":
+            if self._cur_abc is None:
+                raise DTLError("<pdc> outside of an <abc>")
+            self._cur_pdc = {"chars": [], "action": a.get("action", "")}
+        elif tag == "action":
+            # A pull-down choice's action (alternative to <pdc action=...>).
+            if self._cur_pdc is not None:
+                self._cur_pdc["action"] = (
+                    a.get("action") or a.get("run") or a.get("cmd") or self._cur_pdc["action"]
+                )
         elif tag == "varclass":
             self._emit_varclass(a)
         elif tag == "checkl":
@@ -264,6 +288,10 @@ class _DTLParser(HTMLParser):
     def handle_data(self, data):
         if self._in_dtafldd:
             self._dtafldd.append(data)
+        elif self._cur_pdc is not None:
+            self._cur_pdc["chars"].append(data)
+        elif self._cur_abc is not None:
+            self._cur_abc["chars"].append(data)
         elif self._tag is not None:
             self._chars.append(data)
 
@@ -282,6 +310,27 @@ class _DTLParser(HTMLParser):
         if tag == "cmdtbl":
             self._in_cmdtbl = False
             self._cur_cmd = None
+            return
+        if tag == "pdc":
+            if self._cur_pdc is not None and self._cur_abc is not None:
+                self._cur_abc["pdc"].append({
+                    "label": "".join(self._cur_pdc["chars"]).strip(),
+                    "action": self._cur_pdc["action"],
+                })
+            self._cur_pdc = None
+            return
+        if tag == "abc":
+            if self._cur_abc is not None and self._ab is not None:
+                self._ab["choices"].append({
+                    "label": "".join(self._cur_abc["chars"]).strip(),
+                    "pdc": self._cur_abc["pdc"],
+                })
+            self._cur_abc = None
+            return
+        if tag == "ab":
+            if self._ab is not None:
+                self._emit_action_bar(self._ab)
+            self._ab = None
             return
         if tag == "cmd":
             self._cur_cmd = None
@@ -350,6 +399,8 @@ class _DTLParser(HTMLParser):
         elif tag == "cmdtbl":  # a self-closing command table is empty; close it
             self.handle_endtag(tag)
         elif tag == "cmd":  # a self-closing cmd (action only via cmdact); close it
+            self.handle_endtag(tag)
+        elif tag in ("ab", "abc", "pdc"):  # self-closing action-bar elements
             self.handle_endtag(tag)
         elif tag in ("area", "region"):  # a self-closing flow box has no content
             self.handle_endtag(tag)
@@ -525,6 +576,16 @@ class _DTLParser(HTMLParser):
         matchval = a.get("matchval", a.get("num", "")).strip().upper()
         if matchval:
             self.screen.selections[matchval] = a.get("name", "").strip()
+
+    def _emit_action_bar(self, ab):
+        """Lay the action-bar choice labels out across the bar's row (high
+        intensity) and record the choices + their pull-downs on the Screen."""
+        col = ab["col"]
+        for choice in ab["choices"]:
+            label = choice["label"]
+            self.screen.add(Text(ab["row"], col, label, DisplayIntensity.HIGH))
+            col += len(label) + ab["gap"]
+        self.screen.action_bar = ab["choices"]
 
     def _emit_keyi(self, a):
         if self._keylist is None:
