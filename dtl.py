@@ -40,6 +40,12 @@ Supported tags
                                  the panel (rendered as nothing; pure metadata).
 ``<keyi key cmd>desc``           one key binding: function key ``key`` (e.g.
                                  ``PF3``) invokes command ``cmd`` (e.g. ``EXIT``).
+``<varclass name type>``         a variable class: ``type="numeric"`` makes its
+                                 variables numeric-only (rendered as nothing).
+``<varlist>``                    container for ``<vardcl>`` declarations.
+``<vardcl name varclass>``       declares variable ``name`` to be of class
+                                 ``varclass``; a field's ``numeric`` is inherited
+                                 from it when the field omits ``numeric``.
 
 ``<dtafld>`` attributes: ``datavar`` (field name sent back), ``entwidth`` (field
 length), ``hidden`` (non-display, e.g. password), ``numeric``, ``default``,
@@ -117,6 +123,9 @@ class _DTLParser(HTMLParser):
         self._in_dtafldd = False  # capturing a <dtafldd> prompt child?
         self._dtafldd = None      # captured <dtafldd> prompt text, or None
         self._keylist = None      # active <keyl> bindings dict, or None
+        self._varclasses = {}     # <varclass> name (upper) → {"numeric": bool}
+        self._vardcls = {}        # <vardcl> name (upper) → {"varclass": name}
+        self._in_varlist = False  # inside a <varlist>?
 
     # ── SGML event handling ──────────────────────────────────────────────────
 
@@ -141,6 +150,12 @@ class _DTLParser(HTMLParser):
             self._keylist = {}
         elif tag == "keyi":
             self._emit_keyi(a)
+        elif tag == "varclass":
+            self._emit_varclass(a)
+        elif tag == "varlist":
+            self._in_varlist = True
+        elif tag == "vardcl":
+            self._emit_vardcl(a)
         elif tag in _CONTENT_TAGS:
             self._tag, self._attrs, self._chars = tag, a, []
             self._dtafldd = None
@@ -162,6 +177,9 @@ class _DTLParser(HTMLParser):
         if tag == "keyl":
             self.screen.keylist = self._keylist or {}
             self._keylist = None
+            return
+        if tag == "varlist":
+            self._in_varlist = False
             return
         if tag != self._tag:
             return
@@ -190,6 +208,8 @@ class _DTLParser(HTMLParser):
             self._selfld = None
         elif tag == "keyl":  # a self-closing keylist has no items; close it
             self.handle_endtag(tag)
+        elif tag == "varlist":  # a self-closing varlist declares nothing; close it
+            self._in_varlist = False
 
     # ── element → model ──────────────────────────────────────────────────────
 
@@ -220,13 +240,46 @@ class _DTLParser(HTMLParser):
             length=self._req_int(a, "entwidth", tag),
             name=name,
             default=a.get("default", ""),
-            numeric=_truthy(a.get("numeric")),
+            numeric=self._resolve_numeric(a, name),
             hidden=_truthy(a.get("hidden")),
             cursor=_truthy(a.get("cursor")),
             mdt=_truthy(a.get("mdt"), default=True),
         )
         self.screen.add(field)
         return field
+
+    def _resolve_numeric(self, a, name):
+        """Whether the field is numeric. An explicit ``numeric`` attribute wins;
+        otherwise inherit it from the variable's declared ``<varclass>``."""
+        if "numeric" in a:
+            return _truthy(a["numeric"])
+        return self._declared_numeric(name)
+
+    def _declared_numeric(self, name):
+        if not name:
+            return False
+        decl = self._vardcls.get(name.upper())
+        if not decl:
+            return False
+        vc = self._varclasses.get(str(decl.get("varclass", "")).upper())
+        return bool(vc and vc.get("numeric"))
+
+    def _emit_varclass(self, a):
+        name = a.get("name")
+        if not name:
+            raise DTLError("<varclass> missing required attribute 'name'")
+        # Authentic DTL types include CHAR/HEX/BIN/NUMERIC/…; the subset only
+        # needs to know whether the class makes its fields numeric-only.
+        vtype = str(a.get("type", "char")).strip().lower()
+        self._varclasses[name.upper()] = {"numeric": vtype in ("numeric", "num")}
+
+    def _emit_vardcl(self, a):
+        if not self._in_varlist:
+            raise DTLError("<vardcl> outside of a <varlist>")
+        name = a.get("name")
+        if not name:
+            raise DTLError("<vardcl> missing required attribute 'name'")
+        self._vardcls[name.upper()] = {"varclass": a.get("varclass", "")}
 
     def _emit_dtafld(self, a, content):
         self._add_field(a, content, "dtafld", a.get("datavar"))
