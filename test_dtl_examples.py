@@ -14,9 +14,10 @@ Two things are asserted:
    screen never drops below :data:`RENDER_BASELINE`. As we add features
    (auto-flow, list fields, …) more examples will render and the baseline rises.
 
-Today **0** of the guide's panel examples render, because the guide universally
-uses auto-flow (no explicit positions) and a much larger tag set than our
-subset. The gaps are tracked in GitHub issues; this corpus is how we measure
+Before the auto-flow work, **0** of the guide's panel examples rendered (the
+guide universally uses implicit positioning). With the panel now an implicit
+flow box (#51), **18** render; the rest still need a larger tag set (text/list
+tags, list fields, …) tracked in GitHub issues. This corpus is how we measure
 progress against them.
 """
 import glob
@@ -30,8 +31,9 @@ _DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tests", "dtl_ex
 EXAMPLE_FILES = sorted(glob.glob(os.path.join(_DIR, "*.dtl")))
 
 # Examples that currently render to a non-empty screen. Bump this as features
-# land so the corpus can only get *more* renderable, never less.
-RENDER_BASELINE = 0
+# land so the corpus can only get *more* renderable, never less. (0 before the
+# auto-flow work; 18 once a panel became an implicit flow box — see #51.)
+RENDER_BASELINE = 18
 
 
 def _load(path):

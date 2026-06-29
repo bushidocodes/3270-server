@@ -420,6 +420,51 @@ def test_help_attribute_does_not_change_rendered_bytes():
     assert load_panel("logon").render() == build_tso_logon().render()
 
 
+# ── auto-flow: a panel is an implicit flow box (no row/col needed) ───────────
+
+def test_panel_autoflows_unpositioned_elements():
+    # With no row/col anywhere, content flows down from the top of the panel.
+    s = load_dtl(
+        '<panel name="p">'
+        '<info>first line</info>'
+        '<info>second line</info>'
+        '<dtafld datavar="u" entwidth="8">Userid</dtafld>'
+        '</panel>'
+    )
+    assert s.items[0] == Text(0, 1, "first line", DisplayIntensity.NORMAL)
+    assert s.items[1] == Text(1, 1, "second line", DisplayIntensity.NORMAL)
+    assert s.items[2] == Text(2, 1, "Userid", DisplayIntensity.NORMAL)   # prompt
+    fld = s.items[3]
+    assert (fld.row, fld.col, fld.name) == (2, 1 + len("Userid") + 1, "u")  # entry after prompt
+
+
+def test_unpositioned_area_is_transparent_to_flow():
+    # An <area> with no row/col continues the panel flow; the panel resumes after.
+    s = load_dtl(
+        '<panel name="p">'
+        '<info>before</info>'
+        '<area><info>inside-a</info><info>inside-b</info></area>'
+        '<info>after</info>'
+        '</panel>'
+    )
+    rows = [(i.row, i.text) for i in s.items]
+    assert rows == [(0, "before"), (1, "inside-a"), (2, "inside-b"), (3, "after")]
+
+
+def test_explicit_position_still_wins_under_autoflow():
+    # Explicit row/col overrides the flow and the flow resumes after it.
+    s = load_dtl(
+        '<panel name="p">'
+        '<info>flowed0</info>'
+        '<info row="10" col="5">explicit</info>'
+        '<info>flowed11</info>'
+        '</panel>'
+    )
+    assert s.items[0] == Text(0, 1, "flowed0", DisplayIntensity.NORMAL)
+    assert s.items[1] == Text(10, 5, "explicit", DisplayIntensity.NORMAL)
+    assert s.items[2] == Text(11, 1, "flowed11", DisplayIntensity.NORMAL)
+
+
 # ── flow layout (<area>/<region>) ────────────────────────────────────────────
 
 def test_area_flows_rows_and_derives_fldcol():
@@ -463,9 +508,11 @@ def test_regions_lay_out_side_by_side_columns():
     assert s.items[3] == Text(3, 40, "right2", DisplayIntensity.NORMAL)
 
 
-def test_missing_row_outside_area_still_raises():
+def test_missing_row_outside_any_flow_context_raises():
+    # With no <panel> (hence no implicit flow box) and no <area>, an <info>
+    # without a row has nowhere to flow, so it still raises.
     with pytest.raises(DTLError):
-        load_dtl('<panel><info col="1">x</info></panel>')
+        load_dtl('<info col="1">x</info>')
 
 
 def test_logon_area_flow_is_byte_identical():
@@ -506,8 +553,10 @@ def test_shipped_panels_have_doctype_and_stay_byte_identical():
 
 
 def test_missing_required_attr_raises():
+    # A still-required attribute (keyi's key) raises; note <info>/<dtafld> no
+    # longer require row/col — they auto-flow inside a panel (see flow tests).
     with pytest.raises(DTLError):
-        load_dtl('<panel><info col="1">x</info></panel>')
+        load_dtl('<panel><keyl><keyi cmd="HELP"/></keyl></panel>')
 
 
 def test_choice_outside_selfld_raises():
