@@ -1,3 +1,4 @@
+<!DOCTYPE DM SYSTEM>
 <!-- z/OS V2R5.0 TSO/E LOGON panel, in Dialog Tag Language (DTL subset).
      Renders byte-for-byte identically to screens.build_tso_logon().
      The transient error message (row 19) is injected at runtime, not here. -->

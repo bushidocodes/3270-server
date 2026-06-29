@@ -1,3 +1,4 @@
+<!DOCTYPE DM SYSTEM>
 <!-- ISPF 7.1.0 Primary Option Menu, in Dialog Tag Language (DTL subset).
      Renders byte-for-byte identically to screens.build_ispf_menu().
      &ZUSER (padded to 8) and &ZTIME are ISPF dialog variables substituted at

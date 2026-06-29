@@ -132,8 +132,11 @@ value the server validates against), `<keyl>`/`<keyi>` (a keylist binding functi
 commands), and `<varclass>`/`<varlist>`/`<vardcl>` (typed variable declarations — a field
 inherits `numeric` from its variable's class). ISPF dialog variables are referenced `&`-style —
 `&ZUSER`, `&ZTIME` — and substituted at load time (e.g. the live user id and clock on the ISPF
-status line); `&&` is a literal ampersand and a trailing `.` terminates a reference. Unlike
-authentic DTL, placement is explicit (`row`/`col`) rather than auto-flowed.
+status line); `&&` is a literal ampersand and a trailing `.` terminates a reference. Messages
+live separately in a `<msgmbr>` (see `messages/`). As in real DTL the source is SGML: files may
+open with a `<!DOCTYPE DM SYSTEM>` prolog, tag/attribute names are case-insensitive, and boolean
+attributes may be minimized (`<dtafld hidden>`). Unlike authentic DTL, placement is explicit
+(`row`/`col`) rather than auto-flowed.
 
 A `<keyl>` is pure metadata — it renders nothing — but the server reads it to resolve function
 keys to commands the way ISPF does, e.g. PF3 → `EXIT`, instead of hard-coding key numbers:
