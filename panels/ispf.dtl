@@ -5,7 +5,9 @@
 <panel name="ispfmenu" title="ISPF Primary Option Menu">
   <info row="0" col="0" intensity="high">-------------------------- ISPF Primary Option Menu ---------------------------</info>
 
-  <dtafld row="2" col="1" fldcol="13" datavar="option" entwidth="6" cursor="yes">Option ===></dtafld>
+  <!-- Command area: the option line. datavar defaults to ZCMD (ISPF convention);
+       the server reads the typed option via Screen.command_value(). -->
+  <cmdarea row="2" col="1" fldcol="13" entwidth="6" cursor="yes">Option ===></cmdarea>
 
   <selfld row="4" numcol="1" namecol="4" desccol="21" numwidth="2" numintensity="high">
     <choice num="0"  name="  Settings      ">  Terminal and user parameters</choice>

@@ -406,7 +406,9 @@ def handle_client(client_socket, addr):
             print(f"AID={hex(aid)}, fields={redact_fields(fields)}")
 
             aid_str = aid_to_string(aid)
-            option = fields.get(ISPF_OPTION_ADDR, "").strip().upper()
+            # Read the option from the panel's <cmdarea> (its ZCMD command
+            # field), resolved by role rather than a hard-coded address.
+            option = (screen.command_value(fields) or "").strip().upper()
 
             if option == "X" or screen.command_for(aid_str) in _LEAVE_COMMANDS:
                 # X, or a keylist key (PF3/PF15) bound to EXIT — back to logon

@@ -28,7 +28,11 @@ Supported tags
                                  ``<dtafldd>`` child (authentic DTL) or, as a
                                  shorthand, the element's own text. See attrs below.
 ``<dtafldd>prompt</dtafldd>``    data-field description: the prompt for its
-                                 enclosing ``<dtafld>``.
+                                 enclosing ``<dtafld>`` or ``<cmdarea>``.
+``<cmdarea row col fldcol         the command area (ISPF "Option/Command ===>"
+   entwidth ...>``                line). Renders like ``<dtafld>``; ``datavar``
+                                 defaults to ``ZCMD`` and the field is recorded
+                                 as ``Screen.command_field``.
 ``<selfld row numcol namecol     a list of menu choices; each ``<choice>`` is laid
    desccol numwidth>``           out on its own row, auto-incrementing.
 ``<choice num name>desc``        one menu row: number, name, description.
@@ -84,7 +88,8 @@ _INTENSITY = {
     "highlighted": DisplayIntensity.HIGHLIGHTED,
 }
 
-_CONTENT_TAGS = ("info", "dtafld", "choice")
+_CONTENT_TAGS = ("info", "dtafld", "cmdarea", "choice")
+_FIELD_TAGS = ("dtafld", "cmdarea")
 
 
 def _truthy(value, default=False):
@@ -129,8 +134,8 @@ class _DTLParser(HTMLParser):
                 "numintensity": _intensity(a, "numintensity", DisplayIntensity.HIGH),
             }
         elif tag == "dtafldd":
-            # The authentic data-field description (prompt) child of <dtafld>.
-            if self._tag == "dtafld":
+            # The authentic data-field description (prompt) child of a field.
+            if self._tag in _FIELD_TAGS:
                 self._in_dtafldd, self._dtafldd = True, []
         elif tag == "keyl":
             self._keylist = {}
@@ -168,6 +173,8 @@ class _DTLParser(HTMLParser):
             self._emit_info(a, content)
         elif tag == "dtafld":
             self._emit_dtafld(a, content)
+        elif tag == "cmdarea":
+            self._emit_cmdarea(a, content)
         elif tag == "choice":
             self._emit_choice(a, content)
         self._tag, self._attrs, self._chars, self._dtafldd = None, None, [], None
@@ -200,23 +207,35 @@ class _DTLParser(HTMLParser):
                  content, _intensity(a))
         )
 
-    def _emit_dtafld(self, a, content):
-        row = self._req_int(a, "row", "dtafld")
-        col = self._req_int(a, "col", "dtafld")
+    def _add_field(self, a, content, tag, name):
+        """Emit a prompt (if any) plus an unprotected input field; return it."""
+        row = self._req_int(a, "row", tag)
+        col = self._req_int(a, "col", tag)
         fldcol = int(a.get("fldcol", col))
         if content:
             self.screen.add(Text(row, col, content, _intensity(a)))
-        self.screen.add(Field(
+        field = Field(
             row=row,
             col=fldcol,
-            length=self._req_int(a, "entwidth", "dtafld"),
-            name=a.get("datavar"),
+            length=self._req_int(a, "entwidth", tag),
+            name=name,
             default=a.get("default", ""),
             numeric=_truthy(a.get("numeric")),
             hidden=_truthy(a.get("hidden")),
             cursor=_truthy(a.get("cursor")),
             mdt=_truthy(a.get("mdt"), default=True),
-        ))
+        )
+        self.screen.add(field)
+        return field
+
+    def _emit_dtafld(self, a, content):
+        self._add_field(a, content, "dtafld", a.get("datavar"))
+
+    def _emit_cmdarea(self, a, content):
+        # The command area is ISPF's command/option line; its variable defaults
+        # to the conventional ZCMD. Mark the field as the panel's command area.
+        field = self._add_field(a, content, "cmdarea", a.get("datavar", "ZCMD"))
+        self.screen.command_field = field
 
     def _emit_choice(self, a, content):
         sf = self._selfld
