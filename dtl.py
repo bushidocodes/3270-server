@@ -23,8 +23,12 @@ Supported tags
 ``<panel name title>``           root container; ``title`` → ``Screen.title``
 ``<info row col intensity>``     protected text (label / instruction / rule).
                                  ``fill`` + ``width`` repeats a character (rules).
-``<dtafld row col fldcol         a prompt (the element text) plus an unprotected
-   datavar entwidth ...>``       input field at ``fldcol``. See attrs below.
+``<dtafld row col fldcol         a prompt plus an unprotected input field at
+   datavar entwidth ...>``       ``fldcol``. The prompt is the text of a nested
+                                 ``<dtafldd>`` child (authentic DTL) or, as a
+                                 shorthand, the element's own text. See attrs below.
+``<dtafldd>prompt</dtafldd>``    data-field description: the prompt for its
+                                 enclosing ``<dtafld>``.
 ``<selfld row numcol namecol     a list of menu choices; each ``<choice>`` is laid
    desccol numwidth>``           out on its own row, auto-incrementing.
 ``<choice num name>desc``        one menu row: number, name, description.
@@ -74,6 +78,8 @@ class _DTLParser(HTMLParser):
         self._attrs = None
         self._chars = []
         self._selfld = None       # active <selfld> layout state, or None
+        self._in_dtafldd = False  # capturing a <dtafldd> prompt child?
+        self._dtafldd = None      # captured <dtafldd> prompt text, or None
 
     # ── SGML event handling ──────────────────────────────────────────────────
 
@@ -90,20 +96,33 @@ class _DTLParser(HTMLParser):
                 "numwidth": int(a.get("numwidth", 2)),
                 "numintensity": _intensity(a, "numintensity", DisplayIntensity.HIGH),
             }
+        elif tag == "dtafldd":
+            # The authentic data-field description (prompt) child of <dtafld>.
+            if self._tag == "dtafld":
+                self._in_dtafldd, self._dtafldd = True, []
         elif tag in _CONTENT_TAGS:
             self._tag, self._attrs, self._chars = tag, a, []
+            self._dtafldd = None
 
     def handle_data(self, data):
-        if self._tag is not None:
+        if self._in_dtafldd:
+            self._dtafldd.append(data)
+        elif self._tag is not None:
             self._chars.append(data)
 
     def handle_endtag(self, tag):
         if tag == "selfld":
             self._selfld = None
             return
+        if tag == "dtafldd":
+            if self._in_dtafldd:
+                self._in_dtafldd, self._dtafldd = False, "".join(self._dtafldd)
+            return
         if tag != self._tag:
             return
-        content = "".join(self._chars)
+        # A <dtafldd> child, if present, supplies the prompt; otherwise the
+        # element's own text is the prompt (a convenient shorthand).
+        content = self._dtafldd if isinstance(self._dtafldd, str) else "".join(self._chars)
         a = self._attrs
         if tag == "info":
             self._emit_info(a, content)
@@ -111,12 +130,14 @@ class _DTLParser(HTMLParser):
             self._emit_dtafld(a, content)
         elif tag == "choice":
             self._emit_choice(a, content)
-        self._tag, self._attrs, self._chars = None, None, []
+        self._tag, self._attrs, self._chars, self._dtafldd = None, None, [], None
 
     def handle_startendtag(self, tag, attrs):
         # Self-closing form, e.g. <dtafld .../> or <info fill="-" width="37"/>
         self.handle_starttag(tag, attrs)
         if tag in _CONTENT_TAGS:
+            self.handle_endtag(tag)
+        elif tag == "dtafldd":  # empty prompt
             self.handle_endtag(tag)
         elif tag == "selfld":  # a self-closing selfld has no choices; close it
             self._selfld = None

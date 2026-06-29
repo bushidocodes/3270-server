@@ -88,6 +88,33 @@ def test_dtafld_hidden_and_numeric_and_default():
     assert sz.numeric and sz.default == "00150"
 
 
+def test_dtafld_prompt_from_dtafldd_child():
+    # Authentic DTL: the prompt is the text of a nested <dtafldd>.
+    s = load_dtl(
+        '<panel><dtafld row="5" col="1" fldcol="16" datavar="userid" entwidth="8">'
+        '<dtafldd>Userid ===></dtafldd></dtafld></panel>'
+    )
+    assert s.items[0] == Text(5, 1, "Userid ===>", DisplayIntensity.NORMAL)
+    assert isinstance(s.items[1], Field)
+    assert (s.items[1].col, s.items[1].name) == (16, "userid")
+
+
+def test_dtafld_dtafldd_equivalent_to_text_shorthand():
+    # The <dtafldd> child and the inline-text shorthand render identically.
+    inline = load_dtl(
+        '<panel><dtafld row="5" col="1" fldcol="16" datavar="u" entwidth="8">'
+        'Userid ===></dtafld></panel>'
+    )
+    nested = load_dtl(
+        '<panel>\n'
+        '  <dtafld row="5" col="1" fldcol="16" datavar="u" entwidth="8">\n'
+        '    <dtafldd>Userid ===></dtafldd>\n'
+        '  </dtafld>\n'
+        '</panel>'
+    )
+    assert inline.render() == nested.render()
+
+
 def test_dtafld_mdt_defaults_true():
     s = load_dtl('<panel><dtafld row="1" col="1" datavar="x" entwidth="4">L</dtafld></panel>')
     assert s.items[1].mdt is True
