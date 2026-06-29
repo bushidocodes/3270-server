@@ -8,15 +8,14 @@ take on the same idea: ``load_dtl(source)`` parses DTL markup into a
 
 Relationship to authentic DTL
 -----------------------------
-We keep DTL's tag *names* and spirit but make two deliberate simplifications:
-
-* **Explicit positioning.** Authentic DTL computes row/column automatically from
-  the document structure (the genuinely hard part of ``ISPDTLC``). Here every
-  visible element carries explicit ``row``/``col`` attributes, so the markup maps
-  directly and predictably onto the field-oriented 3270 data stream.
-* **Decoupled prompt + entry.** A ``<dtafld>`` still bundles a prompt with its
-  input field, but the entry's column is given explicitly (``fldcol``) rather
-  than flowed after the prompt.
+We keep DTL's tag *names* and spirit. Positioning works both ways: every visible
+element may carry explicit ``row``/``col`` (predictable, and how the bundled
+panels are written), but a ``<panel>`` is also an implicit **flow box** — an
+element that omits ``row``/``col`` flows down from the top (and a ``<dtafld>``
+that omits ``fldcol`` gets its entry after the prompt). Explicit positions always
+win, so fully-positioned panels are unaffected. This is a pragmatic take on
+``ISPDTLC``'s auto-layout (the genuinely hard part); the bundled panels position
+explicitly, while the conformance corpus (``tests/dtl_examples/``) exercises flow.
 
 Like real DTL the source is SGML: files may begin with a ``<!DOCTYPE DM SYSTEM>``
 prolog (tolerated and ignored), tag and attribute names are case-insensitive
@@ -202,14 +201,22 @@ class _DTLParser(HTMLParser):
                 self.screen.width = int(a["width"])
             if "depth" in a:
                 self.screen.depth = int(a["depth"])
+            # The panel itself is an implicit flow box: elements that omit
+            # row/col flow down from the top. Explicit positions still win, so
+            # fully-positioned panels are unaffected.
+            self._areas.append(
+                {"row": 0, "col": 1, "fldgap": 1, "explicit": True, "parent": None}
+            )
         elif tag == "selfld":
+            ctx = self._areas[-1] if self._areas else None
             self._selfld = {
-                "row": self._req_int(a, "row", tag),
+                "row": int(a["row"]) if "row" in a else (ctx["row"] if ctx else 0),
                 "numcol": int(a.get("numcol", 1)),
                 "namecol": int(a.get("namecol", 4)),
                 "desccol": int(a.get("desccol", 21)),
                 "numwidth": int(a.get("numwidth", 2)),
                 "numintensity": _intensity(a, "numintensity", DisplayIntensity.HIGH),
+                "ctx": ctx,
             }
         elif tag == "dtafldd":
             # The authentic data-field description (prompt) child of a field.
@@ -265,13 +272,18 @@ class _DTLParser(HTMLParser):
         elif tag == "vardcl":
             self._emit_vardcl(a)
         elif tag in ("area", "region"):
-            # A flow box: contained elements that omit row/col flow down from
-            # this origin; a field that omits fldcol gets its entry after the
-            # prompt (col + len(prompt) + fldgap).
+            # A flow box. With explicit row/col it is a positioned sub-box; with
+            # neither it transparently continues the enclosing flow (so its
+            # content flows after the parent's, and the parent resumes after it).
+            parent = self._areas[-1] if self._areas else None
+            explicit = "row" in a
             self._areas.append({
-                "row": self._req_int(a, "row", tag),
-                "col": self._req_int(a, "col", tag),
-                "fldgap": int(a.get("fldgap", 1)),
+                "row": int(a["row"]) if "row" in a else (parent["row"] if parent else 0),
+                "col": int(a["col"]) if "col" in a else (parent["col"] if parent else 1),
+                "fldgap": int(a["fldgap"]) if "fldgap" in a
+                          else (parent["fldgap"] if parent else 1),
+                "explicit": explicit,
+                "parent": parent,
             })
         elif tag == "msgmbr":
             self._in_msgmbr = True
@@ -283,10 +295,12 @@ class _DTLParser(HTMLParser):
             self._tag, self._attrs, self._chars = "msg", a, []
         elif tag in _CONTENT_TAGS:
             self._tag, self._attrs, self._chars = tag, a, []
-            self._dtafldd = None
+            # A new content tag closes any still-open <dtafldd> (SGML omits the
+            # end tag), so the dtafldd capture state must not leak into it.
+            self._in_dtafldd, self._dtafldd = False, None
 
     def handle_data(self, data):
-        if self._in_dtafldd:
+        if self._in_dtafldd and self._dtafldd is not None:
             self._dtafldd.append(data)
         elif self._cur_pdc is not None:
             self._cur_pdc["chars"].append(data)
@@ -296,7 +310,13 @@ class _DTLParser(HTMLParser):
             self._chars.append(data)
 
     def handle_endtag(self, tag):
+        if tag == "panel":
+            self._areas.clear()  # drop the panel's implicit flow box
+            return
         if tag == "selfld":
+            # Advance the enclosing flow past the choices just laid out.
+            if self._selfld and self._selfld.get("ctx") is not None:
+                self._selfld["ctx"]["row"] = self._selfld["row"]
             self._selfld = None
             return
         if tag == "dtafldd":
@@ -353,7 +373,10 @@ class _DTLParser(HTMLParser):
             return
         if tag in ("area", "region"):
             if self._areas:
-                self._areas.pop()
+                ctx = self._areas.pop()
+                parent = ctx.get("parent")
+                if parent is not None and not ctx.get("explicit"):
+                    parent["row"] = ctx["row"]  # resume flow after a transparent box
             return
         if tag != self._tag:
             return
@@ -447,6 +470,8 @@ class _DTLParser(HTMLParser):
     def _emit_info(self, a, content):
         if "fill" in a:
             content = a["fill"] * int(a.get("width", 0))
+        elif not content.strip():
+            return  # empty text element: render nothing, don't consume a flow line
         row, col, _ = self._resolve_pos(a, "info")
         self.screen.add(Text(row, col, content, _intensity(a)))
 
@@ -459,7 +484,10 @@ class _DTLParser(HTMLParser):
             fldcol = col + len(content) + ctx["fldgap"]  # entry flows after prompt
         else:
             fldcol = col
-        length = self._req_int(a, "entwidth", tag)
+        # Entry width: explicit ``entwidth`` wins; otherwise fall back to the
+        # variable's display length (``dispmaxlen``) or a small default, so
+        # auto-flow guide fields that size via the variable still render.
+        length = int(a.get("entwidth", a.get("dispmaxlen", 8)))
         if fldcol + length > self.screen.width:
             raise DTLError(
                 f"<{tag}> field at col {fldcol} width {length} overflows "
