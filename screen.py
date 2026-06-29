@@ -119,10 +119,24 @@ class Screen:
     reset_mdts: bool = True
     keyboard_restore: bool = True
     sound_alarm: bool = False
+    # Function-key → command map (e.g. {"PF3": "EXIT"}), from a DTL <keyl>.
+    # Pure metadata: it is not rendered, so it never affects the data stream.
+    keylist: Dict[str, str] = _dc_field(default_factory=dict)
 
     def add(self, item) -> "Screen":
         self.items.append(item)
         return self
+
+    def command_for(self, key: Optional[str]) -> Optional[str]:
+        """The command bound to a function key (e.g. ``"PF3"``) by the keylist.
+
+        Matches ISPF keylist semantics: a key press resolves to a command name
+        (``EXIT``, ``HELP``, …) that the dialog then acts on. Returns ``None``
+        when the key is unbound. Lookup is case-insensitive on the key name.
+        """
+        if not key:
+            return None
+        return self.keylist.get(key.upper())
 
     def text(self, row, col, s, intensity=DisplayIntensity.NORMAL) -> "Screen":
         return self.add(Text(row, col, s, intensity))

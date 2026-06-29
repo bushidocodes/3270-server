@@ -32,6 +32,10 @@ Supported tags
 ``<selfld row numcol namecol     a list of menu choices; each ``<choice>`` is laid
    desccol numwidth>``           out on its own row, auto-incrementing.
 ``<choice num name>desc``        one menu row: number, name, description.
+``<keyl name>``                  a keylist: a set of function-key bindings for
+                                 the panel (rendered as nothing; pure metadata).
+``<keyi key cmd>desc``           one key binding: function key ``key`` (e.g.
+                                 ``PF3``) invokes command ``cmd`` (e.g. ``EXIT``).
 
 ``<dtafld>`` attributes: ``datavar`` (field name sent back), ``entwidth`` (field
 length), ``hidden`` (non-display, e.g. password), ``numeric``, ``default``,
@@ -107,6 +111,7 @@ class _DTLParser(HTMLParser):
         self._selfld = None       # active <selfld> layout state, or None
         self._in_dtafldd = False  # capturing a <dtafldd> prompt child?
         self._dtafldd = None      # captured <dtafldd> prompt text, or None
+        self._keylist = None      # active <keyl> bindings dict, or None
 
     # ── SGML event handling ──────────────────────────────────────────────────
 
@@ -127,6 +132,10 @@ class _DTLParser(HTMLParser):
             # The authentic data-field description (prompt) child of <dtafld>.
             if self._tag == "dtafld":
                 self._in_dtafldd, self._dtafldd = True, []
+        elif tag == "keyl":
+            self._keylist = {}
+        elif tag == "keyi":
+            self._emit_keyi(a)
         elif tag in _CONTENT_TAGS:
             self._tag, self._attrs, self._chars = tag, a, []
             self._dtafldd = None
@@ -144,6 +153,10 @@ class _DTLParser(HTMLParser):
         if tag == "dtafldd":
             if self._in_dtafldd:
                 self._in_dtafldd, self._dtafldd = False, "".join(self._dtafldd)
+            return
+        if tag == "keyl":
+            self.screen.keylist = self._keylist or {}
+            self._keylist = None
             return
         if tag != self._tag:
             return
@@ -168,6 +181,8 @@ class _DTLParser(HTMLParser):
             self.handle_endtag(tag)
         elif tag == "selfld":  # a self-closing selfld has no choices; close it
             self._selfld = None
+        elif tag == "keyl":  # a self-closing keylist has no items; close it
+            self.handle_endtag(tag)
 
     # ── element → model ──────────────────────────────────────────────────────
 
@@ -213,6 +228,17 @@ class _DTLParser(HTMLParser):
         self.screen.add(Text(row, sf["namecol"], a.get("name", "")))
         self.screen.add(Text(row, sf["desccol"], content))
         sf["row"] = row + 1
+
+    def _emit_keyi(self, a):
+        if self._keylist is None:
+            raise DTLError("<keyi> outside of a <keyl>")
+        key = a.get("key")
+        if not key:
+            raise DTLError("<keyi> missing required attribute 'key'")
+        # ``cmd`` is the command the key invokes (ISPF allows ``action`` too);
+        # both key and command are case-insensitive, stored uppercase.
+        cmd = a.get("cmd", a.get("action", ""))
+        self._keylist[key.upper()] = cmd.upper()
 
 
 def load_dtl(source: str, **subs) -> Screen:

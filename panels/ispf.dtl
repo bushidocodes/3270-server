@@ -33,4 +33,11 @@
   <info row="22" col="1">System ID . :  SY1     </info>
   <info row="22" col="41">ISPF Ver. . :  7.1.0   </info>
   <info row="23" col="0" intensity="high" fill="-" width="79"/>
+
+  <!-- Keylist: PF3/PF15 exit ISPF (back to the logon panel). Metadata only. -->
+  <keyl name="ISPFKEYS">
+    <keyi key="PF1"  cmd="HELP">Help</keyi>
+    <keyi key="PF3"  cmd="EXIT">Exit</keyi>
+    <keyi key="PF15" cmd="EXIT">Exit</keyi>
+  </keyl>
 </panel>

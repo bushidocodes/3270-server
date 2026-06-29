@@ -124,11 +124,20 @@ like:
 ```
 
 Supported tags: `<panel>`, `<info>` (text/instructions, with `fill`+`width` rules),
-`<dtafld>` (prompt + input field), and `<selfld>`/`<choice>` (menu lists). ISPF dialog
-variables are referenced `&`-style — `&ZUSER`, `&ZTIME` — and substituted at load time (e.g.
-the live user id and clock on the ISPF status line); `&&` is a literal ampersand and a trailing
-`.` terminates a reference. Unlike authentic DTL, placement is explicit (`row`/`col`) rather
-than auto-flowed.
+`<dtafld>` (prompt + input field), `<selfld>`/`<choice>` (menu lists), and `<keyl>`/`<keyi>`
+(a keylist binding function keys to commands). ISPF dialog variables are referenced `&`-style —
+`&ZUSER`, `&ZTIME` — and substituted at load time (e.g. the live user id and clock on the ISPF
+status line); `&&` is a literal ampersand and a trailing `.` terminates a reference. Unlike
+authentic DTL, placement is explicit (`row`/`col`) rather than auto-flowed.
+
+A `<keyl>` is pure metadata — it renders nothing — but the server reads it to resolve function
+keys to commands the way ISPF does, e.g. PF3 → `EXIT`, instead of hard-coding key numbers:
+
+```sgml
+<keyl name="ISPFKEYS">
+  <keyi key="PF3" cmd="EXIT">Exit</keyi>
+</keyl>
+```
 
 ## Extending
 
