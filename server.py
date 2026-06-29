@@ -163,7 +163,7 @@ def send_ispf_menu(client_socket, userid: str, short_msg: str = None):
     from screen import Text
 
     time_str = datetime.now().strftime("%H:%M")
-    screen = load_panel("ispf", userid=userid.ljust(8), time=time_str)
+    screen = load_panel("ispf", ZUSER=userid.ljust(8), ZTIME=time_str)
     if short_msg:
         screen.add(Text(2, 25, short_msg[:54], DisplayIntensity.HIGH))
     _send_screen(client_socket, screen)
