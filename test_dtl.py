@@ -219,6 +219,38 @@ def test_msg_missing_msgid_raises():
         load_dtl('<msgmbr><msg>hi</msg></msgmbr>')
 
 
+# ── SGML conformance (DOCTYPE, case-insensitivity, attribute minimization) ───
+
+def test_doctype_prolog_is_tolerated():
+    s = load_dtl(
+        '<!DOCTYPE DM SYSTEM>\n'
+        '<panel><info row="1" col="2">hi</info></panel>'
+    )
+    assert s.items == [Text(1, 2, "hi", DisplayIntensity.NORMAL)]
+
+
+def test_tag_and_attribute_names_are_case_insensitive():
+    s = load_dtl('<PANEL><INFO ROW="1" COL="2" INTENSITY="high">hi</INFO></PANEL>')
+    assert s.items == [Text(1, 2, "hi", DisplayIntensity.HIGH)]
+
+
+def test_boolean_attribute_minimization():
+    # <dtafld hidden> (no value) means hidden="yes"; <... numeric> likewise.
+    s = load_dtl(
+        '<panel>'
+        '<dtafld row="6" col="1" fldcol="16" datavar="pw" entwidth="8" hidden>P</dtafld>'
+        '<dtafld row="8" col="1" fldcol="16" datavar="sz" entwidth="5" numeric>S</dtafld>'
+        '</panel>'
+    )
+    assert s.items[1].hidden is True
+    assert s.items[3].numeric is True
+
+
+def test_shipped_panels_have_doctype_and_stay_byte_identical():
+    # The DOCTYPE prolog added to the .dtl files must not change the bytes.
+    assert load_panel("logon").render() == build_tso_logon().render()
+
+
 def test_missing_required_attr_raises():
     with pytest.raises(DTLError):
         load_dtl('<panel><info col="1">x</info></panel>')

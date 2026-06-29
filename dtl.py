@@ -18,6 +18,11 @@ We keep DTL's tag *names* and spirit but make two deliberate simplifications:
   input field, but the entry's column is given explicitly (``fldcol``) rather
   than flowed after the prompt.
 
+Like real DTL the source is SGML: files may begin with a ``<!DOCTYPE DM SYSTEM>``
+prolog (tolerated and ignored), tag and attribute names are case-insensitive
+(``<PANEL>`` == ``<panel>``), and boolean attributes may be minimized
+(``<dtafld hidden>`` means ``hidden="yes"``).
+
 Supported tags
 --------------
 ``<panel name title>``           root container; ``title`` → ``Screen.title``
@@ -109,6 +114,21 @@ def _truthy(value, default=False):
     if value is None:
         return default
     return str(value).strip().lower() in ("yes", "true", "1", "on")
+
+
+def _bool_attr(attrs, key, default=False):
+    """Read a boolean DTL attribute, honouring SGML attribute minimization.
+
+    ``<dtafld hidden>`` (the attribute present with no value, ``html.parser``
+    reports ``None``) and ``hidden="hidden"`` both mean true, as does any of
+    yes/true/1/on. An absent attribute yields ``default``.
+    """
+    if key not in attrs:
+        return default
+    value = attrs[key]
+    if value is None:
+        return True
+    return _truthy(value) or str(value).strip().lower() == key
 
 
 def _intensity(attrs, key="intensity", default=DisplayIntensity.NORMAL):
@@ -267,9 +287,9 @@ class _DTLParser(HTMLParser):
             name=name,
             default=a.get("default", ""),
             numeric=self._resolve_numeric(a, name),
-            hidden=_truthy(a.get("hidden")),
-            cursor=_truthy(a.get("cursor")),
-            mdt=_truthy(a.get("mdt"), default=True),
+            hidden=_bool_attr(a, "hidden"),
+            cursor=_bool_attr(a, "cursor"),
+            mdt=_bool_attr(a, "mdt", default=True),
         )
         self.screen.add(field)
         return field
@@ -278,7 +298,7 @@ class _DTLParser(HTMLParser):
         """Whether the field is numeric. An explicit ``numeric`` attribute wins;
         otherwise inherit it from the variable's declared ``<varclass>``."""
         if "numeric" in a:
-            return _truthy(a["numeric"])
+            return _bool_attr(a, "numeric")
         return self._declared_numeric(name)
 
     def _declared_numeric(self, name):
