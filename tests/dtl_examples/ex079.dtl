@@ -1,0 +1,15 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<varclass name=namecls type='char 30'>
+<varlist>
+  <vardcl name=name varclass=namecls>
+</varlist>
+<msgmbr name=ordb00>
+  <msg suffix=0 msgtype=warning>You must type your name in the Name field.
+</msgmbr>
+<panel name=msgxmp1>Application Panel
+ <dtafld datavar=name pmtwidth=12 required=yes msg=ordb000>Name
+<cmdarea>
+</panel>

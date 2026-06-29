@@ -1,0 +1,18 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<varclass name=daycls type ='char 1'>
+<varlist>
+  <vardcl name=day varclass=daycls>
+  <vardcl name=choice varclass=daycls>
+</varlist>
+<panel name=singsel>Schedule Appointments
+  <topinst>Choose the most convenient day for your appointment,
+           then press Enter.
+  <area>
+    <selfld name=choice selwidth=30 pmtwidth=9>Weekdays:
+      <choice checkvar=day  match=M>Monday
+      <choice checkvar=day  match=T>Tuesday
+      <choice checkvar=day  match=W>Wednesday
+      <choice checkvar=day  match=H>Thursday

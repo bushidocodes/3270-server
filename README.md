@@ -162,6 +162,15 @@ keys to commands the way ISPF does, e.g. PF3 → `EXIT`, instead of hard-coding 
 </keyl>
 ```
 
+### Conformance corpus
+
+`tests/dtl_examples/` holds the `<panel>` examples extracted verbatim from IBM's
+[z/OS 2.4 ISPF DTL Guide](https://www.ibm.com/docs/en/SSLTBW_2.4.0/pdf/f54dt00_v2r4.pdf), and
+`test_dtl_examples.py` renders each through our parser. It's a yardstick for how close the subset
+is to the real reference: today **0** render (the guide universally uses auto-flow and a much
+larger tag set), and the test ratchets a non-regressing renderable count as features land. The
+gaps are tracked in the repo's issues.
+
 ## Extending
 
 To change a screen, **edit its `.dtl` file** — no Python changes needed. To add a new screen,

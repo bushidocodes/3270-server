@@ -1,0 +1,15 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<panel name=mainpan7>Item Selection
+  <topinst>Select one of the following items and press Enter.
+  <area marginw=10>
+    <selfld name=itemtyp selwidth=58>
+      <choice>Automotive
+      <choice>Hardware
+      <choice>Health and beauty
+      <choice>Lawn and garden
+      <choice>Sporting goods
+    </selfld>
+  </area>

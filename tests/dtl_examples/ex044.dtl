@@ -1,0 +1,29 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+  <vardcl name=ch5 varclass=char1>
+  <vardcl name=ch6 varclass=char1>
+</varlist>
+<panel name=servsel>Service Selections
+  <topinst>Select the stylist and services you want, then press Enter.
+  <area>
+    <region dir=horiz>
+    <selfld name=person selwidth=19 pmtwidth=15>Stylist
+      <choice checkvar=stylst match=1>Cecilia
+      <choice checkvar=stylst match=2>Dana
+      <choice checkvar=stylst match=3>Laurel
+      <choice checkvar=stylst match=4>Pierce
+      <choice checkvar=stylst match=5>Stephenie
+    </selfld>
+    <divider>
+    <selfld type=multi selwidth=32 pmtwidth=15>Services
+      <choice name=ch1 checkvar=dry>Dry haircut
+      <choice name=ch2 checkvar=cut>Shampoo, haircut, and style
+      <choice name=ch3 checkvar=per>Permanent or body wave
+      <choice name=ch4 checkvar=fac>Facial
+      <choice name=ch5 checkvar=man>Manicure
+      <choice name=ch6 checkvar=ped>Pedicure
+    </selfld>
+    </region>
+  </area>
+</panel>

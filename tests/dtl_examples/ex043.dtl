@@ -1,0 +1,11 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system ()>
+<!--  MENU selection panel example -->
+<panel name=menusel1 menu>Sample Option Menu
+  <topinst>Enter a selection choice
+  <region indent=4>
+    <selfld type=menu entwidth=1 selwidth=40>
+      <choice checkvar=xtest1 match=a>Select Command
+        <action run=tstch1 type=cmd parm='1234'

@@ -1,0 +1,7 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<varlist>
+  <vardcl name=vard varclass=varc>
+</varlist>
+<panel name=panel>

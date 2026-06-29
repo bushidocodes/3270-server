@@ -1,0 +1,16 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<panel name=widget63 width=50>Widgets
+  <area>
+    <info width=48>
+      <p>Choose the type of Widget you want to order by placing
+      the cursor on the field and pressing Enter.
+      <notel>
+        <li>If the Widget you wish to order is not in stock, please
+            refer to the "Back Order" panel to place an order.
+        <li>Back-ordered Widgets usually arrive within three days.
+          <p>Please check again in three days.
+      </notel>
+      <p>If you want to order more than one Widget, specify the quantity

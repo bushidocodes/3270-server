@@ -1,0 +1,25 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM [
+<!ENTITY % glbent SYSTEM -- declaration of global entity file -->
+%glbent;<!-- Embeds the global entity file -->
+<!ENTITY % list "sl" -- type of list -->
+<!ENTITY slist "<%list;>" -- type of list start tag. -- >
+<!ENTITY elist "</%list;>" -- type of list end tag. -- >
+]>
+<panel name=showlist depth=22 width=45>Show Departments
+  <area>
+    <info width=40>
+      &header;
+      <p>The floors and departments are shown below:
+      &slist;
+        <li>First floor
+          &slist;
+            <li>Toys
+            <li>Electronics
+          &elist;
+        <li>Second floor
+          &slist;
+            <li>Boys clothes
+            <li>Girls clothes

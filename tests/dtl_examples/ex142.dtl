@@ -1,0 +1,33 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM>
+<VARCLASS NAME=char8 TYPE='char 8'>
+<VARCLASS NAME=name  TYPE='char 25'>
+<VARCLASS NAME=phoncls TYPE='char 12'>
+<VARCLASS NAME=appcls  TYPE='char 1'>
+  <XLATL FORMAT=upper>
+  </XLATL>
+  <CHECKL>
+    <CHECKI TYPE=values PARM1=EQ PARM2='Y N'>
+  </CHECKL>
+<VARLIST>
+  <VARDCL NAME=curdate VARCLASS=char8>
+  <VARDCL NAME=namevar VARCLASS=name>
+  <VARDCL NAME=passvar VARCLASS=char8>
+  <VARDCL NAME=xlname  VARCLASS=name>
+  <VARDCL NAME=xphone  VARCLASS=phoncls>
+  <VARDCL NAME=xapp    VARCLASS=appcls>
+</VARLIST>
+<PANEL NAME=varlist1 KEYLIST=keylxmp>System Log On
+<TOPINST>Complete the following fields, then press Enter.
+<AREA>
+  <DTACOL PMTWIDTH=12>
+    <DTAFLD DATAVAR=curdate ENTWIDTH=8 USAGE=out>Date
+    <DTAFLD DATAVAR=namevar ENTWIDTH=25 DESWIDTH=15>Name
+    <DTAFLD DATAVAR=passvar ENTWIDTH=8 DISPLAY=no>Password
+  </DTACOL>
+</AREA>
+</PANEL>
+<PANEL NAME=varlist2 DEPTH=14 KEYLIST=keyltbl>Subscriber List
+<TOPINST>Enter phone number, if missing,

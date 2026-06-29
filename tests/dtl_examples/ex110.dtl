@@ -1,0 +1,27 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM>
+  <!entity sampvar1 system>
+  <!entity sampabc system>)>
+&sampvar1;
+<PANEL NAME=grphdr KEYLIST=keylxmp>Library Card Registration
+<AB>
+&sampabc;
+</AB>
+<TOPINST> Type in patron's name and card number (if applicable)
+<AREA>
+  <GRPHDR FORMAT=center WIDTH=50 FMTWIDTH=30 DIV=solid COMPACT>
+        Data Field Group Heading
+  </GRPHDR>
+  <DTACOL PMTWIDTH=12 ENTWIDTH=25 DESWIDTH=25 SELWIDTH=25>
+    <DTAFLD DATAVAR=curdate USAGE=out ENTWIDTH=8>Date
+    <DTAFLD DATAVAR=cardno ENTWIDTH=7>Card No.
+      <DTAFLDD>(A 7-digit number)
+    <DTAFLD DATAVAR=name>Name
+      <DTAFLDD>(Last, First, M.I.)
+    <DTAFLD DATAVAR=address>Address
+  </DTACOL>
+</AREA>
+<CMDAREA>Enter a command
+</PANEL>

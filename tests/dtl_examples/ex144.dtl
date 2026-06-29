@@ -1,0 +1,44 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM>
+<VARCLASS NAME=monthcls type='char 3'>
+   <XLATL FORMAT=upper>
+   </XLATL>
+   <XLATL MSG=abcd003>
+       <XLATI VALUE=11>NOV
+       <XLATI VALUE=12>DEC
+       <XLATI VALUE=01>JAN
+       <XLATI VALUE=02>FEB
+       <XLATI VALUE=03>MAR
+   </XLATL>
+<VARCLASS NAME=costcls TYPE='numeric 6' MSG=abcd001>
+<VARCLASS NAME=typecls TYPE='char 4'>
+   <XLATL FORMAT=upper>
+   </XLATL>
+   <CHECKL MSG=abcd002>
+      <CHECKI TYPE=values Parm1=EQ Parm2= 'GAS OIL ELEC'>
+   </CHECKL>
+<VARLIST>
+   <VARDCL NAME=month VARCLASS=monthcls>
+   <VARDCL NAME=cost VARCLASS=costcls>
+   <VARDCL NAME=heat VARCLASS=typecls>
+</VARLIST>
+<PANEL NAME=xlatl KEYLIST=keylxmp>Heating Cost Survey
+   <TOPINST>Complete the information below and then press Enter.
+   <AREA>
+     <DTACOL PMTWIDTH=20 DESWIDTH=30>
+        <DTAFLD DATAVAR=month ENTWIDTH=3>Winter month
+          <DTAFLDD>Enter Nov, Dec, Jan, Feb, or Mar
+        <DTAFLD DATAVAR=cost ENTWIDTH=6>Heating cost
+        <DTAFLD DATAVAR=heat ENTWIDTH=4>Type of heating
+          <DTAFLDD>Enter Oil, Gas, or Elec
+     </DTACOL>
+   </AREA>
+   <BOTINST>Thank you for your participation.
+</PANEL>
+<MSGMBR NAME=abcd00>
+  <MSG SUFFIX=1>Heating cost must be numeric
+  <MSG SUFFIX=2>Type of heating must be "Gas", "Oil", or "Elec"
+  <MSG SUFFIX=3>Winter month must be "Nov","Dec", "Jan", "Feb", or "Mar"
+</MSGMBR>

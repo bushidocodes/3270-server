@@ -1,0 +1,44 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system ()>
+<!--   Sample selection menu -->
+<varclass name=vc1 type='char 80'>
+   <xlatl format=upper>
+   </xlatl>
+<varlist>
+  <vardcl name=zcmd varclass=vc1>
+</varlist>
+<panel name=textseg1 menu keylist=keylxmp>
+   <textline>
+     <textseg>&ztime
+     <textseg expand=both>
+           Sample Selection Panel with TEXTLINE tag
+     <textseg>&zdate(8)
+   </textline>
+  <topinst>This is a selection panel.
+  <selfld type=menu   pmtloc=before fchoice=0 trail=nextsel
+          selwidth=40 pmtwidth=10>Select an option
+    <choice checkvar=xtest1 match=a>
+                Selection #0 (Command Selch0)
+      <action run=Selch0>
+    <choice checkvar=xtext1 match=b>
+                Selection #1 (Command Selch1)
+      <action run=Selch1 parm='1 2 3 4'>
+       passlib newpool suspend
+    <choice checkvar=xtest1 match=c>
+                Selection #2 (Command Selch2)
+      <action run=Selch2 parm=1234>
+    <choice checkvar=xtest1 match=d>
+                Selection #3 (Command Selch3)
+      <action run=Selch3 parm=abcd>
+    <choice checkvar=xtest1 match=e>
+                Selection #4 (Command Selch4)
+      <action run=Selch4 parm='a b c d'>
+    <chdiv>
+    <choice selchar=x>
+            Exit
+      <action run=exit type=exit>
+  </selfld>
+  <cmdarea>
+</panel>

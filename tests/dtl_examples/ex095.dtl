@@ -1,0 +1,23 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM>
+<VARCLASS NAME=aa TYPE='char 18'>
+  <CHECKL MSG=msgf881>
+    <CHECKI TYPE=ALPHA>
+  </CHECKL>
+<VARCLASS NAME=bb TYPE='char 6'>
+  <XLATL FORMAT=upper>
+  </XLATL>
+  <CHECKL MSG=msgf883>
+    <CHECKI TYPE=VALUES PARM1=EQ PARM2="SINGLE DOUBLE">
+  </CHECKL>
+<VARLIST>
+  <VARDCL NAME=checka VARCLASS=aa>
+  <VARDCL NAME=checkb VARCLASS=bb>
+</VARLIST>
+<PANEL NAME=checkl>CHECKL audits
+  <DTAFLD DATAVAR=checka ENTWIDTH=18 PMTWIDTH=20>Enter Last Name
+  <DTAFLD DATAVAR=checkb ENTWIDTH=6 PMTWIDTH=20>Enter Room Type
+  <CMDAREA>
+</PANEL>

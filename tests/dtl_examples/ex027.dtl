@@ -1,0 +1,35 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<panel name=mainpan8>Application
+ <topinst>Complete the information below and press Enter.
+ <area>
+   <dtafld datavar=name entwidth=25 pmtwidth=9>Name
+   <dtafld datavar=addr entwidth=25 pmtwidth=9>Address
+   <region dir=horiz>
+     <dtafld datavar=city pmtwidth=9 entwidth=25>City
+     <dtafld datavar=stat pmtwidth=5 entwidth=2>State
+     <dtafld datavar=zip pmtwidth=8 entwidth=5>Zip code
+   </region>
+   <divider type=solid gutter=3>
+   <region dir=horiz>
+     <selfld name=grade pmtwidth=32 selwidth=33>Highest education level
+       <choice>Some high school
+       <choice>High school graduate
+       <choice>Some college
+       <choice>College graduate
+       <choice>Some post-graduate work
+       <choice>Post graduate degree
+     </selfld>
+     <divider gutter=5>
+     <region>
+       <info width=30>
+         <p compact>Complete if applicable:
+       </info>
+       <dtafld datavar=grad pmtwidth=10 entwidth=11>Date of graduation
+       <dtafld datavar=field pmtwidth=10 entwidth=11>Field of study
+     </region>
+   </region>
+ </area>
+</panel>

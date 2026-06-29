@@ -1,0 +1,10 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<panel name=addfile width=50>Changing a File
+  <area>
+    <info width=48>
+      <p>After you have made the desired changes
+      to the file, press Enter to save the changes.
+      <p><warning>Pressing Enter saves

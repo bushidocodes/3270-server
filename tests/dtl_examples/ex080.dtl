@@ -1,0 +1,26 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<cmdtbl applid=brws>
+  <cmd name=quit>quit
+    <cmdact action=...>
+  <cmd name=send>send
+    <cmdact action=...>
+</cmdtbl>
+<keyl name=panlkeys>
+  <keyi key=f4 cmd=quit>
+  <keyi key=f6 cmd=send>
+</keyl>
+<panel...>
+  <ab>
+    <abc>Actions
+      <pdc>Quit
+        <action run=quit>
+      <pdc>Send
+        <action run=send>
+      <pdc>Exit
+        <action run=exit>
+  </ab>
+⋮
+</panel>

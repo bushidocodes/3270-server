@@ -1,0 +1,38 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM(
+  <!entity sampvar1 system>
+  <!entity sampabc system>)>
+&sampvar1;
+<PANEL NAME=choice1 KEYLIST=keylxmp>Library Card Registration
+<AB>
+&sampabc;
+</AB>
+<TOPINST>Type in patron's name and card number (if applicable).
+<TOPINST>Then select an action bar choice.
+<AREA>
+  <DTAFLD DATAVAR=curdate PMTWIDTH=12 ENTWIDTH=8 USAGE=out>Date
+  <DTAFLD DATAVAR=cardno PMTWIDTH=12 ENTWIDTH=7 DESWIDTH=25>Card No
+    <DTAFLDD>(A 7-digit number)
+  <DTAFLD DATAVAR=name PMTWIDTH=12 ENTWIDTH=25 DESWIDTH=25>Name
+    <DTAFLDD>(Last, First, M.I.)
+  <DTAFLD DATAVAR=address PMTWIDTH=12 ENTWIDTH=25>Address
+  <DIVIDER>
+  <REGION DIR=horiz>
+  <SELFLD NAME=cardsel PMTWIDTH=30 SELWIDTH=38>Choose
+  one of the following
+    <CHOICE CHECKVAR=card MATCH=new>New
+    <CHOICE CHECKVAR=card MATCH=renew>Renewal
+    <CHOICE CHECKVAR=card MATCH=replace>Replacement
+  </SELFLD>
+  <SELFLD TYPE=multi PMTWIDTH=30 SELWIDTH=25>Check valid branches
+    <CHOICE NAME=north HELP=nthhlp CHECKVAR=nth>North Branch
+    <CHOICE NAME=south HELP=sthhlp CHECKVAR=sth>South Branch
+    <CHOICE NAME=east HELP=esthlp CHECKVAR=est>East Branch
+    <CHOICE NAME=west HELP=wsthlp CHECKVAR=wst>West Branch
+  </SELFLD>
+  </REGION>
+</AREA>
+<CMDAREA>Enter a command
+</PANEL>

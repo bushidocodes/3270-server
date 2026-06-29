@@ -1,0 +1,18 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<varclass name=authorc type='char 40'>
+<varclass name=catnumc type='char 10'>
+<varlist>
+  <vardcl name=author varclass=authorc>
+  <vardcl name=catnum varclass=catnumc>
+</varlist>
+<panel name=books2>Book Title Search
+  <area>
+    <dtacol pmtwidth=20>
+      <dtafld entwidth=40 datavar=author>Author
+      <dtafld entwidth=10 datavar=catnum>Catalog number
+    </dtacol>
+  </area>
+</panel>

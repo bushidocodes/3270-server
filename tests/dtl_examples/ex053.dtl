@@ -1,0 +1,17 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<panel name=infopan3 width=42>Information
+  <area>
+    <info width=40>
+      <h1>A Main Topic
+      <p>Notice how the heading is in the
+      center of the information region?
+        <h2>A Subtopic
+        <p>This heading is left-justified.
+        <h2>Another Subtopic
+        <p>Here's another level-two heading.
+    </info>
+  </area>
+</panel>

@@ -1,0 +1,16 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM>
+<VARCLASS NAME=selcls TYPE='CHAR 2'>
+<VARLIST>
+  <VARDCL NAME=loc  VARCLASS=selcls>
+  <VARDCL NAME=mode VARCLASS=selcls>
+</VARLIST>
+<PANEL NAME=topinst HELP=trvlhlp WIDTH=60 DEPTH=22 KEYLIST=keylxmp>
+Dream Vacation Guide
+<AB>
+  <ABC>File
+    <PDC>Add Entry
+        <ACTION RUN=add>
+    <PDC>Delete Entry

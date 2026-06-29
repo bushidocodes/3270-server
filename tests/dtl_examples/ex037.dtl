@@ -1,0 +1,28 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<varclass name=sampcls type='char 10'>
+<varclass name=char1 type='char 1'>
+<varlist>
+  <vardcl name=samplea varclass=sampcls>
+  <vardcl name=sampleb varclass=sampcls>
+  <vardcl name=samplec varclass=char1>
+  <vardcl name=sampled varclass=char1>
+</varlist>
+<panel name=pmt02>Application Name
+  <area>
+    <dtacol entwidth=10 selwidth=76>
+    <dtafld datavar=samplea>This is a very, very long prompt
+    <divider>
+    <dtafld datavar=sampleb pmtwidth=12>This is a very, very long prompt
+    <divider>
+    <selfld name=samplec>Here is another long prompt used to show
+            word-wrapping of prompts
+      <choice>Choice 1
+      <choice>Choice 2
+    </selfld>
+    <divider>
+    <selfld name=sampled pmtwidth=14>Here is another long prompt used to show
+                                     word-wrapping of prompts
+      <choice>Choice 1

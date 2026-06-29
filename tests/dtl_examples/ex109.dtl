@@ -1,0 +1,15 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM>
+<PANEL NAME=* KEYLIST=keylxmp applid=isr window=no>
+            Generate Tag Example
+<CMDAREA>
+<pnlinst compact>
+         Sample panel source to illustrate the GENERATE tag.
+<divider type=solid gap=no>
+<generate>
+    <attr attrchar=! type=FP>
+    <attr attrchar=_ type=NEF>
+    <attr attrchar=+ type=NT>
+<source>

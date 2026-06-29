@@ -1,0 +1,12 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<panel name=delfile width=50>Deleting a File
+  <area>
+    <info width=48>
+      <p>To delete a file, type the file name in the
+      "Delete this file" field and press Enter.
+      <p>A message appears asking for verification.
+      To continue the delete operation, press Enter.
+      <p><caution>Verifying the delete operation

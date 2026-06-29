@@ -1,0 +1,15 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM>
+<VARCLASS NAME=varcls1 TYPE='char 1'>
+<VARCLASS NAME=varcls2 TYPE='char 2'>
+<VARLIST>
+  <VARDCL NAME=hexvar  VARCLASS=varcls1>
+  <VARDCL NAME=decimal VARCLASS=varcls2>
+</VARLIST>
+<PANEL NAME=assignl>Hex to Decimal
+<TOPINST>Enter a hexadecimal digit.
+<AREA>
+<DTAFLD DATAVAR=hexvar PMTWIDTH=23 ENTWIDTH=1>Hexadecimal Value
+  <ASSIGNL DESTVAR=decimal>

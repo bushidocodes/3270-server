@@ -1,0 +1,43 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM>
+<VARCLASS NAME=namecls TYPE='char 12'>
+<VARCLASS NAME=midcls  TYPE='char 1'>
+<VARCLASS NAME=yearcls TYPE='char 9'>
+<VARCLASS NAME=semcls  TYPE='char 2'>
+<VARLIST>
+  <VARDCL NAME=xfname  VARCLASS=namecls>
+  <VARDCL NAME=xlname  VARCLASS=namecls>
+  <VARDCL NAME=xmid    VARCLASS=midcls>
+  <VARDCL NAME=xyear   VARCLASS=yearcls>
+  <VARDCL NAME=sem1    VARCLASS=semcls>
+  <VARDCL NAME=sem2    VARCLASS=semcls>
+</VARLIST>
+<PANEL NAME=lstgrp WIDTH=66 KEYLIST=keyltbl>Class Roster
+<AREA>
+  <LSTFLD>
+    <LSTGRP HEADLINE=yes>Student Name
+    <LSTGRP>Last
+      <LSTCOL DATAVAR=xlname USAGE=out COLWIDTH=12>
+    </LSTGRP>
+    <LSTGRP>First
+      <LSTCOL DATAVAR=xfname USAGE=out COLWIDTH=12>
+    </LSTGRP>
+    <LSTGRP>M
+      <LSTCOL DATAVAR=xmid   USAGE=out COLWIDTH=1>
+    </LSTGRP>
+    </LSTGRP>
+    <LSTGRP>Class
+    <LSTGRP>Year
+      <LSTCOL DATAVAR=xyear USAGE=out COLWIDTH=9>
+    </LSTGRP>
+    </LSTGRP>
+    <LSTGRP HEADLINE=yes>Grade
+      <LSTCOL DATAVAR=sem1 COLWIDTH=2>Sem 1
+      <LSTCOL DATAVAR=sem2 COLWIDTH=2>Sem 2
+    </LSTGRP>
+  </LSTFLD>
+</AREA>
+<CMDAREA>
+</PANEL>

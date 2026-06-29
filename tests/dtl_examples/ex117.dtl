@@ -1,0 +1,22 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM>
+<VARCLASS NAME=namecls TYPE='char 15'>
+<VARCLASS NAME=midcls  TYPE='char 1'>
+<VARCLASS NAME=phoncls TYPE='char 12'>
+<VARCLASS NAME=appcls  TYPE='char 1'>
+  <XLATL FORMAT=upper>
+  </XLATL>
+  <CHECKL>
+    <CHECKI TYPE=values PARM1=EQ PARM2='Y N'>
+  </CHECKL>
+<VARLIST>
+  <VARDCL NAME=xfname  VARCLASS=namecls>
+  <VARDCL NAME=xlname  VARCLASS=namecls>
+  <VARDCL NAME=xmid    VARCLASS=midcls>
+  <VARDCL NAME=xphone  VARCLASS=phoncls>
+  <VARDCL NAME=xapp    VARCLASS=appcls>
+</VARLIST>
+<PANEL NAME=lstcolb KEYLIST=keyltbl>Subscriber List
+<TOPINST>Enter phone number, if missing,

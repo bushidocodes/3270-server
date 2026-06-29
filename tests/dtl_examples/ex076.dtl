@@ -1,0 +1,41 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM>
+ <VARCLASS NAME=date    TYPE='char 8'>
+ <VARCLASS NAME=numcls  TYPE='numeric 7'>
+ <VARCLASS NAME=namecls TYPE='char 25'>
+ <VARCLASS NAME=char1cls TYPE='char 1'>
+ <VARCLASS NAME=char7cls TYPE='char 7'>
+ <VARLIST>
+   <VARDCL NAME=whchsrch VARCLASS=char1cls>
+   <VARDCL NAME=curdate VARCLASS=date>
+   <VARDCL NAME=cardno  VARCLASS=numcls>
+   <VARDCL NAME=name    VARCLASS=namecls>
+   <VARDCL NAME=address VARCLASS=namecls>
+   <VARDCL NAME=cardsel VARCLASS=char1cls>
+   <VARDCL NAME=card  VARCLASS=char7cls>
+   <VARDCL NAME=north VARCLASS=char1cls>
+   <VARDCL NAME=south VARCLASS=char1cls>
+   <VARDCL NAME=east  VARCLASS=char1cls>
+   <VARDCL NAME=west  VARCLASS=char1cls>
+ </VARLIST>
+<PANEL NAME=hlitep>Library Card Registration
+<AB>
+ <ABC>File
+   <PDC>Add Entry
+     <ACTION RUN=add>
+   <PDC>Delete Entry
+     <ACTION RUN=delete>
+   <PDC>Update Entry
+     <ACTION RUN=update>
+   <PDC>Exit
+     <ACTION RUN=exit>
+ <ABC>Search
+   <PDC CHECKVAR=whchsrch MATCH=1>Search on name
+     <ACTION SETVAR=whchsrch VALUE=1>
+     <ACTION RUN=search>
+   <PDC CHECKVAR=whchsrch MATCH=2>Search on card number
+     <ACTION SETVAR=whchsrch VALUE=2>
+     <ACTION RUN=search>
+  <ABC>Help

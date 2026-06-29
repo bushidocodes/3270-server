@@ -1,0 +1,39 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM(
+  <!entity sampvar1 system>
+  <!entity sampabc system>)>
+<VARCLASS NAME=char9cls TYPE='char 9'>
+  <XLATL FORMAT=upper>
+  </XLATL>
+&sampvar1;
+<VARLIST>
+  <VARDCL NAME=cardtype VARCLASS=char9cls>
+</VARLIST
+<PANEL NAME=chofld KEYLIST=keylxmp>Library Card Registration
+<AB>
+&sampabc;
+</AB>
+<TOPINST>Type in patron's name and card number (if applicable).
+<TOPINST>Then select an action bar choice.
+<AREA>
+  <DTAFLD DATAVAR=curdate PMTWIDTH=12 ENTWIDTH=8 USAGE=out>Date
+  <DTAFLD DATAVAR=cardno PMTWIDTH=12 ENTWIDTH=7 DESWIDTH=25>Card No
+    <DTAFLDD>(A 7-digit number)
+  <DTAFLD DATAVAR=name PMTWIDTH=12 ENTWIDTH=25 DESWIDTH=25>Name
+    <DTAFLDD>(Last, First, M.I.)
+  <DTAFLD DATAVAR=address PMTWIDTH=12 ENTWIDTH=25>Address
+  <DIVIDER>
+  <REGION DIR=horiz>
+  <SELFLD NAME=cardsel PMTWIDTH=30 SELWIDTH=38>Choose
+  one of the following
+    <CHOICE CHECKVAR=card MATCH=new>
+            New    Type:
+    <CHOFLD datavar=cardtype autotab=yes entwidth=9>
+          (Permanent or Temporary)
+<CHOICE CHECKVAR=card MATCH=renew>Renewal
+<CHOICE CHECKVAR=card MATCH=replace>Replacement
+  </SELFLD>
+ <DTACOL>
+    <SOURCE>

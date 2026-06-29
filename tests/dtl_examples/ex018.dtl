@@ -1,0 +1,20 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system (
+  <!ENTITY actnfile system>
+  <!ENTITY actnoptn system>
+  <!ENTITY actnhelp system>
+)>
+<panel name=pdcxmp1>Sample Application
+  <ab>
+    &actnfile;
+    <abc>View
+      <pdc checkvar=sorttype match=N><M>Name
+        <action run=name>
+      <pdc checkvar=sorttype match=O><M>Owner
+        <action run=owner>
+      <pdc checkvar=sorttype match=D><M>Date
+        <action run=date>
+      <pdc checkvar=sorttype match=S><M>Size
+        <action run=size>

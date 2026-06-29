@@ -1,0 +1,33 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM(
+  <!entity sampvar1 sysem>
+  <!entity sampbody system>)>
+&sampvar1;
+<PANEL NAME=m1 KEYLIST=keylxmp>Library Card Registration
+<AB>
+<ABC><M>File
+  <PDC><M>A</M>dd Entry
+    <ACTION RUN=add>
+  <PDC><M>D</M>elete Entry
+    <ACTION RUN=delete>
+  <PDC><M>U</M>pdate Entry
+    <ACTION RUN=update>
+  <PDC><M>E</M>xit
+    <ACTION RUN=exit>
+<ABC><M>Search
+  <PDC CHECKVAR=whchsrch MATCH=1>Search on <M>n</M>ame
+    <ACTION SETVAR=whchsrch VALUE=1>
+    <ACTION RUN=search>
+  <PDC CHECKVAR=whchsrch MATCH=2>Search on <M>c</M>ard number
+    <ACTION SETVAR=whchsrch VALUE=2>
+    <ACTION RUN=search>
+<ABC><M>Help
+  <PDC><M>Extended Help...
+    <ACTION RUN=exhelp>
+  <PDC><M>Keys Help...
+    <ACTION RUN=keyshelp>
+</AB>
+&sampbody;
+</PANEL>

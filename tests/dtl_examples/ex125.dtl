@@ -1,0 +1,57 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM>
+<VARCLASS NAME=selcls TYPE='CHAR 2'>
+<VARLIST>
+  <VARDCL NAME=loc  VARCLASS=selcls>
+  <VARDCL NAME=mode VARCLASS=selcls>
+</VARLIST>
+<PANEL NAME=panel HELP=trvlhlp KEYLIST=keylxmp
+  DEPTH=22 WIDTH=60>Dream Vacation Guide
+<AB>
+  <ABC>File
+    <PDC>Add Entry
+        <ACTION RUN=add>
+    <PDC>Delete Entry
+        <ACTION RUN=delete>
+    <PDC>Update Entry
+        <ACTION RUN=update>
+    <PDC>Exit
+        <ACTION RUN=exit>
+  <ABC>Help
+    <PDC>Extended Help...
+        <ACTION RUN=exhelp>
+    <PDC>Keys Help...
+        <ACTION RUN=keyshelp>
+</AB>
+<TOPINST>Choose one of the following exotic locations and
+your preferred mode of travel, then press Enter.
+<AREA>
+  <REGION DIR=horiz>
+  <SELFLD NAME=loc PMTWIDTH=23 SELWIDTH=25>Exotic Location:
+    <CHOICE>Athens, GA
+    <CHOICE>Berlin, CT
+    <CHOICE>Cairo, IL
+    <CHOICE>Lizard Lick, NC
+    <CHOICE>Paris, TX
+    <CHOICE>Rome, NY
+    <CHOICE>Venice, FL
+  </SELFLD>
+  <DIVIDER>
+  <SELFLD NAME=mode PMTWIDTH=25 SELWIDTH=25>Travel Mode:
+    <CHOICE>Boxcar
+    <CHOICE>Hitchhike
+    <CHOICE>Mule
+  </SELFLD>
+  </REGION>
+</AREA>
+<CMDAREA>
+</PANEL>
+<HELP NAME=trvlhlp>Sample help panel "trvlhelp"
+<AREA>
+<INFO WIDTH=48>
+<P>This is help panel "trvlhlp"
+</INFO>
+</AREA>
+</HELP>

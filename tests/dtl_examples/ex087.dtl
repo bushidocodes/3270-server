@@ -1,0 +1,44 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM>
+<PANEL NAME=action1>Library Card Listing
+<AB>
+<ABC>File
+    <PDC>Add Entry
+        <ACTION SETVAR=fchoice VALUE=add>
+        <ACTION RUN=add>
+    <PDC>Delete Entry
+        <ACTION SETVAR=fchoice VALUE=delete>
+        <ACTION RUN=delete>
+    <PDC>Update Entry
+        <ACTION SETVAR=fchoice VALUE=update>
+        <ACTION RUN=update>
+    <PDC>Exit
+        <ACTION RUN=exit>
+<ABC>Sort sequence
+    <PDC CHECKVAR=whchsort MATCH=1>Sort on name
+        <ACTION SETVAR=whchsort VALUE=1>
+        <ACTION RUN=sort>
+    <PDC CHECKVAR=whchsort MATCH=2>Sort on card number
+        <ACTION SETVAR=whchsort VALUE=2>
+        <ACTION RUN=sort>
+<ABC>Help
+    <PDC>Extended Help...
+        <ACTION RUN=exhelp>
+    <PDC>Keys Help...
+        <ACTION RUN=keyshelp>
+</AB>
+<TOPINST>Choose the size of the list needed.
+<TOPINST>Then select action bar choice "Sort sequence" to
+indicate the desired sort sequence.
+<AREA>
+  <SELFLD NAME=aa PMTWIDTH=30 PMTLOC=before SELWIDTH=38>Choose
+  one of the following
+    <CHOICE>New this month
+    <CHOICE>New this year
+    <CHOICE>All (this will take time to process)
+  </SELFLD>
+</AREA>
+<CMDAREA>Enter a command
+</PANEL>

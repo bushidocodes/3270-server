@@ -1,0 +1,24 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!DOCTYPE DM SYSTEM>
+<VARCLASS NAME=aa TYPE='char 2'>
+<VARCLASS NAME=bb TYPE='char 9'>
+<VARCLASS NAME=cc TYPE='char 9'>
+  <XLATL FORMAT=upper>
+  </XLATL>
+  <XLATL>
+    <XLATI VALUE=1>BIGCHARGE
+    <XLATI VALUE=2><LIT>V I S T A</LIT>
+    <XLATI VALUE=3><LIT>EZCARD   </LIT>
+    <XLATI VALUE=4><LIT>CHECK    </LIT>
+    <XLATI VALUE=5><LIT>     CASH</LIT>
+</XLATL>
+<VARLIST>
+  <VARDCL NAME=dispva VARCLASS=cc>
+  <VARDCL NAME=inptva VARCLASS=bb>
+  <VARDCL NAME=chckva VARCLASS=aa>
+</VARLIST>
+<PANEL NAME=lit>LIT translation
+  <TOPINST>You can display this panel with ISPF option 7.2
+  <TOPINST>For this example, enter the word 'BIGCHARGE', 'V I S T A',

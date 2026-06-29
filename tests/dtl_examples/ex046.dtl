@@ -1,0 +1,28 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system>
+<varclass name=timecls type='char 13'>
+<varclass name=vc1     type ='char 9'>
+<varlist>
+  <vardcl name=timecol varclass=timecls>
+  <vardcl name=moncol  varclass=vc1>
+  <vardcl name=tuecol  varclass=vc1>
+  <vardcl name=wedcol  varclass=vc1>
+  <vardcl name=thrcol  varclass=vc1>
+  <vardcl name=fricol  varclass=vc1>
+</varlist>
+<panel name=lstfld2>Scheduling Account Visits
+ <topinst>Enter the account name in the appropriate time slot.
+ <area>
+  <lstfld scrollvar=scrlamt scrvhelp=scrhelp>
+    <lstcol datavar=timecol usage=out colwidth=13>
+    <lstcol datavar=moncol colwidth=9>Monday
+    <lstcol datavar=tuecol colwidth=9>Tuesday
+    <lstcol datavar=wedcol colwidth=9>Wednesday
+    <lstcol datavar=thrcol colwidth=9>Thursday
+    <lstcol datavar=fricol colwidth=9>Friday
+  </LSTFLD>
+</area>
+<cmdarea>
+</panel>

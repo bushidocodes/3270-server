@@ -1,0 +1,29 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<!doctype dm system ()>
+<!-- Sample selection menu with point-and-shoot -->
+<panel name=ps1 menu keylist=keylxmp>Sample Point-and-Shoot
+  <topinst>This is a selection panel.
+  <selfld type=menu   pmtloc=before
+          selwidth=40 pmtwidth=10>Select an option
+    <choice checkvar=xtest1 match=a>
+        <PS VAR=zcmd VALUE=1>Selection #1 (Command Tstch1)
+</PS>
+      <action run=tstch1 parm='1 2 3 4'
+       passlib newpool suspend>
+    <choice checkvar=xtest1 match=b>
+        <PS VAR=zcmd VALUE=2>Selection #2 (Command Tstch2)
+</PS>
+      <action run=tstch2 parm=1234>
+    <choice checkvar=xtest1 match=c>
+        <PS VAR=zcmd VALUE=3>Selection #3 (Command Tstch3)
+</PS>
+      <action run=tstch3 parm=abcd>
+    <choice checkvar=xtest1 match=d>
+        <PS VAR=zcmd VALUE=4>Selection #4 (Command Tstch4)
+</PS>
+      <action run=tstch4 parm='a b c d'>
+  </selfld>
+  <cmdarea>
+</panel>

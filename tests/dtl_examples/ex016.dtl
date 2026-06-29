@@ -1,0 +1,23 @@
+<!-- DTL Guide example (z/OS 2.4 ISPF DTL Guide, f54dt00_v2r4.pdf),
+     extracted verbatim. Used to test our DTL subset against the real
+     reference; see test_dtl_examples.py. -->
+<panel name=mainpan2 depth=15>Sample Application
+  <ab>
+    <abc>File
+      <pdc>Add Entry
+        <action run=add>
+      <pdc>Delete Entry
+        <action run=delete>
+      <pdc>Update Entry
+        <action run=update>
+      <pdc>Exit
+        <action run=Exit>
+    <abc>View
+⋮
+    <abc>Options
+⋮
+    <abc>Help
+⋮
+  </ab>
+⋮
+</panel>
