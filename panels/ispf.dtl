@@ -43,4 +43,12 @@
     <keyi key="PF3"  cmd="EXIT">Exit</keyi>
     <keyi key="PF15" cmd="EXIT">Exit</keyi>
   </keyl>
+
+  <!-- Command table: commands the option line recognises (vs. invalid options).
+       BYE is an alias for EXIT (leaves ISPF); KEYLIST matches from 3 chars. -->
+  <cmdtbl applid="ISR">
+    <cmd name="PANELID">Toggle panel id<cmdact action="passthru"></cmd>
+    <cmd name="KEYLIST" trunc="3">Edit keylist<cmdact action="passthru"></cmd>
+    <cmd name="BYE">Leave ISPF<cmdact action="alias exit"></cmd>
+  </cmdtbl>
 </panel>

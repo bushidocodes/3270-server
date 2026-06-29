@@ -160,10 +160,29 @@ class Screen:
     # Field name (upper) → {"checkmsg": id, "checks": [...]}, from a variable's
     # <varclass> validation (<checkl>/<checki>). Metadata: not rendered.
     validations: Dict[str, dict] = _dc_field(default_factory=dict)
+    # Command name (upper) → {"action": str, "trunc": int}, from a DTL <cmdtbl>.
+    # Lets the command line recognise named commands (with truncation).
+    commands: Dict[str, dict] = _dc_field(default_factory=dict)
 
     def add(self, item) -> "Screen":
         self.items.append(item)
         return self
+
+    def lookup_command(self, typed: Optional[str]) -> Optional[str]:
+        """Resolve a typed command against the command table, honouring each
+        command's truncation (e.g. KEYLIST trunc=3 matches KEY/KEYL/…). Returns
+        the command's action string, or ``None`` if it is not a known command.
+        """
+        if not typed:
+            return None
+        t = typed.strip().upper()
+        for name, c in self.commands.items():
+            if t == name:
+                return c["action"]
+            trunc = c.get("trunc") or 0
+            if trunc and len(t) >= trunc and name.startswith(t):
+                return c["action"]
+        return None
 
     def first_validation_error(self, fields_by_addr: Dict[int, str]):
         """Validate submitted fields against their <varclass> checks.

@@ -185,6 +185,51 @@ def test_substitution_unknown_left_intact():
     assert s.items[0].text == "keep &NOPE here"
 
 
+# ── command tables (<cmdtbl>/<cmd>/<cmdact>) ─────────────────────────────────
+
+def _cmd_panel():
+    return load_dtl(
+        '<panel>'
+        '<cmdtbl applid="ISR">'
+        '<cmd name="PANELID">Toggle<cmdact action="passthru"></cmd>'
+        '<cmd name="KEYLIST" trunc="3">Keys<cmdact action="passthru"></cmd>'
+        '<cmd name="BYE">Leave<cmdact action="alias exit"></cmd>'
+        '</cmdtbl>'
+        '</panel>'
+    )
+
+
+def test_cmdtbl_parses_commands_and_actions():
+    s = _cmd_panel()
+    assert s.commands["PANELID"]["action"] == "passthru"
+    assert s.commands["KEYLIST"]["trunc"] == 3
+    assert s.commands["BYE"]["action"] == "alias exit"
+
+
+def test_lookup_command_with_truncation():
+    s = _cmd_panel()
+    assert s.lookup_command("PANELID") == "passthru"
+    assert s.lookup_command("panelid") == "passthru"     # case-insensitive
+    assert s.lookup_command("KEY") == "passthru"         # trunc=3 → KEY matches
+    assert s.lookup_command("KEYL") == "passthru"
+    assert s.lookup_command("KE") is None                # below truncation
+    assert s.lookup_command("PAN") is None               # PANELID has no trunc
+    assert s.lookup_command("ZZZ") is None               # unknown
+
+
+def test_cmd_outside_cmdtbl_raises():
+    with pytest.raises(DTLError):
+        load_dtl('<panel><cmd name="X"><cmdact action="passthru"></cmd></panel>')
+
+
+def test_ispf_panel_has_command_table():
+    s = load_panel("ispf", ZUSER="IBMUSER ", ZTIME="13:45")
+    assert s.lookup_command("BYE") == "alias exit"
+    assert s.lookup_command("KEY") == "passthru"
+    # Command table is metadata — the menu still renders identically.
+    assert s.render() == build_ispf_menu("IBMUSER", "13:45").render()
+
+
 # ── message members (<msgmbr>/<msg>) ─────────────────────────────────────────
 
 def test_msg_member_parses_and_formats_with_substitution():
