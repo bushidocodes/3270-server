@@ -33,6 +33,28 @@ from server import (
 ERASE_WRITE = 0xF5
 
 
+def _check_failure(check: dict, value: str):
+    """Return message substitutions if ``value`` fails ``check``, else ``None``.
+
+    Mirrors a DTL ``<checki>``: ``range`` requires a number within [min, max];
+    ``values`` requires membership in a fixed set. The returned dict feeds the
+    check's ``checkmsg`` (e.g. ``{"VALUE": .., "MIN": .., "MAX": ..}``).
+    """
+    if check["type"] == "range":
+        try:
+            n = int(value)
+        except ValueError:
+            n = None
+        if n is None or not (check["min"] <= n <= check["max"]):
+            return {"VALUE": value, "MIN": check["min"], "MAX": check["max"]}
+        return None
+    if check["type"] == "values":
+        if value.upper() not in check["values"]:
+            return {"VALUE": value}
+        return None
+    return None  # unknown check type: treat as passing
+
+
 def _emit_sba(buf: bytearray, row: int, col: int) -> None:
     buf.append(SBA)
     buf.extend(encode_pack_addr(row, col))
@@ -131,10 +153,38 @@ class Screen:
     # Lets the dialog validate/route a typed option against the panel's own
     # declared choices. Metadata: not rendered.
     selections: Dict[str, str] = _dc_field(default_factory=dict)
+    # Field name (upper) → {"checkmsg": id, "checks": [...]}, from a variable's
+    # <varclass> validation (<checkl>/<checki>). Metadata: not rendered.
+    validations: Dict[str, dict] = _dc_field(default_factory=dict)
 
     def add(self, item) -> "Screen":
         self.items.append(item)
         return self
+
+    def first_validation_error(self, fields_by_addr: Dict[int, str]):
+        """Validate submitted fields against their <varclass> checks.
+
+        Returns ``(msgid, subs)`` for the first field whose value fails a check
+        (``subs`` are substitution values for the message, e.g. MIN/MAX/VALUE),
+        or ``None`` if everything validates. Empty fields are not checked.
+        """
+        addr_by_name = {
+            f.name.upper(): f.data_addr
+            for f in self.items
+            if isinstance(f, Field) and f.name
+        }
+        for name, spec in self.validations.items():
+            addr = addr_by_name.get(name.upper())
+            if addr is None:
+                continue
+            value = (fields_by_addr.get(addr) or "").strip()
+            if not value:
+                continue
+            for check in spec["checks"]:
+                subs = _check_failure(check, value)
+                if subs is not None:
+                    return spec["checkmsg"], subs
+        return None
 
     def command_value(self, fields_by_addr: Dict[int, str]) -> Optional[str]:
         """The text the client typed into the command area, or ``None``.

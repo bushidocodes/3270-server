@@ -56,7 +56,12 @@ Supported tags
 ``<keyi key cmd>desc``           one key binding: function key ``key`` (e.g.
                                  ``PF3``) invokes command ``cmd`` (e.g. ``EXIT``).
 ``<varclass name type>``         a variable class: ``type="numeric"`` makes its
-                                 variables numeric-only (rendered as nothing).
+                                 variables numeric-only. May contain a ``<checkl>``.
+``<checkl checkmsg>``            a validity-check list; ``checkmsg`` names the
+                                 message shown when a check fails.
+``<checki type>min max``         a check item: ``type="range"`` (``min max`` text)
+``<checki type>v1 v2 ...``       or ``type="values"`` (allowed values). A field's
+                                 input is validated against its class's checks.
 ``<varlist>``                    container for ``<vardcl>`` declarations.
 ``<vardcl name varclass>``       declares variable ``name`` to be of class
                                  ``varclass``; a field's ``numeric`` is inherited
@@ -157,8 +162,10 @@ class _DTLParser(HTMLParser):
         self._in_dtafldd = False  # capturing a <dtafldd> prompt child?
         self._dtafldd = None      # captured <dtafldd> prompt text, or None
         self._keylist = None      # active <keyl> bindings dict, or None
-        self._varclasses = {}     # <varclass> name (upper) → {"numeric": bool}
+        self._varclasses = {}     # <varclass> name (upper) → {"numeric", "checks", "checkmsg"}
         self._vardcls = {}        # <vardcl> name (upper) → {"varclass": name}
+        self._cur_varclass = None # name of the <varclass> currently being defined
+        self._checkl = None       # active <checkl> {"checkmsg", "checks"} or None
         self._in_varlist = False  # inside a <varlist>?
         self._in_msgmbr = False   # inside a <msgmbr>?
         self.messages = {}        # <msg> msgid (upper) → message text
@@ -190,6 +197,14 @@ class _DTLParser(HTMLParser):
             self._emit_keyi(a)
         elif tag == "varclass":
             self._emit_varclass(a)
+        elif tag == "checkl":
+            if self._cur_varclass is None:
+                raise DTLError("<checkl> outside of a <varclass>")
+            self._checkl = {"checkmsg": a.get("checkmsg"), "checks": []}
+        elif tag == "checki":
+            if self._checkl is None:
+                raise DTLError("<checki> outside of a <checkl>")
+            self._tag, self._attrs, self._chars = "checki", a, []
         elif tag == "varlist":
             self._in_varlist = True
         elif tag == "vardcl":
@@ -233,6 +248,16 @@ class _DTLParser(HTMLParser):
             self.screen.keylist = self._keylist or {}
             self._keylist = None
             return
+        if tag == "varclass":
+            self._cur_varclass = None
+            return
+        if tag == "checkl":
+            if self._checkl is not None and self._cur_varclass in self._varclasses:
+                vc = self._varclasses[self._cur_varclass]
+                vc["checks"].extend(self._checkl["checks"])
+                vc["checkmsg"] = self._checkl["checkmsg"]
+            self._checkl = None
+            return
         if tag == "varlist":
             self._in_varlist = False
             return
@@ -259,6 +284,8 @@ class _DTLParser(HTMLParser):
             self._emit_choice(a, content)
         elif tag == "msg":
             self.messages[a["msgid"].upper()] = content.strip()
+        elif tag == "checki":
+            self._emit_checki(a, content)
         self._tag, self._attrs, self._chars, self._dtafldd = None, None, [], None
 
     def handle_startendtag(self, tag, attrs):
@@ -273,6 +300,10 @@ class _DTLParser(HTMLParser):
         elif tag == "keyl":  # a self-closing keylist has no items; close it
             self.handle_endtag(tag)
         elif tag == "msg":  # a self-closing msg has empty text
+            self.handle_endtag(tag)
+        elif tag == "checki":  # a self-closing checki carries params in attrs
+            self.handle_endtag(tag)
+        elif tag == "varclass":  # a self-closing varclass has no checks; close it
             self.handle_endtag(tag)
         elif tag == "varlist":  # a self-closing varlist declares nothing; close it
             self._in_varlist = False
@@ -341,7 +372,22 @@ class _DTLParser(HTMLParser):
             mdt=_bool_attr(a, "mdt", default=True),
         )
         self.screen.add(field)
+        self._attach_validation(name)
         return field
+
+    def _attach_validation(self, name):
+        """Attach a field's variable-class <checkl> validation to the Screen."""
+        if not name:
+            return
+        decl = self._vardcls.get(name.upper())
+        if not decl:
+            return
+        vc = self._varclasses.get(str(decl.get("varclass", "")).upper())
+        if vc and vc.get("checks"):
+            self.screen.validations[name.upper()] = {
+                "checkmsg": vc.get("checkmsg"),
+                "checks": vc["checks"],
+            }
 
     def _resolve_numeric(self, a, name):
         """Whether the field is numeric. An explicit ``numeric`` attribute wins;
@@ -366,7 +412,30 @@ class _DTLParser(HTMLParser):
         # Authentic DTL types include CHAR/HEX/BIN/NUMERIC/…; the subset only
         # needs to know whether the class makes its fields numeric-only.
         vtype = str(a.get("type", "char")).strip().lower()
-        self._varclasses[name.upper()] = {"numeric": vtype in ("numeric", "num")}
+        self._cur_varclass = name.upper()
+        self._varclasses[self._cur_varclass] = {
+            "numeric": vtype in ("numeric", "num"),
+            "checks": [],
+            "checkmsg": None,
+        }
+
+    def _emit_checki(self, a, content):
+        """A <checki> validity-check item: ``type="range"`` with ``min max`` text,
+        or ``type="values"`` with a space-separated list of allowed values."""
+        ctype = str(a.get("type", "")).strip().lower()
+        words = content.split()
+        if ctype == "range":
+            if len(words) != 2:
+                raise DTLError('<checki type="range"> needs "min max"')
+            self._checkl["checks"].append(
+                {"type": "range", "min": int(words[0]), "max": int(words[1])}
+            )
+        elif ctype == "values":
+            self._checkl["checks"].append(
+                {"type": "values", "values": [w.upper() for w in words]}
+            )
+        else:
+            raise DTLError(f"<checki> unknown type {ctype!r}")
 
     def _emit_vardcl(self, a):
         if not self._in_varlist:

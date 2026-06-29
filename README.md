@@ -132,7 +132,8 @@ Supported tags: `<panel>`, `<info>` (text/instructions, with `fill`+`width` rule
 `ZCMD`), `<selfld>`/`<choice>` (menu lists; each `<choice matchval>` registers a selectable
 value the server validates against), `<keyl>`/`<keyi>` (a keylist binding function keys to
 commands), `<varclass>`/`<varlist>`/`<vardcl>` (typed variable declarations — a field inherits
-`numeric` from its variable's class), and `<area>`/`<region>` (flow boxes — see below). ISPF
+`numeric` from its class, and a class's `<checkl>`/`<checki>` range/value checks validate the
+field's input, e.g. the logon SIZE field), and `<area>`/`<region>` (flow boxes — see below). ISPF
 dialog variables are referenced `&`-style — `&ZUSER`, `&ZTIME` — and substituted at load time
 (e.g. the live user id and clock on the ISPF status line); `&&` is a literal ampersand and a
 trailing `.` terminates a reference. Messages live separately in a `<msgmbr>` (see `messages/`).

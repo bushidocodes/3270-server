@@ -4,10 +4,17 @@
      The transient error message (row 19) is injected at runtime, not here. -->
 <panel name="tsologon" title="z/OS V2R5.0 TSO/E LOGON" help="tsohelp">
   <!-- Typed variables: SIZE and PERFORM are numeric. Declaring them via a
-       <varclass> lets their <dtafld>s omit numeric="yes" and inherit the type. -->
+       <varclass> lets their <dtafld>s omit numeric="yes" and inherit the type.
+       SIZE additionally carries a range check; the server rejects out-of-range
+       input with message TSO001 before processing the logon. -->
   <varclass name="NUMFLD" type="numeric"/>
+  <varclass name="SIZEFLD" type="numeric">
+    <checkl checkmsg="TSO001">
+      <checki type="range">0 32768</checki>
+    </checkl>
+  </varclass>
   <varlist>
-    <vardcl name="size"    varclass="NUMFLD"/>
+    <vardcl name="size"    varclass="SIZEFLD"/>
     <vardcl name="perform" varclass="NUMFLD"/>
   </varlist>
 
