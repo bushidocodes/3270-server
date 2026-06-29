@@ -8,7 +8,7 @@ so DTL → Screen → bytes is proven equal to the live wire format.
 """
 import pytest
 
-from dtl import load_dtl, load_panel, DTLError
+from dtl import load_dtl, load_panel, load_messages, load_message_member, DTLError
 from screen import Screen, Text, Field, DisplayIntensity
 from screens import build_tso_logon, build_ispf_menu
 
@@ -183,6 +183,40 @@ def test_substitution_terminator_and_escape():
 def test_substitution_unknown_left_intact():
     s = load_dtl('<panel><info row="1" col="1">keep &NOPE here</info></panel>')
     assert s.items[0].text == "keep &NOPE here"
+
+
+# ── message members (<msgmbr>/<msg>) ─────────────────────────────────────────
+
+def test_msg_member_parses_and_formats_with_substitution():
+    cat = load_messages(
+        '<msgmbr name="IKJ564">'
+        '<msg msgid="IKJ56425I">PASSWORD NOT CORRECT FOR &USERID</msg>'
+        '<msg msgid="IKJ56700I">USERID MUST BE SPECIFIED</msg>'
+        '</msgmbr>'
+    )
+    assert cat.format("IKJ56425I", USERID="IBMUSER") == \
+        "IKJ56425I PASSWORD NOT CORRECT FOR IBMUSER"
+    assert cat.format("IKJ56700I") == "IKJ56700I USERID MUST BE SPECIFIED"
+    assert cat.format("NOSUCH") == "NOSUCH"     # unknown id -> just the id
+
+
+def test_shipped_tso_messages_match_legacy_strings():
+    # The DTL message member must reproduce the exact strings server.py used to
+    # hard-code, so the rendered logon-with-error screen is unchanged.
+    cat = load_message_member("tsomsgs")
+    assert cat.format("IKJ56425I", USERID="IBMUSER") == \
+        "IKJ56425I PASSWORD NOT CORRECT FOR IBMUSER"
+    assert cat.format("IKJ56700I") == "IKJ56700I USERID MUST BE SPECIFIED"
+
+
+def test_msg_outside_msgmbr_raises():
+    with pytest.raises(DTLError):
+        load_dtl('<msg msgid="X">hi</msg>')
+
+
+def test_msg_missing_msgid_raises():
+    with pytest.raises(DTLError):
+        load_dtl('<msgmbr><msg>hi</msg></msgmbr>')
 
 
 def test_missing_required_attr_raises():
