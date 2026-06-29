@@ -29,7 +29,7 @@ After a successful login you land on the ISPF Primary Option Menu. The keyboard 
 
 ![ISPF Primary Option Menu](docs/screenshots/ispf_menu.png)
 
-The full z/OS ISPF 7.1.0 menu is rendered, including the user ID, system ID (SY1), and current time in the status block. Options 0–13 and X are listed. (Sub-menus are not yet implemented — selecting any option returns you to the main menu with a short message.)
+The full z/OS ISPF 7.1.0 menu is rendered, including the user ID, system ID (SY1), and current time in the status block. Options 0–13 and X are listed. Option `0` opens a Settings sub-panel (complete with an action bar across the top); PF3 returns. The other options return to the menu with a short message.
 
 ## Quick start
 
@@ -97,6 +97,7 @@ panels/         — the screens authored declaratively
   ispf.dtl        ISPF Primary Option Menu
   tsohelp.dtl     PF1 help for the logon panel
   ispfhelp.dtl    PF1 help for the ISPF menu
+  settings.dtl    ISPF Settings sub-panel (option 0; has an action bar)
 messages/       — message members, kept apart from panels as on z/OS (ISPMLIB vs ISPPLIB)
   tsomsgs.dtl     TSO/E logon messages (IKJ56425I, IKJ56700I)
 ```
@@ -134,8 +135,9 @@ value the server validates against), `<keyl>`/`<keyi>` (a keylist binding functi
 commands), `<cmdtbl>`/`<cmd>`/`<cmdact>` (an application command table — the command line
 recognizes named commands, with truncation), `<varclass>`/`<varlist>`/`<vardcl>` (typed variable
 declarations — a field inherits `numeric` from its class, and a class's `<checkl>`/`<checki>`
-range/value checks validate the field's input, e.g. the logon SIZE field), and `<area>`/`<region>`
-(flow boxes — see below). ISPF
+range/value checks validate the field's input, e.g. the logon SIZE field), `<ab>`/`<abc>`/`<pdc>`
+(an action bar with pull-down choices, e.g. on the Settings sub-panel), `<topinst>`/`<paninst>`
+(instruction text), and `<area>`/`<region>` (flow boxes — see below). ISPF
 dialog variables are referenced `&`-style — `&ZUSER`, `&ZTIME` — and substituted at load time
 (e.g. the live user id and clock on the ISPF status line); `&&` is a literal ampersand and a
 trailing `.` terminates a reference. Messages live separately in a `<msgmbr>` (see `messages/`).

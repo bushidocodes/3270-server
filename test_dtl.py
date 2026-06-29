@@ -256,6 +256,44 @@ def test_ispf_panel_has_command_table():
     assert s.render() == build_ispf_menu("IBMUSER", "13:45").render()
 
 
+# ── action bars (<ab>/<abc>/<pdc>) ───────────────────────────────────────────
+
+def test_action_bar_renders_labels_and_records_pulldowns():
+    s = load_dtl(
+        '<panel>'
+        '<ab row="0" col="1" gap="3">'
+        '<abc>Menu<pdc action="exit">Exit</pdc></abc>'
+        '<abc>Help<pdc action="passthru">About</pdc></abc>'
+        '</ab>'
+        '</panel>'
+    )
+    # Labels laid out across row 0: Menu at col 1, Help at col 1+4+3 = 8.
+    assert s.items[0] == Text(0, 1, "Menu", DisplayIntensity.HIGH)
+    assert s.items[1] == Text(0, 8, "Help", DisplayIntensity.HIGH)
+    # Pull-down structure preserved for future interaction.
+    assert s.action_bar == [
+        {"label": "Menu", "pdc": [{"label": "Exit", "action": "exit"}]},
+        {"label": "Help", "pdc": [{"label": "About", "action": "passthru"}]},
+    ]
+
+
+def test_abc_outside_ab_raises():
+    with pytest.raises(DTLError):
+        load_dtl('<panel><abc>Menu</abc></panel>')
+
+
+def test_pdc_outside_abc_raises():
+    with pytest.raises(DTLError):
+        load_dtl('<panel><ab row="0" col="1"><pdc>x</pdc></ab></panel>')
+
+
+def test_settings_panel_has_action_bar():
+    s = load_panel("settings")
+    labels = [c["label"] for c in s.action_bar]
+    assert "Log/List" in labels and "Help" in labels
+    assert s.command_for("PF3") == "EXIT"   # PF3 returns to the menu
+
+
 # ── message members (<msgmbr>/<msg>) ─────────────────────────────────────────
 
 def test_msg_member_parses_and_formats_with_substitution():

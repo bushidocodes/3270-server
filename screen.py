@@ -163,6 +163,10 @@ class Screen:
     # Command name (upper) → {"action": str, "trunc": int}, from a DTL <cmdtbl>.
     # Lets the command line recognise named commands (with truncation).
     commands: Dict[str, dict] = _dc_field(default_factory=dict)
+    # Action-bar choices from a DTL <ab>: [{"label": str, "pdc": [...]}]. The
+    # choice labels are also emitted as Text items; the pull-down structure is
+    # kept here for future point-and-shoot interaction.
+    action_bar: List[dict] = _dc_field(default_factory=list)
 
     def add(self, item) -> "Screen":
         self.items.append(item)
