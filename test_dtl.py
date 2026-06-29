@@ -21,13 +21,13 @@ def test_logon_dtl_matches_builder():
 
 def test_ispf_dtl_matches_builder():
     userid, time_str = "IBMUSER", "13:45"
-    got = load_panel("ispf", userid=userid.ljust(8), time=time_str).render()
+    got = load_panel("ispf", ZUSER=userid.ljust(8), ZTIME=time_str).render()
     assert got == build_ispf_menu(userid, time_str).render()
 
 
 def test_ispf_dtl_other_userid_and_time():
     userid, time_str = "TESTUSER", "09:02"
-    got = load_panel("ispf", userid=userid.ljust(8), time=time_str).render()
+    got = load_panel("ispf", ZUSER=userid.ljust(8), ZTIME=time_str).render()
     assert got == build_ispf_menu(userid, time_str).render()
 
 
@@ -41,7 +41,7 @@ def test_logon_dtl_field_addresses():
 
 
 def test_ispf_dtl_option_field_and_title():
-    s = load_panel("ispf", userid="IBMUSER ", time="13:45")
+    s = load_panel("ispf", ZUSER="IBMUSER ", ZTIME="13:45")
     assert s.field_addr("option") == 2 * 80 + 14
     assert s.title == "ISPF Primary Option Menu"
 
@@ -108,8 +108,22 @@ def test_selfld_lays_out_choices_on_incrementing_rows():
 
 
 def test_substitution():
-    s = load_dtl('<panel><info row="1" col="1">Hi ${who}</info></panel>', who="BOB")
+    # &NAME dialog-variable reference, matched case-insensitively.
+    s = load_dtl('<panel><info row="1" col="1">Hi &who</info></panel>', WHO="BOB")
     assert s.items[0].text == "Hi BOB"
+
+
+def test_substitution_terminator_and_escape():
+    # A trailing '.' terminates (and is consumed by) the reference; && is literal.
+    s = load_dtl(
+        '<panel><info row="1" col="1">&ZUSER.X uses &&</info></panel>', ZUSER="IBMUSER"
+    )
+    assert s.items[0].text == "IBMUSERX uses &"
+
+
+def test_substitution_unknown_left_intact():
+    s = load_dtl('<panel><info row="1" col="1">keep &NOPE here</info></panel>')
+    assert s.items[0].text == "keep &NOPE here"
 
 
 def test_missing_required_attr_raises():

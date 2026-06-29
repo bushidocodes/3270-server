@@ -33,15 +33,42 @@ Supported tags
 length), ``hidden`` (non-display, e.g. password), ``numeric``, ``default``,
 ``cursor`` (place the cursor here), ``mdt`` (default yes), ``intensity`` (prompt).
 
-Variable substitution: ``${name}`` tokens in the source are replaced from the
-keyword arguments to :func:`load_dtl` before parsing (e.g. the live user id and
-time on the ISPF status line).
+Variable substitution: dialog-variable references are written ISPF-style with a
+leading ``&`` (e.g. ``&ZUSER``, ``&ZTIME``) and resolved from the keyword
+arguments to :func:`load_dtl` before parsing. A reference is a name of 1–8
+characters; an optional trailing ``.`` terminates it (and is consumed), so
+``&ZUSER.X`` substitutes ``ZUSER`` followed by a literal ``X``. ``&&`` is a
+literal ampersand. Names are matched case-insensitively (ISPF convention is
+uppercase). An undefined reference is left untouched rather than blanked.
 """
 
+import re
 from html.parser import HTMLParser
-from string import Template
 
 from screen import Screen, Text, Field, DisplayIntensity
+
+# An ISPF dialog-variable reference in panel source: ``&&`` (escaped literal
+# ampersand) or ``&NAME`` with an optional terminating ``.``. A name is 1–8
+# characters: a letter or one of @ # $ followed by up to 7 alphanumerics/@#$.
+_DIALOG_VAR_RE = re.compile(r"&&|&([A-Za-z@#$][A-Za-z0-9@#$]{0,7})\.?")
+
+
+def _substitute(source: str, variables: dict) -> str:
+    """Resolve ``&NAME`` dialog-variable references against ``variables``.
+
+    ``&&`` collapses to a single ``&``; a known ``&NAME`` (case-insensitive) is
+    replaced by its value and any trailing ``.`` consumed; an unknown reference
+    is left verbatim (including its terminator).
+    """
+    upper = {k.upper(): "" if v is None else str(v) for k, v in variables.items()}
+
+    def repl(match):
+        if match.group(0) == "&&":
+            return "&"
+        name = match.group(1).upper()
+        return upper.get(name, match.group(0))
+
+    return _DIALOG_VAR_RE.sub(repl, source)
 
 _INTENSITY = {
     "normal": DisplayIntensity.NORMAL,
@@ -170,11 +197,10 @@ class _DTLParser(HTMLParser):
 def load_dtl(source: str, **subs) -> Screen:
     """Parse DTL markup into a :class:`screen.Screen`.
 
-    ``subs`` provides values for ``${name}`` tokens in the source (e.g.
-    ``userid``, ``time``) before parsing.
+    ``subs`` provides values for ``&NAME`` dialog-variable references in the
+    source (e.g. ``ZUSER``, ``ZTIME``) before parsing.
     """
-    if subs:
-        source = Template(source).safe_substitute(**subs)
+    source = _substitute(source, subs)
     parser = _DTLParser()
     parser.feed(source)
     parser.close()
