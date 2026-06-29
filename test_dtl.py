@@ -57,6 +57,32 @@ def test_info_basic():
     assert s.items == [Text(1, 2, "hello", DisplayIntensity.NORMAL)]
 
 
+def test_topinst_and_paninst_render_like_info():
+    s = load_dtl(
+        '<panel>'
+        '<topinst row="2" col="1">Enter parameters:</topinst>'
+        '<paninst row="16" col="1" intensity="high">Press ENTER</paninst>'
+        '</panel>'
+    )
+    assert s.items[0] == Text(2, 1, "Enter parameters:", DisplayIntensity.NORMAL)
+    assert s.items[1] == Text(16, 1, "Press ENTER", DisplayIntensity.HIGH)
+
+
+def test_instruction_tags_flow_in_area():
+    s = load_dtl(
+        '<panel><area row="3" col="1">'
+        '<topinst>line one</topinst><paninst>line two</paninst>'
+        '</area></panel>'
+    )
+    assert s.items[0] == Text(3, 1, "line one", DisplayIntensity.NORMAL)
+    assert s.items[1] == Text(4, 1, "line two", DisplayIntensity.NORMAL)
+
+
+def test_logon_instruction_tags_byte_identical():
+    # The logon panel now uses <topinst>/<paninst> for some lines; bytes unchanged.
+    assert load_panel("logon").render() == build_tso_logon().render()
+
+
 def test_info_intensity_and_fill():
     s = load_dtl(
         '<panel>'

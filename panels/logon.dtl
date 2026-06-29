@@ -20,8 +20,8 @@
 
   <info row="0" col="18" intensity="high">--------  z/OS V2R5.0 TSO/E LOGON  --------</info>
 
-  <info row="2" col="1">Enter LOGON parameters below:</info>
-  <info row="2" col="42">RACF LOGON parameters:</info>
+  <topinst row="2" col="1">Enter LOGON parameters below:</topinst>
+  <topinst row="2" col="42">RACF LOGON parameters:</topinst>
   <info row="3" col="1" fill="-" width="37"/>
   <info row="3" col="42" fill="-" width="37"/>
 
@@ -44,7 +44,7 @@
   <info row="14" col="42">OIDcard   ===> None</info>
 
   <info row="15" col="1" intensity="highlighted">*** Authorized users only. Unauthorized access is prohibited. ***</info>
-  <info row="16" col="1">Press ENTER to logon to TSO/E</info>
+  <paninst row="16" col="1">Press ENTER to logon to TSO/E</paninst>
   <info row="17" col="1">PF1=HELP   PF3=LOGOFF</info>
   <info row="21" col="1">ENTER AN END COMMAND TO LOGOFF</info>
 
