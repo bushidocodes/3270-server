@@ -1,0 +1,20 @@
+<!DOCTYPE DM SYSTEM>
+<!-- Help panel for the ISPF Primary Option Menu. Shown on PF1; PF3 returns. -->
+<panel name="ispfhelp" title="ISPF Primary Option Menu - HELP">
+  <info row="0" col="0" intensity="high">------------------- ISPF Primary Option Menu  -  HELP -------------------------</info>
+
+  <info row="2" col="1">The Primary Option Menu is the top of the ISPF dialog hierarchy.</info>
+
+  <info row="4" col="1">Type an option number on the Option ===> line and press ENTER to select it.</info>
+  <info row="6" col="3">0  Settings      1  View          2  Edit          3  Utilities</info>
+  <info row="7" col="3">4  Foreground    5  Batch         6  Command       7  Dialog Test</info>
+
+  <info row="9" col="1">Enter X (or press PF3) on the Option line to exit ISPF and log off.</info>
+
+  <info row="22" col="1">PF3=Return</info>
+
+  <keyl name="HELPKEYS">
+    <keyi key="PF3"  cmd="EXIT">Return</keyi>
+    <keyi key="PF15" cmd="EXIT">Return</keyi>
+  </keyl>
+</panel>
