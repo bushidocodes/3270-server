@@ -572,14 +572,18 @@ def test_lines_preserves_internal_spacing_and_truncates_to_width():
 
 def test_list_field_columns_laid_out_with_headings():
     # Columns flow left to right by colwidth plus a one-column gap; their
-    # headings render on one row.
+    # headings render on one row, with an (empty) input model row beneath.
     s = load_dtl(
         '<panel name="p"><area>'
         '<lstfld><lstcol datavar=a colwidth=5>Mon<lstcol datavar=b colwidth=5>Tue</lstfld>'
         '</area></panel>'
     )
     H = DisplayIntensity.HIGH
-    assert s.items == [Text(0, 1, "Mon", H), Text(0, 7, "Tue", H)]
+    assert s.items == [
+        Text(0, 1, "Mon", H), Text(0, 7, "Tue", H),
+        Field(row=1, col=1, length=5, name="a", terminator=False),
+        Field(row=1, col=7, length=5, name="b", terminator=True),
+    ]
 
 
 def test_list_field_group_heading_centered_over_columns():
@@ -596,6 +600,43 @@ def test_list_field_group_heading_centered_over_columns():
     assert s.items == [
         Text(0, 5, "Wk", H),                       # centered over cols 1..12
         Text(1, 1, "Mon", H), Text(1, 7, "Tue", H),
+        Field(row=2, col=1, length=5, name="a", terminator=False),
+        Field(row=2, col=7, length=5, name="b", terminator=True),
+    ]
+
+
+def test_list_field_display_column_and_data_rows():
+    # usage=out renders protected text; input columns are pre-filled from the
+    # supplied rows; one model entry per row.
+    s = load_dtl(
+        '<panel name="p"><area>'
+        '<lstfld><lstcol datavar=t colwidth=4 usage=out>Time'
+        '<lstcol datavar=who colwidth=6>Who</lstfld>'
+        '</area></panel>',
+        rows=[{"t": "8:00", "who": "Acme"}, {"t": "9:00", "who": "Globex"}],
+    )
+    H, N = DisplayIntensity.HIGH, DisplayIntensity.NORMAL
+    assert s.items == [
+        Text(0, 1, "Time", H), Text(0, 6, "Who", H),
+        Text(1, 1, "8:00", N),  Field(row=1, col=6, length=6, name="who", default="Acme", terminator=True),
+        Text(2, 1, "9:00", N),  Field(row=2, col=6, length=6, name="who", default="Globex", terminator=True),
+    ]
+
+
+def test_list_field_line_attribute_stacks_columns():
+    # line=2 puts a column on the second row of each model entry; the entry is
+    # two rows tall, and each line's rightmost input field gets a terminator.
+    s = load_dtl(
+        '<panel name="p"><area>'
+        '<lstfld><lstcol datavar=a colwidth=5 line=1>A'
+        '<lstcol datavar=b colwidth=5 line=2>B</lstfld>'
+        '</area></panel>'
+    )
+    H = DisplayIntensity.HIGH
+    assert s.items == [
+        Text(0, 1, "A", H), Text(0, 7, "B", H),
+        Field(row=1, col=1, length=5, name="a", terminator=True),
+        Field(row=2, col=7, length=5, name="b", terminator=True),
     ]
 
 

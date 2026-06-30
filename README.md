@@ -141,7 +141,9 @@ pull-down, point-and-shoot style; or use **F10/F11** to step the cursor left/rig
 choices), `<topinst>`/`<paninst>`
 (instruction text), `<lstfld>`/`<lstcol>`/`<lstgrp>` (a scrollable list/table — the column
 headings are laid out left-to-right by `colwidth`, with a `<lstgrp headline=yes>` group heading
-centered over its columns; runtime model rows are supplied by the table service), and
+centered over its columns; below them, model rows render each column as a protected display
+(`usage=out`) or an editable input field, stacked by `line=N`, populated from data passed as
+`load_panel(..., rows=[{datavar: value}, …])`), and
 `<area>`/`<region>` (flow boxes — see below). ISPF
 dialog variables are referenced `&`-style — `&ZUSER`, `&ZTIME` — and substituted at load time
 (e.g. the live user id and clock on the ISPF status line); `&&` is a literal ampersand and a

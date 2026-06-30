@@ -238,6 +238,7 @@ class _DTLParser(HTMLParser):
         self._lists = []          # stack of open <ul>/<ol> ({"type", "n"})
         self._lstfld = None       # active <lstfld> table {"cols", "groups", …}
         self._lstgrp = None       # current <lstgrp> column group, or None
+        self._rows = None         # data rows for the list field (datavar→value)
 
     # ── SGML event handling ──────────────────────────────────────────────────
 
@@ -758,7 +759,8 @@ class _DTLParser(HTMLParser):
 
     def _add_lstcol(self, a, content):
         """Record one <lstcol> in the active table: its heading text, width
-        (``colwidth``, else as wide as the heading), and its group."""
+        (``colwidth``, else as wide as the heading), the bound ``datavar``, its
+        ``usage`` (in/out), the model ``line`` it sits on, and its group."""
         if self._lstfld is None:
             return
         heading = " ".join(content.split())
@@ -769,6 +771,11 @@ class _DTLParser(HTMLParser):
         self._lstfld["cols"].append({
             "heading": heading,
             "width": width,
+            "datavar": a.get("datavar", ""),
+            # A column is an input field unless it is explicitly display-only.
+            "usage": "out" if a.get("usage", "").lower() == "out" else "in",
+            "line": int(a.get("line", 1)),
+            "align": a.get("align", "start").lower(),
             "group": self._lstgrp,
         })
 
@@ -803,8 +810,51 @@ class _DTLParser(HTMLParser):
             if c["heading"]:
                 self.screen.add(Text(row, c["x"], c["heading"][:c["width"]], H))
         row += 1
+        row = self._emit_lstfld_rows(cols, row)
         if fld["ctx"] is not None:
             fld["ctx"]["row"] = row
+
+    def _emit_lstfld_rows(self, cols, row):
+        """Lay out the table's model rows below the header. Each data row (or a
+        single empty template when none is supplied) renders every column on its
+        ``line``: a display column (usage=out) as protected text, an input
+        column as an unprotected field, pre-filled from the row's ``datavar``.
+        Rows are capped to the panel depth. Returns the next free row."""
+        entry_height = max((c["line"] for c in cols), default=1)
+        # The rightmost input column on each model line needs an explicit
+        # terminator; interior fields are bounded by the next column's start.
+        last_in = {}
+        for c in cols:
+            if c["usage"] == "in":
+                last_in[c["line"]] = c
+        last_in_ids = {id(c) for c in last_in.values()}
+        data = self._rows if self._rows else [None]
+        for entry in data:
+            if row + entry_height > self.screen.depth - 1:
+                break  # leave room; don't overrun the panel
+            for c in cols:
+                cy = row + (c["line"] - 1)
+                raw = "" if entry is None else str(entry.get(c["datavar"], ""))
+                value = self._align(raw, c["width"], c["align"])
+                if c["usage"] == "out":
+                    self.screen.add(Text(cy, c["x"], value, DisplayIntensity.NORMAL))
+                else:
+                    self.screen.add(Field(
+                        row=cy, col=c["x"], length=c["width"],
+                        name=c["datavar"] or None, default=value,
+                        terminator=id(c) in last_in_ids,
+                    ))
+            row += entry_height
+        return row
+
+    @staticmethod
+    def _align(text, width, align):
+        text = text[:width]
+        if align == "end":
+            return text.rjust(width)
+        if align in ("center", "centre"):
+            return text.center(width)
+        return text  # start/left: no padding (an input field fills its own width)
 
     def _emit_info(self, a, content):
         if "fill" in a:
@@ -987,32 +1037,36 @@ class _DTLParser(HTMLParser):
         self._keylist[key.upper()] = cmd.upper()
 
 
-def load_dtl(source: str, **subs) -> Screen:
+def load_dtl(source: str, rows=None, **subs) -> Screen:
     """Parse DTL markup into a :class:`screen.Screen`.
 
     ``subs`` provides values for ``&NAME`` dialog-variable references in the
-    source (e.g. ``ZUSER``, ``ZTIME``) before parsing.
+    source (e.g. ``ZUSER``, ``ZTIME``) before parsing. ``rows`` populates a
+    ``<lstfld>`` list/table: a sequence of ``{datavar: value}`` mappings, one
+    per model row (when omitted, a single empty model row is laid out).
     """
     source = _resolve_entities(source)
     source = _substitute(source, subs)
     parser = _DTLParser()
+    parser._rows = rows
     parser.feed(source)
     parser.close()
     return parser.screen
 
 
-def load_panel(name: str, directory: str = None, **subs) -> Screen:
+def load_panel(name: str, directory: str = None, rows=None, **subs) -> Screen:
     """Load and parse ``<directory>/<name>.dtl``.
 
     ``directory`` defaults to the ``panels`` folder next to this module, so the
     panels resolve regardless of the process's current working directory.
+    ``rows`` populates a ``<lstfld>`` list/table (see :func:`load_dtl`).
     """
     import os
     if directory is None:
         directory = os.path.join(os.path.dirname(os.path.abspath(__file__)), "panels")
     path = os.path.join(directory, f"{name}.dtl")
     with open(path, "r", encoding="utf-8") as fh:
-        return load_dtl(fh.read(), **subs)
+        return load_dtl(fh.read(), rows=rows, **subs)
 
 
 class MessageCatalog:
