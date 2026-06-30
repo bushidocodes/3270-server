@@ -568,6 +568,42 @@ def test_lines_preserves_internal_spacing_and_truncates_to_width():
     ]
 
 
+# ── list/table fields (<lstfld>/<lstcol>/<lstgrp>) ───────────────────────────
+
+def test_list_field_columns_laid_out_with_headings():
+    # Columns flow left to right by colwidth plus a one-column gap; their
+    # headings render on one row.
+    s = load_dtl(
+        '<panel name="p"><area>'
+        '<lstfld><lstcol datavar=a colwidth=5>Mon<lstcol datavar=b colwidth=5>Tue</lstfld>'
+        '</area></panel>'
+    )
+    H = DisplayIntensity.HIGH
+    assert s.items == [Text(0, 1, "Mon", H), Text(0, 7, "Tue", H)]
+
+
+def test_list_field_group_heading_centered_over_columns():
+    # A <lstgrp headline=yes> heading is centered over its columns' span, on the
+    # row above the column headings.
+    s = load_dtl(
+        '<panel name="p"><area>'
+        '<lstfld><lstgrp headline=yes>Wk'
+        '<lstcol datavar=a colwidth=5>Mon<lstcol datavar=b colwidth=5>Tue'
+        '</lstgrp></lstfld>'
+        '</area></panel>'
+    )
+    H = DisplayIntensity.HIGH
+    assert s.items == [
+        Text(0, 5, "Wk", H),                       # centered over cols 1..12
+        Text(1, 1, "Mon", H), Text(1, 7, "Tue", H),
+    ]
+
+
+def test_list_column_outside_list_field_raises():
+    with pytest.raises(DTLError):
+        load_dtl('<panel name="p"><lstcol colwidth=5>X</panel>')
+
+
 def test_panel_title_text_centered():
     s = load_dtl('<panel name="p" width="20">My Title<info>body</info></panel>')
     assert s.title == "My Title"
