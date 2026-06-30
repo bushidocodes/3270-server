@@ -211,6 +211,43 @@ def test_substitution_unknown_left_intact():
     assert s.items[0].text == "keep &NOPE here"
 
 
+# ── SGML general entities (<!ENTITY name "text">) ────────────────────────────
+
+def test_internal_entity_reference_resolved():
+    # <!ENTITY name "value"> declared in the doctype internal subset; &name;
+    # references in the body are replaced with the value.
+    s = load_dtl(
+        '<!doctype dm system [\n'
+        '<!entity guar "money-back guarantee">\n'
+        ']>\n'
+        '<panel><info row="1" col="1">It has our &guar;.</info></panel>'
+    )
+    assert s.items[0].text == "It has our money-back guarantee."
+
+
+def test_external_system_entity_reference_left_intact():
+    # A SYSTEM entity references a file we don't have; leave the reference as-is
+    # rather than dropping or guessing it.
+    s = load_dtl(
+        '<!doctype dm system [\n'
+        '<!entity widgets system>\n'
+        ']>\n'
+        '<panel><info row="1" col="1">See &widgets; now.</info></panel>'
+    )
+    assert s.items[0].text == "See &widgets; now."
+
+
+def test_entity_does_not_disturb_dialog_vars():
+    # An entity declaration in the same source must not break &NAME dialog
+    # variables (which use a '.' terminator, not ';') or && escapes.
+    s = load_dtl(
+        '<!entity guar "G">\n'
+        '<panel><info row="1" col="1">&guar; &who.X &&</info></panel>',
+        WHO="BOB",
+    )
+    assert s.items[0].text == "G BOBX &"
+
+
 # ── command tables (<cmdtbl>/<cmd>/<cmdact>) ─────────────────────────────────
 
 def _cmd_panel():
