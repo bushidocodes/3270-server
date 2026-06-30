@@ -23,6 +23,7 @@ from server import (
     read_client_input,
     write_control_character,
     _dialog_vars,
+    _run_tso_command,
 )
 
 SBA = 0x11
@@ -309,3 +310,17 @@ def test_dialog_vars_uses_live_userid_and_authentic_names():
     assert by_name["ZAPPLID"] == "ISR"
     # every row is a {vname, vvalue} mapping the <lstfld> can lay out
     assert all(set(r) == {"vname", "vvalue"} for r in rows)
+
+
+# ── TSO Command Shell (option 6) ────────────────────────────────────────────
+
+def test_run_tso_command_unknown_verb_is_not_found():
+    # TSO's authentic response to an unrecognized command.
+    assert _run_tso_command("LISTDS 'A.B'") == "IKJ56500I COMMAND LISTDS NOT FOUND"
+    assert _run_tso_command("foo") == "IKJ56500I COMMAND FOO NOT FOUND"
+
+
+def test_run_tso_command_time_reports_live_clock():
+    out = _run_tso_command("TIME")
+    assert out.startswith("IKJ56650I TIME-")
+    assert "DAY-" in out and "DATE-" in out

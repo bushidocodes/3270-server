@@ -188,6 +188,46 @@ def _dialog_vars(userid: str):
     ]
 
 
+def _run_tso_command(cmd: str) -> str:
+    """Run a TSO command entered in the Command Shell (option 6) and return the
+    response line. A small set of real commands is handled (TIME, READY); any
+    other verb yields the authentic 'command not found' message TSO issues."""
+    verb = cmd.split()[0].upper()
+    if verb in ("TIME",):
+        now = datetime.now()
+        # Mirrors the real TSO TIME message (Julian date, day of week).
+        return (now.strftime("IKJ56650I TIME-%I:%M:%S %p")
+                + now.strftime(" DATE-%Y.%j DAY-").upper()
+                + now.strftime("%A").upper())
+    if verb in ("READY", "LISTBC", "PROFILE"):
+        return "READY"
+    return f"IKJ56500I COMMAND {verb} NOT FOUND"
+
+
+def _show_command_shell(client_socket):
+    """ISPF option 6: a TSO Command Shell. Loops reading a command from the
+    panel's <cmdarea>, running it, and showing the response, until the user
+    presses PF3 (or PF1 for help). Enter runs the typed command and stays."""
+    from dtl import load_panel
+
+    msg = ""
+    while True:
+        screen = load_panel("command", CMDMSG=msg)
+        _send_screen(client_socket, screen)
+        result = read_client_input(client_socket)
+        if result is None:
+            return
+        aid, fields, _ = result
+        aid_str = aid_to_string(aid)
+        if screen.command_for(aid_str) in _LEAVE_COMMANDS:
+            return
+        if aid_str == "PF1" and screen.help:
+            _show_overlay(client_socket, screen.help)
+            continue
+        cmd = (screen.command_value(fields) or "").strip()
+        msg = _run_tso_command(cmd) if cmd else ""
+
+
 def _show_overlay(client_socket, panel_name: str, rows=None):
     """Display an overlay panel (help or sub-panel) and wait for the user to
     leave it (PF3/PF15/Enter). The underlying panel is re-sent by the caller's
@@ -569,6 +609,10 @@ def handle_client(client_socket, addr):
             if option == "0":
                 # Option 0 (Settings) opens a real sub-panel (with an action bar).
                 _show_overlay(client_socket, "settings")
+                short_msg = None
+            elif option == "6":
+                # Option 6 (Command) opens a TSO Command Shell sub-panel.
+                _show_command_shell(client_socket)
                 short_msg = None
             elif option == "7":
                 # Option 7 (Dialog Test) opens the variable-display sub-panel,
