@@ -485,6 +485,47 @@ def test_nested_unordered_lists_matches_guide_figure():
     ]
 
 
+def test_widget_help_matches_guide_figure():
+    # IBM DTL Guide "Widget Assembly Help" figure: a <help> panel with a
+    # centered title, a paragraph, an ordered list (1./2./3.) with a nested
+    # lettered list (a./b.), word-wrapped to width 60 with a hanging indent,
+    # and a trailing paragraph aligned under the list. (Verbatim guide source.)
+    s = load_dtl(
+        '<!DOCTYPE DM SYSTEM>\n'
+        '<HELP NAME=ol DEPTH=22 WIDTH=60>Widget Assembly Help\n'
+        '<AREA>\n<INFO>\n'
+        '<P>To assemble your new Widget, you should:<OL><LI>Attach the gizmo '
+        'flexure component to the\nmain steering mechanism of the doohickey.'
+        '<OL COMPACT><LI>If slot A fits snugly on retaining\npin B, proceed to '
+        'step 2.\n<LI>If slot A does not fit snugly on\nretaining pin B, throw '
+        'the Widget away\nand buy a new one.</OL><LI>Use a screwdriver to turn '
+        'the power drive unit on.\n<LI>Stand back and watch the fun!\n'
+        '<P>Wake up the kids and call the neighbors, they won\'t\n'
+        'want to miss it!</OL></INFO>\n</AREA>\n</HELP>'
+    )
+    N = DisplayIntensity.NORMAL
+    assert s.title == "Widget Assembly Help"
+    assert s.items == [
+        Text(0, 20, "Widget Assembly Help", N),
+        Text(1, 1, "To assemble your new Widget, you should:", N),
+        Text(2, 1, "1.", N),
+        Text(2, 5, "Attach the gizmo flexure component to the main", N),
+        Text(3, 5, "steering mechanism of the doohickey.", N),
+        Text(4, 5, "a.", N),
+        Text(4, 9, "If slot A fits snugly on retaining pin B, proceed", N),
+        Text(5, 9, "to step 2.", N),
+        Text(6, 5, "b.", N),
+        Text(6, 9, "If slot A does not fit snugly on retaining pin B,", N),
+        Text(7, 9, "throw the Widget away and buy a new one.", N),
+        Text(8, 1, "2.", N),
+        Text(8, 5, "Use a screwdriver to turn the power drive unit on.", N),
+        Text(9, 1, "3.", N),
+        Text(9, 5, "Stand back and watch the fun!", N),
+        Text(10, 5, "Wake up the kids and call the neighbors, they won't", N),
+        Text(11, 5, "want to miss it!", N),
+    ]
+
+
 def test_implicit_end_does_not_break_explicitly_closed_panels():
     # Bundled-panel style (explicit </info>) is unaffected by implicit-end logic.
     assert load_panel("logon").render() == build_tso_logon().render()

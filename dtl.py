@@ -40,13 +40,17 @@ Supported tags
 ``<topinst row col>``            top instruction / panel instruction text. Render
 ``<paninst row col>``            like ``<info>`` (protected text); semantic DTL tags.
 ``<p>`` ``<lines>`` ``<dt>`` ``<dd>``  flowed text: paragraphs and items each render
-``<pt>`` ``<pd>``                as a protected line. DTL omits end tags, so a block
-                                 element is closed by whatever block tag follows it.
-``<ul>`` ``<ol>`` ``<li>``         a list: each ``<li>`` flows as a bullet plus its
-                                 text, indented one level per nesting (``<ul>`` →
-                                 ``o``/``-``/``--`` by depth; ``<ol>`` → ``1.``, ``2.``…).
-Panel title: the text after ``<panel ...>`` (before its first child) renders
-centered on row 0, with the body flowing beneath it.
+``<pt>`` ``<pd>``                as protected lines, word-wrapped to the panel
+                                 width with a hanging indent. DTL omits end tags,
+                                 so a block element is closed by the next block tag.
+``<ul>`` ``<ol>`` ``<li>``         a list: each ``<li>`` flows as a bullet/number plus
+                                 its (wrapped) text, indented one level per nesting.
+                                 ``<ul>`` → ``o``/``-``/``--`` by depth; ``<ol>`` →
+                                 ``1.`` then nested ``a.`` then ``i.`` (CUA style).
+``<help name width depth>``      a top-level help panel — same flow root as
+                                 ``<panel>`` (title text, width/depth, flow box).
+Panel title: the text after ``<panel ...>``/``<help ...>`` (before its first child)
+renders centered on row 0, with the body flowing beneath it.
 ``<dtafld row col fldcol         a prompt plus an unprotected input field at
    datavar entwidth ...>``       ``fldcol``. The prompt is the text of a nested
                                  ``<dtafldd>`` child (authentic DTL) or, as a
@@ -218,7 +222,8 @@ class _DTLParser(HTMLParser):
             self._emit_current()
         if tag in ("ul", "ol"):
             self._lists.append({"type": tag, "n": 0})
-        if tag == "panel":
+        if tag in ("panel", "help"):
+            # A top-level <help> is itself a (help) panel — same flow root.
             self.screen.title = a.get("title")
             self.screen.help = a.get("help")
             if "width" in a:
@@ -346,7 +351,7 @@ class _DTLParser(HTMLParser):
             self._emit_current()  # flush at the current list depth, before any pop
         if tag in ("ul", "ol") and self._lists:
             self._lists.pop()
-        if tag == "panel":
+        if tag in ("panel", "help"):
             self._areas.clear()  # drop the panel's implicit flow box
             return
         if tag == "selfld":
@@ -537,10 +542,55 @@ class _DTLParser(HTMLParser):
         if self._areas and self._areas[-1]["row"] < 1:
             self._areas[-1]["row"] = 1  # flow starts below the title
 
+    def _wrap(self, text, width):
+        """Greedy word-wrap ``text`` into lines no wider than ``width``."""
+        words, lines, cur = text.split(), [], ""
+        for w in words:
+            if not cur:
+                cur = w
+            elif len(cur) + 1 + len(w) <= width:
+                cur += " " + w
+            else:
+                lines.append(cur)
+                cur = w
+        if cur:
+            lines.append(cur)
+        return lines or [""]
+
+    @staticmethod
+    def _roman(n):
+        vals = ((10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i"))
+        out = ""
+        for v, s in vals:
+            while n >= v:
+                out += s; n -= v
+        return out
+
+    def _ol_marker(self, n, ol_depth):
+        """Ordered-list marker: arabic at level 1, lowercase alpha at level 2,
+        lowercase roman at level 3 (CUA-style nested numbering)."""
+        if ol_depth == 2:
+            return chr(ord("a") + (n - 1) % 26) + "."
+        if ol_depth >= 3:
+            return self._roman(n) + "."
+        return f"{n}."
+
+    def _emit_flow_lines(self, text, row, col, ctx, marker=None, marker_col=None):
+        """Word-wrap ``text`` and emit it as protected lines from ``row`` at
+        ``col`` (hanging indent for continuations). Optionally place a ``marker``
+        (bullet/number) on the first line. Advances the flow cursor."""
+        lines = self._wrap(text, max(1, self.screen.width - (col + 1)))
+        if marker is not None:
+            self.screen.add(Text(row, marker_col, marker, DisplayIntensity.NORMAL))
+        for i, ln in enumerate(lines):
+            self.screen.add(Text(row + i, col, ln, DisplayIntensity.NORMAL))
+        if ctx is not None:
+            ctx["row"] = row + len(lines)
+
     def _emit_listitem(self, a, content):
-        """Emit one <li>: a depth-based bullet plus the item text, flowed and
-        indented one level per enclosing <ul>/<ol>."""
-        text = re.sub(r"\s*\n\s*", " ", content).strip()
+        """Emit one <li>: a depth-based bullet/number plus the item text, flowed,
+        word-wrapped with a hanging indent, one level deeper per nested list."""
+        text = " ".join(content.split())
         if not text:
             return
         ctx = self._areas[-1] if self._areas else None
@@ -551,30 +601,38 @@ class _DTLParser(HTMLParser):
         lst = self._lists[-1] if self._lists else None
         if lst and lst["type"] == "ol":
             lst["n"] += 1
-            bullet = f"{lst['n']}."
+            ol_depth = sum(1 for ln in self._lists if ln["type"] == "ol")
+            marker = self._ol_marker(lst["n"], ol_depth)
         else:
-            bullet = self._BULLETS[min(depth - 1, len(self._BULLETS) - 1)]
-        self.screen.add(Text(row, bullet_col, bullet, DisplayIntensity.NORMAL))
-        self.screen.add(Text(row, bullet_col + self._LIST_INDENT, text,
-                             DisplayIntensity.NORMAL))
-        if ctx:
-            ctx["row"] = row + 1
+            marker = self._BULLETS[min(depth - 1, len(self._BULLETS) - 1)]
+        self._emit_flow_lines(text, row, bullet_col + self._LIST_INDENT, ctx,
+                              marker=marker, marker_col=bullet_col)
 
     def _emit_info(self, a, content):
         if "fill" in a:
             content = a["fill"] * int(a.get("width", 0))
-        elif "\n" in content:
-            # Multi-line flowed text (paragraphs wrap in real DTL): collapse the
-            # line breaks and surrounding whitespace to single spaces so it
-            # renders on one line. Single-line content is left byte-for-byte
-            # untouched, so the bundled panels' exact spacing is preserved.
-            content = re.sub(r"\s*\n\s*", " ", content).strip()
-            if not content:
+            row, col, _ = self._resolve_pos(a, "info")
+            self.screen.add(Text(row, col, content, _intensity(a)))
+            return
+        if "row" in a:
+            # Explicit position: emit content exactly as written (no wrap), so
+            # the bundled panels stay byte-for-byte identical.
+            if "\n" in content:
+                content = re.sub(r"\s*\n\s*", " ", content).strip()
+            if not content.strip():
                 return
-        elif not content.strip():
-            return  # empty text element: render nothing, don't consume a line
-        row, col, _ = self._resolve_pos(a, "info")
-        self.screen.add(Text(row, col, content, _intensity(a)))
+            row, col, _ = self._resolve_pos(a, "info")
+            self.screen.add(Text(row, col, content, _intensity(a)))
+            return
+        # Flowed text: normalize whitespace and word-wrap to the panel width.
+        text = " ".join(content.split())
+        if not text:
+            return
+        row, col, ctx = self._resolve_pos(a, "info")
+        if self._lists:
+            # A paragraph inside a list aligns with the list's item text.
+            col += len(self._lists) * self._LIST_INDENT
+        self._emit_flow_lines(text, row, col, ctx)
 
     def _add_field(self, a, content, tag, name):
         """Emit a prompt (if any) plus an unprotected input field; return it."""
