@@ -452,6 +452,49 @@ def test_ordered_list_numbers_items():
     ]
 
 
+def test_definition_list_pairs_term_and_description_on_one_line():
+    # <dl> default break=none: each <dt> term and its <dd> description share a
+    # line, the description in a column tsize (default 10) to the right.
+    s = load_dtl(
+        '<panel name="p"><dl><dt>AP<dd>Appliances<dt>AU<dd>Automotive</dl></panel>'
+    )
+    N = DisplayIntensity.NORMAL
+    assert s.items == [
+        Text(0, 1, "AP", N), Text(0, 11, "Appliances", N),
+        Text(1, 1, "AU", N), Text(1, 11, "Automotive", N),
+    ]
+
+
+def test_definition_list_tsize_sets_description_column():
+    s = load_dtl('<panel name="p"><dl tsize=4><dt>X<dd>ex</dl></panel>')
+    N = DisplayIntensity.NORMAL
+    assert s.items == [Text(0, 1, "X", N), Text(0, 5, "ex", N)]
+
+
+def test_definition_list_break_all_puts_description_on_next_line():
+    # break=all: the description always starts on the line after the term,
+    # indented to the term column (tsize).
+    s = load_dtl(
+        '<panel name="p"><dl tsize=6 break=all><dt>Cash<dd>We accept it</dl></panel>'
+    )
+    N = DisplayIntensity.NORMAL
+    assert s.items == [Text(0, 1, "Cash", N), Text(1, 7, "We accept it", N)]
+
+
+def test_parameter_list_wraps_long_description_under_column():
+    # <parml>/<pt>/<pd> behaves like <dl>; a long description wraps with a
+    # hanging indent aligned under the description column.
+    s = load_dtl(
+        '<panel name="p" width=30><parml><pt>78<pd>seventh and eighth digits</parml></panel>'
+    )
+    N = DisplayIntensity.NORMAL
+    assert s.items == [
+        Text(0, 1, "78", N),
+        Text(0, 11, "seventh and eighth", N),
+        Text(1, 11, "digits", N),
+    ]
+
+
 def test_panel_title_text_centered():
     s = load_dtl('<panel name="p" width="20">My Title<info>body</info></panel>')
     assert s.title == "My Title"

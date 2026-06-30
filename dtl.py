@@ -223,6 +223,15 @@ class _DTLParser(HTMLParser):
             self._emit_current()
         if tag in ("ul", "ol"):
             self._lists.append({"type": tag, "n": 0})
+        elif tag in ("dl", "parml"):
+            # A definition/parameter list carries its term-column width (tsize)
+            # and break style; <dt>/<dd> (<pt>/<pd>) entries lay out against it.
+            self._lists.append({
+                "type": tag, "n": 0,
+                "tsize": int(a["tsize"]) if "tsize" in a else self._DL_TSIZE,
+                "break": a.get("break", "none").lower(),
+                "pending": None,
+            })
         if tag in ("panel", "help"):
             # A top-level <help> is itself a (help) panel — same flow root.
             self.screen.title = a.get("title")
@@ -356,7 +365,7 @@ class _DTLParser(HTMLParser):
         # end tag is handled below via the normal `tag == self._tag` path.
         if self._tag is not None and tag != self._tag and tag != "dtafldd":
             self._emit_current()  # flush at the current list depth, before any pop
-        if tag in ("ul", "ol") and self._lists:
+        if tag in ("ul", "ol", "dl", "parml") and self._lists:
             self._lists.pop()
         if tag in ("panel", "help"):
             self._areas.clear()  # drop the panel's implicit flow box
@@ -445,6 +454,8 @@ class _DTLParser(HTMLParser):
         a = self._attrs
         if tag == "li":
             self._emit_listitem(a, content)
+        elif tag in ("dt", "dd", "pt", "pd"):
+            self._emit_defitem(tag, a, content)
         elif tag in _TEXT_TAGS:
             self._emit_info(a, content)
         elif tag == "dtafld":
@@ -465,7 +476,7 @@ class _DTLParser(HTMLParser):
         self.handle_starttag(tag, attrs)
         if tag in _CONTENT_TAGS:
             self.handle_endtag(tag)
-        elif tag in ("ul", "ol"):  # a self-closing list is empty; pop it
+        elif tag in ("ul", "ol", "dl", "parml"):  # a self-closing list is empty; pop it
             self.handle_endtag(tag)
         elif tag == "dtafldd":  # empty prompt
             self.handle_endtag(tag)
@@ -534,6 +545,7 @@ class _DTLParser(HTMLParser):
     # Unordered-list bullets by nesting depth (ISPF: o, then -, then --, …).
     _BULLETS = ("o", "-", "--", "---")
     _LIST_INDENT = 4   # columns added per nesting level
+    _DL_TSIZE = 10     # default <dl>/<parml> term-column width (chars)
 
     def _finalize_panel_title(self):
         """Emit the panel's title text (centered on row 0) and start the flow
@@ -614,6 +626,39 @@ class _DTLParser(HTMLParser):
             marker = self._BULLETS[min(depth - 1, len(self._BULLETS) - 1)]
         self._emit_flow_lines(text, row, bullet_col + self._LIST_INDENT, ctx,
                               marker=marker, marker_col=bullet_col)
+
+    def _emit_defitem(self, tag, a, content):
+        """Emit one definition-list entry. A term (<dt>/<pt>) sits at the list
+        margin; its description (<dd>/<pd>) is laid out in a column ``tsize``
+        chars to the right — on the term's own line when ``break`` is
+        ``none``/``fit`` and the term fits, otherwise on the following line."""
+        text = " ".join(content.split())
+        if not text:
+            return
+        # Find the enclosing definition list (it carries tsize/break/pending).
+        dl = next((ln for ln in reversed(self._lists)
+                   if ln["type"] in ("dl", "parml")), None)
+        tsize = dl["tsize"] if dl else self._DL_TSIZE
+        brk = dl["break"] if dl else "none"
+        depth = max(len(self._lists), 1)
+        row, col, ctx = self._resolve_pos(a, tag)  # advances the flow one line
+        base = col + (depth - 1) * self._LIST_INDENT
+        if tag in ("dt", "pt"):
+            self.screen.add(Text(row, base, text, _intensity(a)))
+            # Decide where this term's description goes. With break=none/fit a
+            # short term shares its line; rewind the flow cursor so the next
+            # <dd> lands on the same row.
+            same_line = brk != "all" and len(text) < tsize
+            if same_line and ctx is not None:
+                ctx["row"] = row
+            if dl is not None:
+                dl["pending"] = {"desc_col": base + tsize}
+            return
+        # Description.
+        desc_col = dl["pending"]["desc_col"] if dl and dl["pending"] else base + tsize
+        if dl is not None:
+            dl["pending"] = None
+        self._emit_flow_lines(text, row, desc_col, ctx)
 
     def _emit_info(self, a, content):
         if "fill" in a:
