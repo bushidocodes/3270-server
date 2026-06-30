@@ -765,12 +765,29 @@ def test_checkl_outside_varclass_raises():
         load_dtl('<panel><checkl><checki type="range">0 1</checki></checkl></panel>')
 
 
-def test_checki_bad_type_raises():
-    with pytest.raises(DTLError):
-        load_dtl(
-            '<panel><varclass name="C"><checkl>'
-            '<checki type="bogus">x</checki></checkl></varclass></panel>'
-        )
+def test_checki_unsupported_type_is_ignored():
+    # An unenforced check type (alpha, picture, …) loads without failing the
+    # panel; it simply adds no validation.
+    s = load_dtl(
+        '<panel>'
+        '<varclass name="C"><checkl checkmsg="M"><checki type="alpha">x</checki></checkl>'
+        '</varclass>'
+        '<varlist><vardcl name="f" varclass="C"/></varlist>'
+        '<dtafld row="1" col="1" fldcol="5" datavar="f" entwidth="4">F</dtafld>'
+        '</panel>'
+    )
+    addr = s.field_addr("f")
+    assert s.first_validation_error({addr: "anything"}) is None   # no check enforced
+
+
+def test_msg_suffix_forms_id_from_member_name():
+    cat = load_messages(
+        '<msgmbr name="ABCD00">'
+        '<msg suffix="1">First message<msg suffix="2">Second message'
+        '</msgmbr>'
+    )
+    assert cat.format("ABCD001") == "ABCD001 First message"
+    assert cat.format("ABCD002") == "ABCD002 Second message"
 
 
 def test_logon_size_validation_and_byte_identity():
