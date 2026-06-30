@@ -136,6 +136,35 @@ def _substitute(source: str, variables: dict) -> str:
 
     return _DIALOG_VAR_RE.sub(repl, source)
 
+
+# An internal SGML general-entity declaration with a literal value, e.g.
+# ``<!ENTITY guar "money-back guarantee">`` — and the matching ``&guar;``
+# reference. Parameter entities (``<!ENTITY % …>``) and external/SYSTEM
+# entities reference files we don't have, so they're left unresolved.
+_ENTITY_DECL_RE = re.compile(
+    r"""<!\s*ENTITY\s+([A-Za-z][\w.-]*)\s+(?:"([^"]*)"|'([^']*)')\s*>""",
+    re.IGNORECASE,
+)
+_ENTITY_REF_RE = re.compile(r"&([A-Za-z][\w.-]*);")
+
+
+def _resolve_entities(source: str) -> str:
+    """Resolve internal SGML general entities: capture ``<!ENTITY name "text">``
+    declarations (wherever they appear, including a ``<!doctype … [ … ]>``
+    internal subset), drop the declarations, and replace ``&name;`` references
+    with their text. References to entities we didn't capture (external/SYSTEM,
+    parameter, or undeclared) are left verbatim."""
+    entities = {}
+    for m in _ENTITY_DECL_RE.finditer(source):
+        entities[m.group(1).lower()] = m.group(2) if m.group(2) is not None else m.group(3)
+    if not entities:
+        return source
+    source = _ENTITY_DECL_RE.sub("", source)
+    return _ENTITY_REF_RE.sub(
+        lambda m: entities.get(m.group(1).lower(), m.group(0)), source
+    )
+
+
 _INTENSITY = {
     "normal": DisplayIntensity.NORMAL,
     "high": DisplayIntensity.HIGH,
@@ -847,6 +876,7 @@ def load_dtl(source: str, **subs) -> Screen:
     ``subs`` provides values for ``&NAME`` dialog-variable references in the
     source (e.g. ``ZUSER``, ``ZTIME``) before parsing.
     """
+    source = _resolve_entities(source)
     source = _substitute(source, subs)
     parser = _DTLParser()
     parser.feed(source)
