@@ -171,16 +171,36 @@ def send_ispf_menu(client_socket, userid: str, short_msg: str = None):
     return screen
 
 
-def _show_overlay(client_socket, panel_name: str):
+def _dialog_vars(userid: str):
+    """The live ISPF dialog variables shown by Dialog Test (option 7), as
+    ``{vname, vvalue}`` rows for the panel's ``<lstfld>`` table. These are real
+    ISPF system-variable names with this session's current values."""
+    now = datetime.now()
+    return [
+        {"vname": "ZUSER",   "vvalue": userid},
+        {"vname": "ZPREFIX", "vvalue": userid},
+        {"vname": "ZAPPLID", "vvalue": "ISR"},
+        {"vname": "ZTIME",   "vvalue": now.strftime("%H:%M")},
+        {"vname": "ZDATE",   "vvalue": now.strftime("%y/%m/%d")},
+        {"vname": "ZSCREEN", "vvalue": "1"},
+        {"vname": "ZENVIR",  "vvalue": "ISPF 7.1"},
+        {"vname": "ZKEYS",   "vvalue": "DLGTKEYS"},
+    ]
+
+
+def _show_overlay(client_socket, panel_name: str, rows=None):
     """Display an overlay panel (help or sub-panel) and wait for the user to
     leave it (PF3/PF15/Enter). The underlying panel is re-sent by the caller's
     loop on return — mirroring ISPF's PF1 HELP and option-select behaviour.
+
+    ``rows`` populates a ``<lstfld>`` list/table on the panel (e.g. the Dialog
+    Test variable display), passed straight through to ``load_panel``.
     """
     from dtl import load_panel
 
     abc_idx = None  # which action-bar choice the cursor is parked on, or None
     while True:
-        screen = load_panel(panel_name)
+        screen = load_panel(panel_name, rows=rows)
         if abc_idx is not None and screen.action_bar:
             ch = screen.action_bar[abc_idx % len(screen.action_bar)]
             screen.cursor_at = (ch["row"], ch["col"] + 1)  # on the choice label
@@ -549,6 +569,11 @@ def handle_client(client_socket, addr):
             if option == "0":
                 # Option 0 (Settings) opens a real sub-panel (with an action bar).
                 _show_overlay(client_socket, "settings")
+                short_msg = None
+            elif option == "7":
+                # Option 7 (Dialog Test) opens the variable-display sub-panel,
+                # its <lstfld> table populated from the live session variables.
+                _show_overlay(client_socket, "dlgtest", rows=_dialog_vars(userid))
                 short_msg = None
             elif option in screen.selections:
                 short_msg = f"OPTION {option} NOT YET IMPLEMENTED"
