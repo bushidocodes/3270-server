@@ -485,6 +485,8 @@ class _DTLParser(HTMLParser):
             self._emit_listitem(a, content)
         elif tag in ("dt", "dd", "pt", "pd"):
             self._emit_defitem(tag, a, content)
+        elif tag == "lines":
+            self._emit_lines(a, content)
         elif tag in _TEXT_TAGS:
             self._emit_info(a, content)
         elif tag == "dtafld":
@@ -688,6 +690,28 @@ class _DTLParser(HTMLParser):
         if dl is not None:
             dl["pending"] = None
         self._emit_flow_lines(text, row, desc_col, ctx)
+
+    def _emit_lines(self, a, content):
+        """Emit a <lines> block: preformatted text whose authored line breaks
+        are preserved (unlike <p>, which collapses whitespace and word-wraps).
+        Blank framing lines are dropped, the common source indentation removed,
+        and each line truncated to the panel width."""
+        raw = content.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        while raw and not raw[0].strip():
+            raw.pop(0)
+        while raw and not raw[-1].strip():
+            raw.pop()
+        if not raw:
+            return
+        indents = [len(ln) - len(ln.lstrip()) for ln in raw if ln.strip()]
+        cut = min(indents) if indents else 0
+        lines = [ln[cut:].rstrip() for ln in raw]
+        row, col, ctx = self._resolve_pos(a, "lines")
+        width = max(1, self.screen.width - (col + 1))
+        for i, ln in enumerate(lines):
+            self.screen.add(Text(row + i, col, ln[:width], DisplayIntensity.NORMAL))
+        if ctx is not None:
+            ctx["row"] = row + len(lines)
 
     def _emit_info(self, a, content):
         if "fill" in a:

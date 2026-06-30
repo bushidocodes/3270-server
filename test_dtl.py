@@ -532,6 +532,42 @@ def test_parameter_list_wraps_long_description_under_column():
     ]
 
 
+def test_lines_preserves_authored_line_breaks():
+    # <lines> is preformatted: authored line breaks (and a blank interior line)
+    # are preserved, unlike <p> which collapses whitespace and word-wraps.
+    s = load_dtl(
+        '<panel name="p"><info><lines>\n'
+        '  Roses are red\n'
+        '  Violets are blue\n'
+        '\n'
+        '  Sugar is sweet\n'
+        '</lines></info></panel>'
+    )
+    N = DisplayIntensity.NORMAL
+    assert s.items == [
+        Text(0, 1, "Roses are red", N),
+        Text(1, 1, "Violets are blue", N),
+        Text(2, 1, "", N),
+        Text(3, 1, "Sugar is sweet", N),
+    ]
+
+
+def test_lines_preserves_internal_spacing_and_truncates_to_width():
+    # Common source indentation is stripped, but spacing *within* a line is
+    # kept (so columns line up); lines wider than the panel are truncated.
+    s = load_dtl(
+        '<panel name="p" width=12><info><lines>\n'
+        '    col1  col2\n'
+        '    a     b\n'
+        '</lines></info></panel>'
+    )
+    N = DisplayIntensity.NORMAL
+    assert s.items == [
+        Text(0, 1, "col1  col2", N),   # width 12 -> 10 usable cols, fits exactly
+        Text(1, 1, "a     b", N),
+    ]
+
+
 def test_panel_title_text_centered():
     s = load_dtl('<panel name="p" width="20">My Title<info>body</info></panel>')
     assert s.title == "My Title"
