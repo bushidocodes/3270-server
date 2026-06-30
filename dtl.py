@@ -197,6 +197,7 @@ class _DTLParser(HTMLParser):
         self._checkl = None       # active <checkl> {"checkmsg", "checks"} or None
         self._in_varlist = False  # inside a <varlist>?
         self._in_msgmbr = False   # inside a <msgmbr>?
+        self._msgmbr_name = ""    # current <msgmbr name=...> (for <msg suffix>)
         self.messages = {}        # <msg> msgid (upper) → message text
         self._areas = []          # stack of <area>/<region> flow contexts
         self._in_cmdtbl = False   # inside a <cmdtbl>?
@@ -317,11 +318,17 @@ class _DTLParser(HTMLParser):
             })
         elif tag == "msgmbr":
             self._in_msgmbr = True
+            self._msgmbr_name = a.get("name", "")
         elif tag == "msg":
             if not self._in_msgmbr:
                 raise DTLError("<msg> outside of a <msgmbr>")
             if "msgid" not in a:
-                raise DTLError("<msg> missing required attribute 'msgid'")
+                # ISPF forms the id from the member name + a per-message suffix
+                # (e.g. <msgmbr name=abcd00><msg suffix=1> → abcd001).
+                if "suffix" in a and self._msgmbr_name:
+                    a["msgid"] = self._msgmbr_name + a["suffix"]
+                else:
+                    raise DTLError("<msg> missing required attribute 'msgid'")
             self._tag, self._attrs, self._chars = "msg", a, []
         elif tag in _CONTENT_TAGS:
             self._tag, self._attrs, self._chars = tag, a, []
@@ -728,8 +735,8 @@ class _DTLParser(HTMLParser):
             self._checkl["checks"].append(
                 {"type": "values", "values": [w.upper() for w in words]}
             )
-        else:
-            raise DTLError(f"<checki> unknown type {ctype!r}")
+        # Other authentic check types (alpha, picture, …) are not enforced yet;
+        # ignore them rather than failing the panel, so real DTL still loads.
 
     def _emit_vardcl(self, a):
         if not self._in_varlist:
