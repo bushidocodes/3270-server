@@ -236,6 +236,8 @@ class _DTLParser(HTMLParser):
         self._cur_pdc = None      # current <pdc> pull-down choice, or None
         self._panel_title = None  # capturing the panel's title text, or None
         self._lists = []          # stack of open <ul>/<ol> ({"type", "n"})
+        self._lstfld = None       # active <lstfld> table {"cols", "groups", …}
+        self._lstgrp = None       # current <lstgrp> column group, or None
 
     # ── SGML event handling ──────────────────────────────────────────────────
 
@@ -340,6 +342,32 @@ class _DTLParser(HTMLParser):
             self._in_varlist = True
         elif tag == "vardcl":
             self._emit_vardcl(a)
+        elif tag == "lstfld":
+            # A scrollable list/table: <lstcol> columns, optionally grouped under
+            # a <lstgrp> heading. We render the static column header structure
+            # (group headings + column headings); model data rows are populated
+            # by the table service at runtime, so there are none to lay out here.
+            ctx = self._areas[-1] if self._areas else None
+            self._lstfld = {
+                "cols": [], "groups": [], "ctx": ctx,
+                "row": int(a["row"]) if "row" in a else (ctx["row"] if ctx else 0),
+                "col": int(a["col"]) if "col" in a else (ctx["col"] if ctx else 1),
+            }
+            self._lstgrp = None
+        elif tag == "lstgrp":
+            if self._lstfld is None:
+                raise DTLError("<lstgrp> outside of a <lstfld>")
+            hv = a.get("headline")
+            headline = "headline" in a and (
+                hv is None or str(hv).lower() in ("yes", "true", "1", "headline")
+            )
+            self._lstgrp = {"heading": "", "headline": headline}
+            self._lstfld["groups"].append(self._lstgrp)
+            self._tag, self._attrs, self._chars = "lstgrp", a, []  # capture heading
+        elif tag == "lstcol":
+            if self._lstfld is None:
+                raise DTLError("<lstcol> outside of a <lstfld>")
+            self._tag, self._attrs, self._chars = "lstcol", a, []  # capture heading
         elif tag in ("area", "region"):
             # A flow box. With explicit row/col it is a positioned sub-box; with
             # neither it transparently continues the enclosing flow (so its
@@ -451,6 +479,14 @@ class _DTLParser(HTMLParser):
                 vc["checkmsg"] = self._checkl["checkmsg"]
             self._checkl = None
             return
+        if tag == "lstgrp":
+            self._lstgrp = None  # the open <lstcol>, if any, was flushed above
+            return
+        if tag == "lstfld":
+            if self._lstfld is not None:
+                self._emit_lstfld()
+            self._lstfld, self._lstgrp = None, None
+            return
         if tag == "varlist":
             self._in_varlist = False
             return
@@ -487,6 +523,11 @@ class _DTLParser(HTMLParser):
             self._emit_defitem(tag, a, content)
         elif tag == "lines":
             self._emit_lines(a, content)
+        elif tag == "lstgrp":
+            if self._lstgrp is not None:
+                self._lstgrp["heading"] = " ".join(content.split())
+        elif tag == "lstcol":
+            self._add_lstcol(a, content)
         elif tag in _TEXT_TAGS:
             self._emit_info(a, content)
         elif tag == "dtafld":
@@ -520,6 +561,8 @@ class _DTLParser(HTMLParser):
         elif tag == "checki":  # a self-closing checki carries params in attrs
             self.handle_endtag(tag)
         elif tag == "varclass":  # a self-closing varclass has no checks; close it
+            self.handle_endtag(tag)
+        elif tag in ("lstfld", "lstgrp", "lstcol"):  # self-closing list elements
             self.handle_endtag(tag)
         elif tag == "varlist":  # a self-closing varlist declares nothing; close it
             self._in_varlist = False
@@ -712,6 +755,56 @@ class _DTLParser(HTMLParser):
             self.screen.add(Text(row + i, col, ln[:width], DisplayIntensity.NORMAL))
         if ctx is not None:
             ctx["row"] = row + len(lines)
+
+    def _add_lstcol(self, a, content):
+        """Record one <lstcol> in the active table: its heading text, width
+        (``colwidth``, else as wide as the heading), and its group."""
+        if self._lstfld is None:
+            return
+        heading = " ".join(content.split())
+        if "colwidth" in a:
+            width = int(a["colwidth"])
+        else:
+            width = max(len(heading), 1)
+        self._lstfld["cols"].append({
+            "heading": heading,
+            "width": width,
+            "group": self._lstgrp,
+        })
+
+    def _emit_lstfld(self):
+        """Lay out the table's column header: each <lstcol> heading at its
+        computed column (left to right, ``colwidth`` + a one-column gap), with
+        any <lstgrp headline=yes> heading centered over its columns' span on the
+        row above. Advances the enclosing flow past the header."""
+        fld = self._lstfld
+        cols = fld["cols"]
+        if not cols:
+            return
+        x = fld["col"]
+        for c in cols:
+            c["x"] = x
+            x += c["width"] + 1  # one-column gap between columns
+        row = fld["row"]
+        H = DisplayIntensity.HIGH
+        groups = [g for g in fld["groups"] if g["headline"] and g["heading"]]
+        if groups:
+            for g in groups:
+                gcols = [c for c in cols if c["group"] is g]
+                if not gcols:
+                    continue
+                start = gcols[0]["x"]
+                end = gcols[-1]["x"] + gcols[-1]["width"]
+                text = g["heading"][:max(1, end - start)]
+                gx = start + max(0, (end - start - len(text)) // 2)
+                self.screen.add(Text(row, gx, text, H))
+            row += 1
+        for c in cols:
+            if c["heading"]:
+                self.screen.add(Text(row, c["x"], c["heading"][:c["width"]], H))
+        row += 1
+        if fld["ctx"] is not None:
+            fld["ctx"]["row"] = row
 
     def _emit_info(self, a, content):
         if "fill" in a:

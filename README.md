@@ -139,7 +139,10 @@ range/value checks validate the field's input, e.g. the logon SIZE field), `<ab>
 (an action bar with pull-down choices — put the cursor on a choice and press Enter to open its
 pull-down, point-and-shoot style; or use **F10/F11** to step the cursor left/right across the
 choices), `<topinst>`/`<paninst>`
-(instruction text), and `<area>`/`<region>` (flow boxes — see below). ISPF
+(instruction text), `<lstfld>`/`<lstcol>`/`<lstgrp>` (a scrollable list/table — the column
+headings are laid out left-to-right by `colwidth`, with a `<lstgrp headline=yes>` group heading
+centered over its columns; runtime model rows are supplied by the table service), and
+`<area>`/`<region>` (flow boxes — see below). ISPF
 dialog variables are referenced `&`-style — `&ZUSER`, `&ZTIME` — and substituted at load time
 (e.g. the live user id and clock on the ISPF status line); `&&` is a literal ampersand and a
 trailing `.` terminates a reference. Messages live separately in a `<msgmbr>` (see `messages/`).
