@@ -22,6 +22,7 @@ from server import (
     field_attribute,
     read_client_input,
     write_control_character,
+    _dialog_vars,
 )
 
 SBA = 0x11
@@ -295,3 +296,16 @@ def test_parse_field_terminated_by_sf_ordinal():
     )
     _, fields, _ = read_client_input(_sock(payload))
     assert fields[addr] == "HELLO"
+
+
+# ── Dialog Test (option 7) session variables ────────────────────────────────
+
+def test_dialog_vars_uses_live_userid_and_authentic_names():
+    rows = _dialog_vars("TESTUSER")
+    by_name = {r["vname"]: r["vvalue"] for r in rows}
+    # real ISPF system-variable names, with the live userid threaded through
+    assert by_name["ZUSER"] == "TESTUSER"
+    assert by_name["ZPREFIX"] == "TESTUSER"
+    assert by_name["ZAPPLID"] == "ISR"
+    # every row is a {vname, vvalue} mapping the <lstfld> can lay out
+    assert all(set(r) == {"vname", "vvalue"} for r in rows)

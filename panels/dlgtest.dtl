@@ -1,0 +1,28 @@
+<!DOCTYPE DM SYSTEM>
+<!-- ISPF Dialog Test (option 7) — Variable Display.
+     Authentic Dialog Test function: list dialog variables and their current
+     values. The rows are supplied at runtime via load_panel(..., rows=[...])
+     from the live session (see server._dialog_vars); the <lstfld> lays them
+     out as a read-only (usage=out) two-column table. PF3 returns to the menu. -->
+<panel name="dlgtvars" title="Dialog Test - Variables" help="ispfhelp">
+  <info row="0" col="0" intensity="high">--------------------------- Dialog Test - Variables ----------------------------</info>
+  <topinst row="2" col="1">ISPF dialog variables and their current values for this session.</topinst>
+
+  <area row="4" col="2">
+    <lstfld>
+      <lstgrp headline="yes">Session Variables
+        <lstcol datavar="vname"  usage="out" colwidth="10">Variable
+        <lstcol datavar="vvalue" usage="out" colwidth="44">Value
+      </lstgrp>
+    </lstfld>
+  </area>
+
+  <info row="22" col="1">Enter PF3 to return to the Primary Option Menu.</info>
+  <info row="23" col="0" intensity="high" fill="-" width="79"/>
+
+  <keyl name="DLGTKEYS">
+    <keyi key="PF1" cmd="HELP">Help</keyi>
+    <keyi key="PF3" cmd="EXIT">Return</keyi>
+    <keyi key="PF15" cmd="EXIT">Return</keyi>
+  </keyl>
+</panel>

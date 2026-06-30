@@ -362,6 +362,22 @@ def test_settings_panel_has_action_bar():
     assert s.command_for("PF3") == "EXIT"   # PF3 returns to the menu
 
 
+def test_dialog_test_panel_renders_variable_rows():
+    # Option 7 (Dialog Test): the <lstfld> table lays out the supplied session
+    # variables as protected name/value rows, and PF3 returns.
+    rows = [{"vname": "ZUSER", "vvalue": "IBMUSER"},
+            {"vname": "ZTIME", "vvalue": "09:41"}]
+    s = load_panel("dlgtest", rows=rows)
+    texts = {(t.row, t.col): t.text for t in s.items if isinstance(t, Text)}
+    # column headings, then one row per variable (display columns -> Text)
+    assert "Variable" in texts.values() and "Value" in texts.values()
+    assert "ZUSER" in texts.values() and "IBMUSER" in texts.values()
+    assert "ZTIME" in texts.values() and "09:41" in texts.values()
+    # the values are display-only: no input Field is emitted for the table
+    assert not [f for f in s.items if isinstance(f, Field)]
+    assert s.command_for("PF3") == "EXIT"
+
+
 # ── message members (<msgmbr>/<msg>) ─────────────────────────────────────────
 
 def test_msg_member_parses_and_formats_with_substitution():
