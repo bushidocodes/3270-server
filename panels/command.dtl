@@ -1,0 +1,23 @@
+<!DOCTYPE DM SYSTEM>
+<!-- ISPF Command Shell (option 6) — enter a TSO command.
+     The command line is a <cmdarea> (datavar ZCMD); the server reads it with
+     Screen.command_value(), runs it (server._run_tso_command), and feeds the
+     response back as &CMDMSG for the next display. PF3 returns to the menu;
+     Enter runs the typed command and stays (an empty command just clears). -->
+<panel name="cmdshell" title="ISPF Command Shell" help="ispfhelp">
+  <info row="0" col="0" intensity="high">------------------------------ ISPF Command Shell ------------------------------</info>
+  <topinst row="2" col="1">Enter a TSO command and press Enter; its response appears below.</topinst>
+
+  <cmdarea row="4" col="1" fldcol="13" entwidth="62" cursor="yes">Command ===></cmdarea>
+
+  <info row="7" col="1" intensity="high">&CMDMSG</info>
+
+  <info row="22" col="1">Enter a command, or PF3 to return to the Primary Option Menu.</info>
+  <info row="23" col="0" intensity="high" fill="-" width="79"/>
+
+  <keyl name="CMDKEYS">
+    <keyi key="PF1" cmd="HELP">Help</keyi>
+    <keyi key="PF3" cmd="EXIT">Return</keyi>
+    <keyi key="PF15" cmd="EXIT">Return</keyi>
+  </keyl>
+</panel>

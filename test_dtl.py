@@ -362,6 +362,16 @@ def test_settings_panel_has_action_bar():
     assert s.command_for("PF3") == "EXIT"   # PF3 returns to the menu
 
 
+def test_command_shell_panel_shows_response_message():
+    # Option 6 (Command): the command line is a ZCMD <cmdarea>, and the server's
+    # response is substituted into the panel via &CMDMSG.
+    s = load_panel("command", CMDMSG="IKJ56500I COMMAND FOO NOT FOUND")
+    assert s.field_addr("ZCMD") == 4 * 80 + 14   # Command ===> input line
+    assert s.command_for("PF3") == "EXIT"
+    texts = [t.text for t in s.items if isinstance(t, Text)]
+    assert "IKJ56500I COMMAND FOO NOT FOUND" in texts
+
+
 def test_dialog_test_panel_renders_variable_rows():
     # Option 7 (Dialog Test): the <lstfld> table lays out the supplied session
     # variables as protected name/value rows, and PF3 returns.
