@@ -29,17 +29,23 @@ After a successful login you land on the ISPF Primary Option Menu. The keyboard 
 
 ![ISPF Primary Option Menu](docs/screenshots/ispf_menu.png)
 
-The full z/OS ISPF 7.1.0 menu is rendered, including the user ID, system ID (SY1), and current time in the status block. Options 0–13 and X are listed. Several options open real, working sub-panels — each driven from its own `panels/*.dtl` — and PF3 always steps back one level:
+The full z/OS ISPF 7.1.0 menu is rendered, including the user ID, system ID (SY1), and current time in the status block. Options 0–13 and X are listed, and **every option opens a real panel** — each driven from its own `panels/*.dtl`. PF3 always steps back one level; typing a dotted path like `3.1` or `9.2` jumps straight to a sub-option:
 
 | Option | Panel | What it does |
 |--------|-------|--------------|
 | `0` Settings | `settings.dtl` | Sub-panel with an **action bar** across the top — F10/F11 walk the choices, Enter opens a choice's pull-down (point-and-shoot). |
 | `1` View | `viewentry.dtl` → `browse.dtl` | Prompts for a panel-library member, then **browses its actual DTL source**, paging with PF7/PF8. Unknown member → `MEMBER xxx NOT FOUND`. |
-| `3` Utilities | `utility.dtl` | A **nested sub-menu** with its own Option line. `3.1` (Library) lists the real `ISPF.ISPPLIB` members in a `<lstfld>` table — and typing `3.1` at the primary menu jumps straight there. |
+| `2` Edit | `editentry.dtl` → `browse.dtl` | Like View, but opens the member in an `EDIT` frame (display-only in this demo). |
+| `3` Utilities | `utility.dtl` | A **nested sub-menu** with its own Option line. `3.1` (Library) lists the real `ISPF.ISPPLIB` members in a `<lstfld>` table. |
+| `4` Foreground / `5` Batch | `foreground.dtl` / `batch.dtl` | Language-processing selection sub-menus (Assembler, COBOL, PL/I, …). |
 | `6` Command | `command.dtl` | A **TSO Command Shell**: `TIME` returns the live TSO time message; any other verb gets the authentic `IKJ56500I COMMAND xxx NOT FOUND`. |
 | `7` Dialog Test | `dlgtest.dtl` | Lists the session's live ISPF dialog variables (`ZUSER`, `ZTIME`, `ZDATE`, …) in a `<lstfld>` table. |
+| `9` IBM Products | `ibmprod.dtl` | Selection sub-menu (ISMF, SDSF, RACF, HCD, DFSORT). |
+| `10` SCLM | `sclm.dtl` | Software Configuration and Library Manager sub-menu. |
+| `11` Workplace | `workplace.dtl` | Informational panel describing the ISPF Object/Action Workplace. |
+| `12` z/OS System / `13` z/OS User | `zsystem.dtl` / `zuser.dtl` | System-programmer and user application sub-menus. |
 
-The remaining options return to the menu with a short message. Pressing **PF1** on most panels shows a help screen.
+Within a sub-menu, selecting a leaf that isn't implemented reports it via the panel's message line. Pressing **PF1** on most panels shows a help screen.
 
 #### Live sub-panels
 
@@ -159,6 +165,14 @@ panels/         — the screens authored declaratively (ISPF ISPPLIB)
   memlist.dtl     Library member list (option 3.1; a <lstfld> table)
   command.dtl     TSO Command Shell (option 6)
   dlgtest.dtl     Dialog Test variable display (option 7; a <lstfld> table)
+  editentry.dtl   Edit entry panel (option 2)
+  foreground.dtl  Foreground language-processing sub-menu (option 4)
+  batch.dtl       Batch language-processing sub-menu (option 5)
+  ibmprod.dtl     IBM Products sub-menu (option 9)
+  sclm.dtl        SCLM sub-menu (option 10)
+  workplace.dtl   Object/Action Workplace info panel (option 11)
+  zsystem.dtl     z/OS System programmer sub-menu (option 12)
+  zuser.dtl       z/OS User applications sub-menu (option 13)
 messages/       — message members, kept apart from panels as on z/OS (ISPMLIB vs ISPPLIB)
   tsomsgs.dtl     TSO/E logon messages (IKJ56425I, IKJ56700I)
 ```

@@ -1,0 +1,26 @@
+<!DOCTYPE DM SYSTEM>
+<!-- ISPF z/OS User Applications (a demo selection sub-menu). Its choices are
+     authentic ISPF sub-functions; each leaf reports back via &SELMSG
+     (not yet implemented). Driven by server._show_submenu; PF3 returns. -->
+<panel name="zuser" title="z/OS User Applications" help="ispfhelp">
+  <info row="0" col="0" intensity="high">--------------------------- z/OS User Applications ----------------------------</info>
+
+  <cmdarea row="2" col="1" fldcol="13" entwidth="6" cursor="yes">Option ===></cmdarea>
+
+  <selfld row="4" numcol="1" namecol="4" desccol="21" numwidth="2" numintensity="high">
+    <choice num="1" name="  Info Center     ">  Information Center Facility</choice>
+    <choice num="2" name="  TSO/E           ">  Time Sharing Option / Extensions</choice>
+    <choice num="3" name="  Utilities       ">  Programmer's workbench utilities</choice>
+    <choice num="4" name="  REXX/CLIST      ">  Run a REXX exec or CLIST</choice>
+  </selfld>
+
+  <info row="20" col="1" intensity="high">&SELMSG</info>
+  <info row="22" col="1">Enter an option, or PF3 to return to the Primary Option Menu.</info>
+  <info row="23" col="0" intensity="high" fill="-" width="79"/>
+
+  <keyl name="ZUSRKEYS">
+    <keyi key="PF1" cmd="HELP">Help</keyi>
+    <keyi key="PF3" cmd="EXIT">Return</keyi>
+    <keyi key="PF15" cmd="EXIT">Return</keyi>
+  </keyl>
+</panel>
