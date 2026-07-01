@@ -204,6 +204,31 @@ def _run_tso_command(cmd: str) -> str:
     return f"IKJ56500I COMMAND {verb} NOT FOUND"
 
 
+# Sentinel returned by _await_action when the panel should be left (the client
+# disconnected, or a PF3/PF15-style leave key was pressed).
+_LEAVE = object()
+
+
+def _await_action(client_socket, screen):
+    """Send ``screen`` and read one response, handling the cases every simple
+    sub-panel loop shares: a disconnect or a leave key (PF3/PF15) both yield
+    :data:`_LEAVE`; PF1 with a help panel shows the help overlay and redisplays.
+    Anything else is returned as ``(aid_str, fields, cursor)`` for the caller."""
+    while True:
+        _send_screen(client_socket, screen)
+        result = read_client_input(client_socket)
+        if result is None:
+            return _LEAVE
+        aid, fields, cursor = result
+        aid_str = aid_to_string(aid)
+        if screen.command_for(aid_str) in _LEAVE_COMMANDS:
+            return _LEAVE
+        if aid_str == "PF1" and screen.help:
+            _show_overlay(client_socket, screen.help)
+            continue  # redisplay this panel after help
+        return aid_str, fields, cursor
+
+
 def _show_command_shell(client_socket):
     """ISPF option 6: a TSO Command Shell. Loops reading a command from the
     panel's <cmdarea>, running it, and showing the response, until the user
@@ -213,17 +238,10 @@ def _show_command_shell(client_socket):
     msg = ""
     while True:
         screen = load_panel("command", CMDMSG=msg)
-        _send_screen(client_socket, screen)
-        result = read_client_input(client_socket)
-        if result is None:
+        action = _await_action(client_socket, screen)
+        if action is _LEAVE:
             return
-        aid, fields, _ = result
-        aid_str = aid_to_string(aid)
-        if screen.command_for(aid_str) in _LEAVE_COMMANDS:
-            return
-        if aid_str == "PF1" and screen.help:
-            _show_overlay(client_socket, screen.help)
-            continue
+        _aid_str, fields, _cursor = action
         cmd = (screen.command_value(fields) or "").strip()
         msg = _run_tso_command(cmd) if cmd else ""
 
@@ -314,17 +332,10 @@ def _show_view(client_socket):
     msg = ""
     while True:
         screen = load_panel("viewentry", VIEWMSG=msg)
-        _send_screen(client_socket, screen)
-        result = read_client_input(client_socket)
-        if result is None:
+        action = _await_action(client_socket, screen)
+        if action is _LEAVE:
             return
-        aid, fields, _ = result
-        aid_str = aid_to_string(aid)
-        if screen.command_for(aid_str) in _LEAVE_COMMANDS:
-            return
-        if aid_str == "PF1" and screen.help:
-            _show_overlay(client_socket, screen.help)
-            continue
+        _aid_str, fields, _cursor = action
         member = (fields.get(screen.field_addr("member")) or "").strip()
         if not member:
             continue
@@ -356,17 +367,10 @@ def _show_submenu(client_socket, panel_name: str, leaves=None, initial=None):
         if pending is not None:
             opt, pending = pending, None
         else:
-            _send_screen(client_socket, screen)
-            result = read_client_input(client_socket)
-            if result is None:
+            action = _await_action(client_socket, screen)
+            if action is _LEAVE:
                 return
-            aid, fields, _ = result
-            aid_str = aid_to_string(aid)
-            if screen.command_for(aid_str) in _LEAVE_COMMANDS:
-                return
-            if aid_str == "PF1" and screen.help:
-                _show_overlay(client_socket, screen.help)
-                continue
+            _aid_str, fields, _cursor = action
             opt = (screen.command_value(fields) or "").strip().upper()
             if not opt:
                 continue
