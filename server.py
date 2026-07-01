@@ -253,38 +253,49 @@ def _library_members():
             for n in names]
 
 
-def _show_submenu(client_socket, panel_name: str, leaves=None):
+def _show_submenu(client_socket, panel_name: str, leaves=None, initial=None):
     """Display a nested selection menu (e.g. option 3, Utilities) and drive it
     like the Primary Option Menu: read the option from the panel's <cmdarea>,
     validate it against the panel's <choice> selections. A leaf listed in
     ``leaves`` ({option: (panel, rows_fn|None)}) opens that sub-panel; any other
-    valid option reports back via &SELMSG. PF3/PF15 returns; PF1 shows help."""
+    valid option reports back via &SELMSG. PF3/PF15 returns; PF1 shows help.
+
+    ``initial`` pre-selects a sub-option without displaying the menu first, so a
+    dotted jump from the parent (``3.1``) lands straight on the leaf; PF3 from
+    there falls back to this menu."""
     from dtl import load_panel
 
     leaves = leaves or {}
     msg = ""
+    pending = (initial or "").strip().upper() or None
     while True:
         screen = load_panel(panel_name, SELMSG=msg)
-        _send_screen(client_socket, screen)
-        result = read_client_input(client_socket)
-        if result is None:
-            return
-        aid, fields, _ = result
-        aid_str = aid_to_string(aid)
-        if screen.command_for(aid_str) in _LEAVE_COMMANDS:
-            return
-        if aid_str == "PF1" and screen.help:
-            _show_overlay(client_socket, screen.help)
-            continue
-        opt = (screen.command_value(fields) or "").strip().upper()
-        if not opt:
-            continue
-        if opt in leaves:
-            sub_panel, rows_fn = leaves[opt]
+        if pending is not None:
+            opt, pending = pending, None
+        else:
+            _send_screen(client_socket, screen)
+            result = read_client_input(client_socket)
+            if result is None:
+                return
+            aid, fields, _ = result
+            aid_str = aid_to_string(aid)
+            if screen.command_for(aid_str) in _LEAVE_COMMANDS:
+                return
+            if aid_str == "PF1" and screen.help:
+                _show_overlay(client_socket, screen.help)
+                continue
+            opt = (screen.command_value(fields) or "").strip().upper()
+            if not opt:
+                continue
+        # A further dotted tail would forward into a deeper leaf; we nest one
+        # level, so select on the head and ignore any deeper segment.
+        head = opt.split(".", 1)[0]
+        if head in leaves:
+            sub_panel, rows_fn = leaves[head]
             _show_overlay(client_socket, sub_panel, rows=rows_fn() if rows_fn else None)
             msg = ""
-        elif opt in screen.selections:
-            msg = f"OPTION {opt} ({screen.selections[opt].strip()}) NOT YET IMPLEMENTED"
+        elif head in screen.selections:
+            msg = f"OPTION {head} ({screen.selections[head].strip()}) NOT YET IMPLEMENTED"
         else:
             msg = f"INVALID OPTION: {opt}"
 
@@ -671,11 +682,15 @@ def handle_client(client_socket, addr):
                 # Option 0 (Settings) opens a real sub-panel (with an action bar).
                 _show_overlay(client_socket, "settings")
                 short_msg = None
-            elif option == "3":
+            elif option.split(".", 1)[0] == "3":
                 # Option 3 (Utilities) opens a nested selection sub-menu; its
-                # Library leaf (3.1) lists the real panel-library members.
+                # Library leaf (3.1) lists the real panel-library members. A
+                # dotted path (e.g. "3.1") jumps straight to the sub-option,
+                # ISPF-style, without stopping at the utility menu first.
+                tail = option.split(".", 1)[1] if "." in option else None
                 _show_submenu(client_socket, "utility",
-                              leaves={"1": ("memlist", _library_members)})
+                              leaves={"1": ("memlist", _library_members)},
+                              initial=tail)
                 short_msg = None
             elif option == "6":
                 # Option 6 (Command) opens a TSO Command Shell sub-panel.
