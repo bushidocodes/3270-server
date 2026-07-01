@@ -228,6 +228,36 @@ def _show_command_shell(client_socket):
         msg = _run_tso_command(cmd) if cmd else ""
 
 
+def _show_submenu(client_socket, panel_name: str):
+    """Display a nested selection menu (e.g. option 3, Utilities) and drive it
+    like the Primary Option Menu: read the option from the panel's <cmdarea>,
+    validate it against the panel's <choice> selections, and report an
+    unimplemented leaf back via &SELMSG. PF3/PF15 returns; PF1 shows help."""
+    from dtl import load_panel
+
+    msg = ""
+    while True:
+        screen = load_panel(panel_name, SELMSG=msg)
+        _send_screen(client_socket, screen)
+        result = read_client_input(client_socket)
+        if result is None:
+            return
+        aid, fields, _ = result
+        aid_str = aid_to_string(aid)
+        if screen.command_for(aid_str) in _LEAVE_COMMANDS:
+            return
+        if aid_str == "PF1" and screen.help:
+            _show_overlay(client_socket, screen.help)
+            continue
+        opt = (screen.command_value(fields) or "").strip().upper()
+        if not opt:
+            continue
+        if opt in screen.selections:
+            msg = f"OPTION {opt} ({screen.selections[opt].strip()}) NOT YET IMPLEMENTED"
+        else:
+            msg = f"INVALID OPTION: {opt}"
+
+
 def _show_overlay(client_socket, panel_name: str, rows=None):
     """Display an overlay panel (help or sub-panel) and wait for the user to
     leave it (PF3/PF15/Enter). The underlying panel is re-sent by the caller's
@@ -609,6 +639,10 @@ def handle_client(client_socket, addr):
             if option == "0":
                 # Option 0 (Settings) opens a real sub-panel (with an action bar).
                 _show_overlay(client_socket, "settings")
+                short_msg = None
+            elif option == "3":
+                # Option 3 (Utilities) opens a nested selection sub-menu.
+                _show_submenu(client_socket, "utility")
                 short_msg = None
             elif option == "6":
                 # Option 6 (Command) opens a TSO Command Shell sub-panel.

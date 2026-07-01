@@ -362,6 +362,19 @@ def test_settings_panel_has_action_bar():
     assert s.command_for("PF3") == "EXIT"   # PF3 returns to the menu
 
 
+def test_utility_submenu_lists_choices_and_message():
+    # Option 3 (Utilities): a nested selection menu — its own Option ===> line
+    # and a <selfld> of choices, with the server's message surfaced via &SELMSG.
+    s = load_panel("utility", SELMSG="OPTION 4 (Dslist) NOT YET IMPLEMENTED")
+    assert s.field_addr("ZCMD") == 2 * 80 + 14   # its own Option ===> line
+    assert s.command_for("PF3") == "EXIT"
+    for opt in ["1", "2", "3", "4", "5", "8"]:
+        assert opt in s.selections
+    assert s.selections["4"] == "Dslist"
+    texts = [t.text for t in s.items if isinstance(t, Text)]
+    assert "OPTION 4 (Dslist) NOT YET IMPLEMENTED" in texts
+
+
 def test_command_shell_panel_shows_response_message():
     # Option 6 (Command): the command line is a ZCMD <cmdarea>, and the server's
     # response is substituted into the panel via &CMDMSG.
