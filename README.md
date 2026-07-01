@@ -29,7 +29,62 @@ After a successful login you land on the ISPF Primary Option Menu. The keyboard 
 
 ![ISPF Primary Option Menu](docs/screenshots/ispf_menu.png)
 
-The full z/OS ISPF 7.1.0 menu is rendered, including the user ID, system ID (SY1), and current time in the status block. Options 0–13 and X are listed. Option `0` opens a Settings sub-panel (complete with an action bar across the top); PF3 returns. Option `1` (View) prompts for a panel-library member and browses its actual DTL source, paging with PF7/PF8; PF3 returns. Option `3` (Utilities) opens a nested Utility Selection sub-menu with its own Option line; its Library choice (`3.1`) lists the real panel-library members (`ISPF.ISPPLIB`) in a `<lstfld>` table, and PF3 steps back out one level at a time. Option `6` (Command) opens a TSO Command Shell: type a command and press Enter; `TIME` returns the live TSO time message and any other verb gets the authentic `IKJ56500I COMMAND xxx NOT FOUND`; PF3 returns. Option `7` (Dialog Test) opens a Variables sub-panel that lists the session's ISPF dialog variables (`ZUSER`, `ZTIME`, `ZDATE`, …) with their live values in a `<lstfld>` table; PF3 returns. The other options return to the menu with a short message.
+The full z/OS ISPF 7.1.0 menu is rendered, including the user ID, system ID (SY1), and current time in the status block. Options 0–13 and X are listed. Several options open real, working sub-panels — each driven from its own `panels/*.dtl` — and PF3 always steps back one level:
+
+| Option | Panel | What it does |
+|--------|-------|--------------|
+| `0` Settings | `settings.dtl` | Sub-panel with an **action bar** across the top — F10/F11 walk the choices, Enter opens a choice's pull-down (point-and-shoot). |
+| `1` View | `viewentry.dtl` → `browse.dtl` | Prompts for a panel-library member, then **browses its actual DTL source**, paging with PF7/PF8. Unknown member → `MEMBER xxx NOT FOUND`. |
+| `3` Utilities | `utility.dtl` | A **nested sub-menu** with its own Option line. `3.1` (Library) lists the real `ISPF.ISPPLIB` members in a `<lstfld>` table — and typing `3.1` at the primary menu jumps straight there. |
+| `6` Command | `command.dtl` | A **TSO Command Shell**: `TIME` returns the live TSO time message; any other verb gets the authentic `IKJ56500I COMMAND xxx NOT FOUND`. |
+| `7` Dialog Test | `dlgtest.dtl` | Lists the session's live ISPF dialog variables (`ZUSER`, `ZTIME`, `ZDATE`, …) in a `<lstfld>` table. |
+
+The remaining options return to the menu with a short message. Pressing **PF1** on most panels shows a help screen.
+
+#### Live sub-panels
+
+Option `7` (Dialog Test) — a `<lstfld>` table populated from the running session:
+
+```
+--------------------------- Dialog Test - Variables ----------------------------
+  ISPF dialog variables and their current values for this session.
+
+                      Session Variables
+   Variable   Value
+   ZUSER      IBMUSER
+   ZPREFIX    IBMUSER
+   ZAPPLID    ISR
+   ZTIME      20:31
+   ZDATE      26/06/30
+   ZSCREEN    1
+   ZENVIR     ISPF 7.1
+   ZKEYS      DLGTKEYS
+```
+
+Option `6` (Command) — after typing `TIME`:
+
+```
+------------------------------ ISPF Command Shell ------------------------------
+  Enter a TSO command and press Enter; its response appears below.
+
+  Command ===> TIME
+
+  IKJ56650I TIME-08:31:45 PM DATE-2026.181 DAY-TUESDAY
+```
+
+Option `1` (View) browsing the ISPF menu's own source (`1` → member `ISPF`):
+
+```
+BROWSE    ISPF.ISPPLIB(ISPF)                          Line 00000001
+<!DOCTYPE DM SYSTEM>
+<!-- ISPF 7.1.0 Primary Option Menu, in Dialog Tag Language (DTL subset).
+     Renders byte-for-byte identically to screens.build_ispf_menu().
+     &ZUSER (padded to 8) and &ZTIME are ISPF dialog variables substituted at
+     load time; the transient short message (row 2) is injected at runtime. -->
+<panel name="ispfmenu" title="ISPF Primary Option Menu" help="ispfhelp">
+  ...
+Lines 1-22 of 54     PF7=Up  PF8=Down  PF3=Exit
+```
 
 ## Quick start
 
@@ -92,12 +147,18 @@ server.py       — TN3270 protocol: negotiation, session loop, the 3270 primiti
 screen.py       — Screen/Field model: renders to a 3270 data stream, parses responses
 screens.py      — the two panels built as Screen objects (the in-code reference)
 dtl.py          — Dialog Tag Language parser: load_panel() → Screen, load_message_member() → MessageCatalog
-panels/         — the screens authored declaratively
+panels/         — the screens authored declaratively (ISPF ISPPLIB)
   logon.dtl       z/OS TSO/E LOGON panel
   ispf.dtl        ISPF Primary Option Menu
   tsohelp.dtl     PF1 help for the logon panel
   ispfhelp.dtl    PF1 help for the ISPF menu
   settings.dtl    ISPF Settings sub-panel (option 0; has an action bar)
+  viewentry.dtl   View entry panel (option 1; prompts for a member)
+  browse.dtl      Browse frame (option 1; shows a member's source)
+  utility.dtl     Utility Selection sub-menu (option 3)
+  memlist.dtl     Library member list (option 3.1; a <lstfld> table)
+  command.dtl     TSO Command Shell (option 6)
+  dlgtest.dtl     Dialog Test variable display (option 7; a <lstfld> table)
 messages/       — message members, kept apart from panels as on z/OS (ISPMLIB vs ISPPLIB)
   tsomsgs.dtl     TSO/E logon messages (IKJ56425I, IKJ56700I)
 ```
