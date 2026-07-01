@@ -405,11 +405,12 @@ def test_member_list_panel_renders_supplied_members():
     # panel-library members as protected name/type/description rows.
     rows = [{"mname": "LOGON", "mtype": "Panel(DTL)", "mdesc": "TSO/E logon panel"},
             {"mname": "ISPF",  "mtype": "Panel(DTL)", "mdesc": "Primary Option Menu"}]
-    s = load_panel("memlist", rows=rows)
+    s = load_panel("memlist", rows=rows, MEMFOOT="Member 1-2 of 2  PF3=Exit")
     texts = [t.text for t in s.items if isinstance(t, Text)]
     assert "Name" in texts and "Type" in texts and "Description" in texts
     assert "LOGON" in texts and "TSO/E logon panel" in texts
     assert "ISPF" in texts and "Primary Option Menu" in texts
+    assert "Member 1-2 of 2  PF3=Exit" in texts          # paging footer
     assert not [f for f in s.items if isinstance(f, Field)]   # display-only
     assert s.command_for("PF3") == "EXIT"
 
