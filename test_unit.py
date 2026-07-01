@@ -25,6 +25,7 @@ from server import (
     _dialog_vars,
     _run_tso_command,
     _library_members,
+    _member_path,
 )
 
 SBA = 0x11
@@ -336,3 +337,20 @@ def test_library_members_lists_real_panels():
     assert {"LOGON", "ISPF", "UTILITY", "MEMLIST"} <= names
     assert all(set(m) == {"mname", "mtype", "mdesc"} for m in members)
     assert all(m["mtype"] == "Panel(DTL)" for m in members)
+
+
+# ── View / Browse member resolution (option 1) ──────────────────────────────
+
+def test_member_path_resolves_real_members():
+    # A real ISPPLIB member resolves (case-insensitively) to its .dtl file.
+    assert _member_path("logon") is not None
+    assert _member_path("LOGON") is not None
+    assert _member_path("ISPF") is not None
+
+
+def test_member_path_rejects_unknown_and_traversal():
+    # Unknown members and any name that could escape panels/ are refused.
+    assert _member_path("nope") is None
+    assert _member_path("") is None
+    for bad in ["../server", r"..\server", "a.b", "a/b", "foo.dtl", "toolongname"]:
+        assert _member_path(bad) is None

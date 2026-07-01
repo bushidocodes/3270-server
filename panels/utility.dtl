@@ -1,5 +1,5 @@
 <!DOCTYPE DM SYSTEM>
-<!-- ISPF Utility Selection Panel (option 3) — a nested selection menu.
+<!-- ISPF Utility Selection Panel (option 3) -- a nested selection menu.
      Same shape as the Primary Option Menu: an Option ===> command line
      (<cmdarea>, ZCMD) and a <selfld> of choices. The server reads the option
      with Screen.command_value() and validates it against Screen.selections;

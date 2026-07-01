@@ -26,7 +26,7 @@
   <info row="3" col="42" fill="-" width="37"/>
 
   <!-- Flow box: these three fields flow down from row 5, col 1; with 13-char
-       prompts and fldgap=2 their entries land at col 16 — the same positions the
+       prompts and fldgap=2 their entries land at col 16 -- the same positions the
        explicit row/fldcol attributes used to give (proven by the golden test). -->
   <area row="5" col="1" fldgap="2">
     <dtafld datavar="userid" entwidth="8" cursor="yes">Userid   ===></dtafld>
@@ -48,7 +48,7 @@
   <info row="17" col="1">PF1=HELP   PF3=LOGOFF</info>
   <info row="21" col="1">ENTER AN END COMMAND TO LOGOFF</info>
 
-  <!-- Keylist: PF3/PF15 leave the panel (logoff). Metadata only — the visible
+  <!-- Keylist: PF3/PF15 leave the panel (logoff). Metadata only -- the visible
        "PF1=HELP PF3=LOGOFF" line above is the displayed function-key area. -->
   <keyl name="TSOLOGON">
     <keyi key="PF1"  cmd="HELP">Help</keyi>

@@ -253,6 +253,89 @@ def _library_members():
             for n in names]
 
 
+def _member_path(member: str):
+    """Resolve a panel-library member name to its panels/<name>.dtl path, or
+    None if the name is invalid or no such member exists. The name is restricted
+    to ISPF member syntax (1-8 ASCII alphanumerics, leading letter), which also
+    makes path traversal impossible — no dots or separators can appear."""
+    import os
+    if not (member and len(member) <= 8 and member.isascii()
+            and member.isalnum() and member[0].isalpha()):
+        return None
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "panels")
+    path = os.path.join(base, f"{member.lower()}.dtl")
+    return path if os.path.isfile(path) else None
+
+
+def _show_browse(client_socket, member: str, path: str):
+    """Browse a panel-library member's source (ISPF option 1 View). Renders the
+    file's lines at rows 1..22 with a BROWSE header/footer, paging with PF7/PF8;
+    PF3/PF15 returns to the entry panel."""
+    from dtl import load_panel
+    from screen import Text
+
+    with open(path, encoding="utf-8") as fh:
+        lines = fh.read().splitlines()
+    page = 22  # row 0 is the header, row 23 the footer
+    top = 0
+    while True:
+        top = max(0, min(top, max(0, len(lines) - 1)))
+        shown_end = min(top + page, len(lines))
+        title = (f"BROWSE    ISPF.ISPPLIB({member.upper()})".ljust(54)
+                 + f"Line {top + 1:08d}")[:79]
+        foot = (f"Lines {top + 1}-{shown_end} of {len(lines)}"
+                "     PF7=Up  PF8=Down  PF3=Exit")[:79]
+        screen = load_panel("browse", BRTITLE=title, BRFOOT=foot)
+        for i, ln in enumerate(lines[top:top + page]):
+            # Browsed content is arbitrary; drop any byte the EBCDIC (cp037)
+            # code page can't encode so the render can never crash.
+            safe = ln.encode("cp037", "replace").decode("cp037")
+            screen.add(Text(1 + i, 0, safe[:79]))
+        _send_screen(client_socket, screen)
+        result = read_client_input(client_socket)
+        if result is None:
+            return
+        aid, _, _ = result
+        aid_str = aid_to_string(aid)
+        if screen.command_for(aid_str) in _LEAVE_COMMANDS:
+            return
+        if aid_str in ("PF8", "PF20"):
+            top += page
+        elif aid_str in ("PF7", "PF19"):
+            top -= page
+        # any other key just redisplays the current page
+
+
+def _show_view(client_socket):
+    """ISPF option 1 (View): prompt for a panel-library member and browse its
+    source. An unknown member is reported via &VIEWMSG; PF3/PF15 returns."""
+    from dtl import load_panel
+
+    msg = ""
+    while True:
+        screen = load_panel("viewentry", VIEWMSG=msg)
+        _send_screen(client_socket, screen)
+        result = read_client_input(client_socket)
+        if result is None:
+            return
+        aid, fields, _ = result
+        aid_str = aid_to_string(aid)
+        if screen.command_for(aid_str) in _LEAVE_COMMANDS:
+            return
+        if aid_str == "PF1" and screen.help:
+            _show_overlay(client_socket, screen.help)
+            continue
+        member = (fields.get(screen.field_addr("member")) or "").strip()
+        if not member:
+            continue
+        path = _member_path(member)
+        if path:
+            _show_browse(client_socket, member, path)
+            msg = ""
+        else:
+            msg = f"MEMBER {member.upper()} NOT FOUND"
+
+
 def _show_submenu(client_socket, panel_name: str, leaves=None, initial=None):
     """Display a nested selection menu (e.g. option 3, Utilities) and drive it
     like the Primary Option Menu: read the option from the panel's <cmdarea>,
@@ -691,6 +774,10 @@ def handle_client(client_socket, addr):
             if option == "0":
                 # Option 0 (Settings) opens a real sub-panel (with an action bar).
                 _show_overlay(client_socket, "settings")
+                short_msg = None
+            elif option == "1":
+                # Option 1 (View) prompts for a member and browses its source.
+                _show_view(client_socket)
                 short_msg = None
             elif option.split(".", 1)[0] == "3":
                 # Option 3 (Utilities) opens a nested selection sub-menu; its
