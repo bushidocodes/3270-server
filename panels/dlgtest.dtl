@@ -1,5 +1,5 @@
 <!DOCTYPE DM SYSTEM>
-<!-- ISPF Dialog Test (option 7) — Variable Display.
+<!-- ISPF Dialog Test (option 7) -- Variable Display.
      Authentic Dialog Test function: list dialog variables and their current
      values. The rows are supplied at runtime via load_panel(..., rows=[...])
      from the live session (see server._dialog_vars); the <lstfld> lays them

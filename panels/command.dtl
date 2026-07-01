@@ -1,5 +1,5 @@
 <!DOCTYPE DM SYSTEM>
-<!-- ISPF Command Shell (option 6) — enter a TSO command.
+<!-- ISPF Command Shell (option 6) -- enter a TSO command.
      The command line is a <cmdarea> (datavar ZCMD); the server reads it with
      Screen.command_value(), runs it (server._run_tso_command), and feeds the
      response back as &CMDMSG for the next display. PF3 returns to the menu;

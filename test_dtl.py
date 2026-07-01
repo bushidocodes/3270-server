@@ -362,6 +362,20 @@ def test_settings_panel_has_action_bar():
     assert s.command_for("PF3") == "EXIT"   # PF3 returns to the menu
 
 
+def test_view_entry_and_browse_panels_load():
+    # Option 1 (View): the entry panel has a `member` input field and surfaces
+    # &VIEWMSG; the browse panel frames &BRTITLE/&BRFOOT with PF3=EXIT.
+    entry = load_panel("viewentry", VIEWMSG="MEMBER FOO NOT FOUND")
+    assert entry.field_addr("member") is not None
+    assert entry.command_for("PF3") == "EXIT"
+    assert "MEMBER FOO NOT FOUND" in [t.text for t in entry.items if isinstance(t, Text)]
+
+    browse = load_panel("browse", BRTITLE="BROWSE  ISPF.ISPPLIB(LOGON)", BRFOOT="PF3=Exit")
+    titles = [t.text for t in browse.items if isinstance(t, Text)]
+    assert "BROWSE  ISPF.ISPPLIB(LOGON)" in titles
+    assert browse.command_for("PF3") == "EXIT"
+
+
 def test_member_list_panel_renders_supplied_members():
     # Utilities -> Library (3.1): the memlist <lstfld> lays out the supplied
     # panel-library members as protected name/type/description rows.
