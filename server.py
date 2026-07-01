@@ -228,13 +228,40 @@ def _show_command_shell(client_socket):
         msg = _run_tso_command(cmd) if cmd else ""
 
 
-def _show_submenu(client_socket, panel_name: str):
+def _library_members():
+    """The ISPF panel library (ISPPLIB) as member rows for the memlist table —
+    the real panels/*.dtl files, so the Library utility lists what's actually
+    there. Each row is {mname, mtype, mdesc}."""
+    import os
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "panels")
+    desc = {
+        "logon": "TSO/E logon panel",
+        "ispf": "Primary Option Menu",
+        "settings": "Settings (action bar)",
+        "utility": "Utility Selection Panel",
+        "command": "TSO Command Shell",
+        "dlgtest": "Dialog Test - Variables",
+        "memlist": "Library - Member List",
+        "tsohelp": "Logon help",
+        "ispfhelp": "ISPF menu help",
+    }
+    try:
+        names = sorted(f[:-4] for f in os.listdir(base) if f.endswith(".dtl"))
+    except OSError:
+        names = []
+    return [{"mname": n.upper(), "mtype": "Panel(DTL)", "mdesc": desc.get(n, "")}
+            for n in names]
+
+
+def _show_submenu(client_socket, panel_name: str, leaves=None):
     """Display a nested selection menu (e.g. option 3, Utilities) and drive it
     like the Primary Option Menu: read the option from the panel's <cmdarea>,
-    validate it against the panel's <choice> selections, and report an
-    unimplemented leaf back via &SELMSG. PF3/PF15 returns; PF1 shows help."""
+    validate it against the panel's <choice> selections. A leaf listed in
+    ``leaves`` ({option: (panel, rows_fn|None)}) opens that sub-panel; any other
+    valid option reports back via &SELMSG. PF3/PF15 returns; PF1 shows help."""
     from dtl import load_panel
 
+    leaves = leaves or {}
     msg = ""
     while True:
         screen = load_panel(panel_name, SELMSG=msg)
@@ -252,7 +279,11 @@ def _show_submenu(client_socket, panel_name: str):
         opt = (screen.command_value(fields) or "").strip().upper()
         if not opt:
             continue
-        if opt in screen.selections:
+        if opt in leaves:
+            sub_panel, rows_fn = leaves[opt]
+            _show_overlay(client_socket, sub_panel, rows=rows_fn() if rows_fn else None)
+            msg = ""
+        elif opt in screen.selections:
             msg = f"OPTION {opt} ({screen.selections[opt].strip()}) NOT YET IMPLEMENTED"
         else:
             msg = f"INVALID OPTION: {opt}"
@@ -641,8 +672,10 @@ def handle_client(client_socket, addr):
                 _show_overlay(client_socket, "settings")
                 short_msg = None
             elif option == "3":
-                # Option 3 (Utilities) opens a nested selection sub-menu.
-                _show_submenu(client_socket, "utility")
+                # Option 3 (Utilities) opens a nested selection sub-menu; its
+                # Library leaf (3.1) lists the real panel-library members.
+                _show_submenu(client_socket, "utility",
+                              leaves={"1": ("memlist", _library_members)})
                 short_msg = None
             elif option == "6":
                 # Option 6 (Command) opens a TSO Command Shell sub-panel.
