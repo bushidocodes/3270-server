@@ -157,6 +157,10 @@ class Screen:
     # Lets the dialog validate/route a typed option against the panel's own
     # declared choices. Metadata: not rendered.
     selections: Dict[str, str] = _dc_field(default_factory=dict)
+    # Screen row → the option value of the <choice> rendered on it. Lets the
+    # dialog resolve a cursor position to a menu choice (point-and-shoot: put
+    # the cursor on a choice and press Enter). Metadata: not rendered.
+    selection_rows: Dict[int, str] = _dc_field(default_factory=dict)
     # Field name (upper) → {"checkmsg": id, "checks": [...]}, from a variable's
     # <varclass> validation (<checkl>/<checki>). Metadata: not rendered.
     validations: Dict[str, dict] = _dc_field(default_factory=dict)
@@ -190,6 +194,14 @@ class Screen:
                     choice["col"] < col <= choice["col"] + len(choice["label"]):
                 return choice
         return None
+
+    def selection_at(self, cursor_addr: Optional[int]) -> Optional[str]:
+        """The option value of the menu choice the cursor's row is on, or
+        ``None`` (point-and-shoot: put the cursor on a choice and press Enter).
+        """
+        if cursor_addr is None:
+            return None
+        return self.selection_rows.get(cursor_addr // 80)
 
     def lookup_command(self, typed: Optional[str]) -> Optional[str]:
         """Resolve a typed command against the command table, honouring each
