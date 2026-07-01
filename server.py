@@ -292,7 +292,9 @@ def _show_submenu(client_socket, panel_name: str, leaves=None, initial=None):
         head = opt.split(".", 1)[0]
         if head in leaves:
             sub_panel, rows_fn = leaves[head]
-            _show_overlay(client_socket, sub_panel, rows=rows_fn() if rows_fn else None)
+            # Leaves are read-only display panels: Enter stays, PF3 exits.
+            _show_overlay(client_socket, sub_panel,
+                          rows=rows_fn() if rows_fn else None, enter_returns=False)
             msg = ""
         elif head in screen.selections:
             msg = f"OPTION {head} ({screen.selections[head].strip()}) NOT YET IMPLEMENTED"
@@ -300,13 +302,18 @@ def _show_submenu(client_socket, panel_name: str, leaves=None, initial=None):
             msg = f"INVALID OPTION: {opt}"
 
 
-def _show_overlay(client_socket, panel_name: str, rows=None):
+def _show_overlay(client_socket, panel_name: str, rows=None, enter_returns=True):
     """Display an overlay panel (help or sub-panel) and wait for the user to
-    leave it (PF3/PF15/Enter). The underlying panel is re-sent by the caller's
-    loop on return — mirroring ISPF's PF1 HELP and option-select behaviour.
+    leave it. The underlying panel is re-sent by the caller's loop on return —
+    mirroring ISPF's PF1 HELP and option-select behaviour.
 
     ``rows`` populates a ``<lstfld>`` list/table on the panel (e.g. the Dialog
     Test variable display), passed straight through to ``load_panel``.
+
+    ``enter_returns`` controls what a bare Enter does. Help panels dismiss on
+    Enter (the default); a read-only display/table panel (member list, variable
+    display) sets it False so Enter just redisplays and only PF3/PF15 exits —
+    the way ISPF treats those panels.
     """
     from dtl import load_panel
 
@@ -335,7 +342,8 @@ def _show_overlay(client_socket, panel_name: str, rows=None):
             continue
         if aid_str == "Enter":
             # Point-and-shoot: Enter with the cursor on an action-bar choice
-            # opens that choice's pull-down; otherwise Enter closes the overlay.
+            # opens that choice's pull-down; otherwise Enter dismisses the
+            # overlay (help panels) or just redisplays it (display panels).
             choice = screen.action_choice_at(cursor)
             if choice and choice.get("pdc"):
                 action = _show_pulldown(client_socket, screen, choice)
@@ -344,7 +352,9 @@ def _show_overlay(client_socket, panel_name: str, rows=None):
                 if _run_pdc_action(client_socket, screen, action):
                     return  # the action left the overlay (e.g. EXIT)
                 continue
-            return
+            if enter_returns:
+                return
+            continue  # display panel: Enter stays; only PF3/PF15 exits
 
 
 def _show_pulldown(client_socket, screen, choice):
@@ -699,7 +709,9 @@ def handle_client(client_socket, addr):
             elif option == "7":
                 # Option 7 (Dialog Test) opens the variable-display sub-panel,
                 # its <lstfld> table populated from the live session variables.
-                _show_overlay(client_socket, "dlgtest", rows=_dialog_vars(userid))
+                # It's a display panel: Enter stays, only PF3 exits.
+                _show_overlay(client_socket, "dlgtest", rows=_dialog_vars(userid),
+                              enter_returns=False)
                 short_msg = None
             elif option in screen.selections:
                 short_msg = f"OPTION {option} NOT YET IMPLEMENTED"
