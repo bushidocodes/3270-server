@@ -24,6 +24,7 @@ from server import (
     write_control_character,
     _dialog_vars,
     _run_tso_command,
+    _library_members,
 )
 
 SBA = 0x11
@@ -324,3 +325,14 @@ def test_run_tso_command_time_reports_live_clock():
     out = _run_tso_command("TIME")
     assert out.startswith("IKJ56650I TIME-")
     assert "DAY-" in out and "DATE-" in out
+
+
+# ── Library member list (Utilities -> 1) ────────────────────────────────────
+
+def test_library_members_lists_real_panels():
+    members = _library_members()
+    names = {m["mname"] for m in members}
+    # the real panel library — these files exist under panels/
+    assert {"LOGON", "ISPF", "UTILITY", "MEMLIST"} <= names
+    assert all(set(m) == {"mname", "mtype", "mdesc"} for m in members)
+    assert all(m["mtype"] == "Panel(DTL)" for m in members)

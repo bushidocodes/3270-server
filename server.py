@@ -228,43 +228,92 @@ def _show_command_shell(client_socket):
         msg = _run_tso_command(cmd) if cmd else ""
 
 
-def _show_submenu(client_socket, panel_name: str):
+def _library_members():
+    """The ISPF panel library (ISPPLIB) as member rows for the memlist table —
+    the real panels/*.dtl files, so the Library utility lists what's actually
+    there. Each row is {mname, mtype, mdesc}."""
+    import os
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "panels")
+    desc = {
+        "logon": "TSO/E logon panel",
+        "ispf": "Primary Option Menu",
+        "settings": "Settings (action bar)",
+        "utility": "Utility Selection Panel",
+        "command": "TSO Command Shell",
+        "dlgtest": "Dialog Test - Variables",
+        "memlist": "Library - Member List",
+        "tsohelp": "Logon help",
+        "ispfhelp": "ISPF menu help",
+    }
+    try:
+        names = sorted(f[:-4] for f in os.listdir(base) if f.endswith(".dtl"))
+    except OSError:
+        names = []
+    return [{"mname": n.upper(), "mtype": "Panel(DTL)", "mdesc": desc.get(n, "")}
+            for n in names]
+
+
+def _show_submenu(client_socket, panel_name: str, leaves=None, initial=None):
     """Display a nested selection menu (e.g. option 3, Utilities) and drive it
     like the Primary Option Menu: read the option from the panel's <cmdarea>,
-    validate it against the panel's <choice> selections, and report an
-    unimplemented leaf back via &SELMSG. PF3/PF15 returns; PF1 shows help."""
+    validate it against the panel's <choice> selections. A leaf listed in
+    ``leaves`` ({option: (panel, rows_fn|None)}) opens that sub-panel; any other
+    valid option reports back via &SELMSG. PF3/PF15 returns; PF1 shows help.
+
+    ``initial`` pre-selects a sub-option without displaying the menu first, so a
+    dotted jump from the parent (``3.1``) lands straight on the leaf; PF3 from
+    there falls back to this menu."""
     from dtl import load_panel
 
+    leaves = leaves or {}
     msg = ""
+    pending = (initial or "").strip().upper() or None
     while True:
         screen = load_panel(panel_name, SELMSG=msg)
-        _send_screen(client_socket, screen)
-        result = read_client_input(client_socket)
-        if result is None:
-            return
-        aid, fields, _ = result
-        aid_str = aid_to_string(aid)
-        if screen.command_for(aid_str) in _LEAVE_COMMANDS:
-            return
-        if aid_str == "PF1" and screen.help:
-            _show_overlay(client_socket, screen.help)
-            continue
-        opt = (screen.command_value(fields) or "").strip().upper()
-        if not opt:
-            continue
-        if opt in screen.selections:
-            msg = f"OPTION {opt} ({screen.selections[opt].strip()}) NOT YET IMPLEMENTED"
+        if pending is not None:
+            opt, pending = pending, None
+        else:
+            _send_screen(client_socket, screen)
+            result = read_client_input(client_socket)
+            if result is None:
+                return
+            aid, fields, _ = result
+            aid_str = aid_to_string(aid)
+            if screen.command_for(aid_str) in _LEAVE_COMMANDS:
+                return
+            if aid_str == "PF1" and screen.help:
+                _show_overlay(client_socket, screen.help)
+                continue
+            opt = (screen.command_value(fields) or "").strip().upper()
+            if not opt:
+                continue
+        # A further dotted tail would forward into a deeper leaf; we nest one
+        # level, so select on the head and ignore any deeper segment.
+        head = opt.split(".", 1)[0]
+        if head in leaves:
+            sub_panel, rows_fn = leaves[head]
+            # Leaves are read-only display panels: Enter stays, PF3 exits.
+            _show_overlay(client_socket, sub_panel,
+                          rows=rows_fn() if rows_fn else None, enter_returns=False)
+            msg = ""
+        elif head in screen.selections:
+            msg = f"OPTION {head} ({screen.selections[head].strip()}) NOT YET IMPLEMENTED"
         else:
             msg = f"INVALID OPTION: {opt}"
 
 
-def _show_overlay(client_socket, panel_name: str, rows=None):
+def _show_overlay(client_socket, panel_name: str, rows=None, enter_returns=True):
     """Display an overlay panel (help or sub-panel) and wait for the user to
-    leave it (PF3/PF15/Enter). The underlying panel is re-sent by the caller's
-    loop on return — mirroring ISPF's PF1 HELP and option-select behaviour.
+    leave it. The underlying panel is re-sent by the caller's loop on return —
+    mirroring ISPF's PF1 HELP and option-select behaviour.
 
     ``rows`` populates a ``<lstfld>`` list/table on the panel (e.g. the Dialog
     Test variable display), passed straight through to ``load_panel``.
+
+    ``enter_returns`` controls what a bare Enter does. Help panels dismiss on
+    Enter (the default); a read-only display/table panel (member list, variable
+    display) sets it False so Enter just redisplays and only PF3/PF15 exits —
+    the way ISPF treats those panels.
     """
     from dtl import load_panel
 
@@ -293,7 +342,8 @@ def _show_overlay(client_socket, panel_name: str, rows=None):
             continue
         if aid_str == "Enter":
             # Point-and-shoot: Enter with the cursor on an action-bar choice
-            # opens that choice's pull-down; otherwise Enter closes the overlay.
+            # opens that choice's pull-down; otherwise Enter dismisses the
+            # overlay (help panels) or just redisplays it (display panels).
             choice = screen.action_choice_at(cursor)
             if choice and choice.get("pdc"):
                 action = _show_pulldown(client_socket, screen, choice)
@@ -302,7 +352,9 @@ def _show_overlay(client_socket, panel_name: str, rows=None):
                 if _run_pdc_action(client_socket, screen, action):
                     return  # the action left the overlay (e.g. EXIT)
                 continue
-            return
+            if enter_returns:
+                return
+            continue  # display panel: Enter stays; only PF3/PF15 exits
 
 
 def _show_pulldown(client_socket, screen, choice):
@@ -640,9 +692,15 @@ def handle_client(client_socket, addr):
                 # Option 0 (Settings) opens a real sub-panel (with an action bar).
                 _show_overlay(client_socket, "settings")
                 short_msg = None
-            elif option == "3":
-                # Option 3 (Utilities) opens a nested selection sub-menu.
-                _show_submenu(client_socket, "utility")
+            elif option.split(".", 1)[0] == "3":
+                # Option 3 (Utilities) opens a nested selection sub-menu; its
+                # Library leaf (3.1) lists the real panel-library members. A
+                # dotted path (e.g. "3.1") jumps straight to the sub-option,
+                # ISPF-style, without stopping at the utility menu first.
+                tail = option.split(".", 1)[1] if "." in option else None
+                _show_submenu(client_socket, "utility",
+                              leaves={"1": ("memlist", _library_members)},
+                              initial=tail)
                 short_msg = None
             elif option == "6":
                 # Option 6 (Command) opens a TSO Command Shell sub-panel.
@@ -651,7 +709,9 @@ def handle_client(client_socket, addr):
             elif option == "7":
                 # Option 7 (Dialog Test) opens the variable-display sub-panel,
                 # its <lstfld> table populated from the live session variables.
-                _show_overlay(client_socket, "dlgtest", rows=_dialog_vars(userid))
+                # It's a display panel: Enter stays, only PF3 exits.
+                _show_overlay(client_socket, "dlgtest", rows=_dialog_vars(userid),
+                              enter_returns=False)
                 short_msg = None
             elif option in screen.selections:
                 short_msg = f"OPTION {option} NOT YET IMPLEMENTED"

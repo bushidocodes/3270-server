@@ -1,0 +1,28 @@
+<!DOCTYPE DM SYSTEM>
+<!-- ISPF Library Member List (Utilities -> 1, Library). A real leaf: the
+     <lstfld> table is populated at runtime from the actual panel library
+     (server._library_members lists panels/*.dtl as ISPPLIB members). Read-only
+     (usage=out). PF3 returns to the Utility Selection Panel. -->
+<panel name="memlist" title="Library - Member List" help="ispfhelp">
+  <info row="0" col="0" intensity="high">--------------------------- ISPF.ISPPLIB - Member List -------------------------</info>
+  <topinst row="2" col="1">Members of the ISPF panel library (ISPPLIB).</topinst>
+
+  <area row="4" col="2">
+    <lstfld>
+      <lstgrp headline="yes">Members
+        <lstcol datavar="mname" usage="out" colwidth="10">Name
+        <lstcol datavar="mtype" usage="out" colwidth="11">Type
+        <lstcol datavar="mdesc" usage="out" colwidth="32">Description
+      </lstgrp>
+    </lstfld>
+  </area>
+
+  <info row="22" col="1">Enter PF3 to return to the Utility Selection Panel.</info>
+  <info row="23" col="0" intensity="high" fill="-" width="79"/>
+
+  <keyl name="MEMKEYS">
+    <keyi key="PF1" cmd="HELP">Help</keyi>
+    <keyi key="PF3" cmd="EXIT">Return</keyi>
+    <keyi key="PF15" cmd="EXIT">Return</keyi>
+  </keyl>
+</panel>
