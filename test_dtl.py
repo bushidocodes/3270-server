@@ -362,6 +362,30 @@ def test_settings_panel_has_action_bar():
     assert s.command_for("PF3") == "EXIT"   # PF3 returns to the menu
 
 
+@pytest.mark.parametrize("name,n_choices", [
+    ("foreground", 6), ("batch", 5), ("ibmprod", 5),
+    ("sclm", 5), ("zsystem", 5), ("zuser", 4),
+])
+def test_remaining_option_submenus_load(name, n_choices):
+    # Options 4/5/9/10/12/13 open nested selection sub-menus: each has its own
+    # ZCMD Option line, the expected number of choices, and PF3=EXIT.
+    s = load_panel(name, SELMSG="")
+    assert s.field_addr("ZCMD") == 2 * 80 + 14
+    assert len(s.selections) == n_choices
+    assert s.command_for("PF3") == "EXIT"
+
+
+def test_edit_entry_and_workplace_panels_load():
+    edit = load_panel("editentry", VIEWMSG="MEMBER FOO NOT FOUND")
+    assert edit.field_addr("member") is not None
+    assert edit.command_for("PF3") == "EXIT"
+    assert "MEMBER FOO NOT FOUND" in [t.text for t in edit.items if isinstance(t, Text)]
+
+    wp = load_panel("workplace")
+    assert wp.command_for("PF3") == "EXIT"
+    assert any("Workplace" in t.text for t in wp.items if isinstance(t, Text))
+
+
 def test_view_entry_and_browse_panels_load():
     # Option 1 (View): the entry panel has a `member` input field and surfaces
     # &VIEWMSG; the browse panel frames &BRTITLE/&BRFOOT with PF3=EXIT.

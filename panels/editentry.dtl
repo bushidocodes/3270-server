@@ -1,0 +1,23 @@
+<!DOCTYPE DM SYSTEM>
+<!-- ISPF Edit - Entry Panel (option 2). Like View, but opens the member in an
+     EDIT frame. Editing is display-only in this demo; the server (_show_view
+     with verb=EDIT) reads the `member` field and browses its source. An unknown
+     member is reported via &VIEWMSG. PF3 returns to the menu. -->
+<panel name="editentry" title="Edit - Entry Panel" help="ispfhelp">
+  <info row="0" col="0" intensity="high">------------------------------ Edit - Entry Panel ------------------------------</info>
+  <topinst row="2" col="1">Enter the name of a panel library (ISPPLIB) member to edit.</topinst>
+
+  <dtafld row="4" col="1" fldcol="18" datavar="member" entwidth="8" cursor="yes">Member name ===></dtafld>
+
+  <info row="7" col="1" intensity="high">&VIEWMSG</info>
+  <info row="9" col="1">Note: this demo opens the member for display; editing is not saved.</info>
+
+  <info row="22" col="1">Enter a member name, or PF3 to return to the Primary Option Menu.</info>
+  <info row="23" col="0" intensity="high" fill="-" width="79"/>
+
+  <keyl name="EDITKEYS">
+    <keyi key="PF1" cmd="HELP">Help</keyi>
+    <keyi key="PF3" cmd="EXIT">Return</keyi>
+    <keyi key="PF15" cmd="EXIT">Return</keyi>
+  </keyl>
+</panel>

@@ -1,0 +1,27 @@
+<!DOCTYPE DM SYSTEM>
+<!-- ISPF SCLM Main Menu (a demo selection sub-menu). Its choices are
+     authentic ISPF sub-functions; each leaf reports back via &SELMSG
+     (not yet implemented). Driven by server._show_submenu; PF3 returns. -->
+<panel name="sclm" title="SCLM Main Menu" help="ispfhelp">
+  <info row="0" col="0" intensity="high">------------------------------- SCLM Main Menu --------------------------------</info>
+
+  <cmdarea row="2" col="1" fldcol="13" entwidth="6" cursor="yes">Option ===></cmdarea>
+
+  <selfld row="4" numcol="1" namecol="4" desccol="21" numwidth="2" numintensity="high">
+    <choice num="1" name="  View            ">  View an SCLM-controlled member</choice>
+    <choice num="2" name="  Edit            ">  Edit an SCLM-controlled member</choice>
+    <choice num="3" name="  Utilities       ">  SCLM library and member utilities</choice>
+    <choice num="4" name="  Build           ">  Build (compile/link) a member</choice>
+    <choice num="5" name="  Promote         ">  Promote a member up the hierarchy</choice>
+  </selfld>
+
+  <info row="20" col="1" intensity="high">&SELMSG</info>
+  <info row="22" col="1">Enter an option, or PF3 to return to the Primary Option Menu.</info>
+  <info row="23" col="0" intensity="high" fill="-" width="79"/>
+
+  <keyl name="SCLMKEYS">
+    <keyi key="PF1" cmd="HELP">Help</keyi>
+    <keyi key="PF3" cmd="EXIT">Return</keyi>
+    <keyi key="PF15" cmd="EXIT">Return</keyi>
+  </keyl>
+</panel>

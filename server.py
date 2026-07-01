@@ -285,10 +285,10 @@ def _member_path(member: str):
     return path if os.path.isfile(path) else None
 
 
-def _show_browse(client_socket, member: str, path: str):
-    """Browse a panel-library member's source (ISPF option 1 View). Renders the
-    file's lines at rows 1..22 with a BROWSE header/footer, paging with PF7/PF8;
-    PF3/PF15 returns to the entry panel."""
+def _show_browse(client_socket, member: str, path: str, verb: str = "BROWSE"):
+    """Browse a panel-library member's source (ISPF option 1 View, or option 2
+    Edit with verb="EDIT"). Renders the file's lines at rows 1..22 with a header/
+    footer, paging with PF7/PF8; PF3/PF15 returns to the entry panel."""
     from dtl import load_panel
     from screen import Text
 
@@ -299,7 +299,7 @@ def _show_browse(client_socket, member: str, path: str):
     while True:
         top = max(0, min(top, max(0, len(lines) - 1)))
         shown_end = min(top + page, len(lines))
-        title = (f"BROWSE    ISPF.ISPPLIB({member.upper()})".ljust(54)
+        title = (f"{verb}    ISPF.ISPPLIB({member.upper()})".ljust(54)
                  + f"Line {top + 1:08d}")[:79]
         foot = (f"Lines {top + 1}-{shown_end} of {len(lines)}"
                 "     PF7=Up  PF8=Down  PF3=Exit")[:79]
@@ -324,14 +324,15 @@ def _show_browse(client_socket, member: str, path: str):
         # any other key just redisplays the current page
 
 
-def _show_view(client_socket):
-    """ISPF option 1 (View): prompt for a panel-library member and browse its
-    source. An unknown member is reported via &VIEWMSG; PF3/PF15 returns."""
+def _show_view(client_socket, entry_panel: str = "viewentry", verb: str = "BROWSE"):
+    """ISPF option 1 (View) / option 2 (Edit): prompt for a panel-library member
+    on ``entry_panel`` and open its source (as ``verb`` — BROWSE or EDIT). An
+    unknown member is reported via &VIEWMSG; PF3/PF15 returns."""
     from dtl import load_panel
 
     msg = ""
     while True:
-        screen = load_panel("viewentry", VIEWMSG=msg)
+        screen = load_panel(entry_panel, VIEWMSG=msg)
         action = _await_action(client_socket, screen)
         if action is _LEAVE:
             return
@@ -341,7 +342,7 @@ def _show_view(client_socket):
             continue
         path = _member_path(member)
         if path:
-            _show_browse(client_socket, member, path)
+            _show_browse(client_socket, member, path, verb=verb)
             msg = ""
         else:
             msg = f"MEMBER {member.upper()} NOT FOUND"
@@ -690,6 +691,18 @@ def tn3270_negotiate(client_socket):
 # rather than hard-coding key numbers.
 _LEAVE_COMMANDS = {"EXIT", "END", "RETURN", "LOGOFF"}
 
+# Primary-menu options that open a nested selection sub-menu (option -> panel).
+# Driven uniformly through _show_submenu, so each supports the dotted jump
+# (e.g. "9.2") and reports an unimplemented leaf via &SELMSG.
+_SUBMENUS = {
+    "4": "foreground",   # Foreground language processing
+    "5": "batch",        # Batch language processing
+    "9": "ibmprod",      # IBM Products
+    "10": "sclm",        # SCLM
+    "12": "zsystem",     # z/OS System programmer applications
+    "13": "zuser",       # z/OS User applications
+}
+
 _message_catalog = None
 
 
@@ -775,6 +788,8 @@ def handle_client(client_socket, addr):
 
             # A typed value is a menu selection, a command from the panel's
             # <cmdtbl>, or invalid. (The "X" exit choice is handled above.)
+            head = option.split(".", 1)[0]
+            tail = option.split(".", 1)[1] if "." in option else None
             if option == "0":
                 # Option 0 (Settings) opens a real sub-panel (with an action bar).
                 _show_overlay(client_socket, "settings")
@@ -783,12 +798,19 @@ def handle_client(client_socket, addr):
                 # Option 1 (View) prompts for a member and browses its source.
                 _show_view(client_socket)
                 short_msg = None
-            elif option.split(".", 1)[0] == "3":
+            elif option == "2":
+                # Option 2 (Edit) prompts for a member and opens it (view-only).
+                _show_view(client_socket, entry_panel="editentry", verb="EDIT")
+                short_msg = None
+            elif option == "11":
+                # Option 11 (Workplace) opens an informational panel.
+                _show_overlay(client_socket, "workplace")
+                short_msg = None
+            elif head == "3":
                 # Option 3 (Utilities) opens a nested selection sub-menu; its
                 # Library leaf (3.1) lists the real panel-library members. A
                 # dotted path (e.g. "3.1") jumps straight to the sub-option,
                 # ISPF-style, without stopping at the utility menu first.
-                tail = option.split(".", 1)[1] if "." in option else None
                 _show_submenu(client_socket, "utility",
                               leaves={"1": ("memlist", _library_members)},
                               initial=tail)
@@ -803,6 +825,11 @@ def handle_client(client_socket, addr):
                 # It's a display panel: Enter stays, only PF3 exits.
                 _show_overlay(client_socket, "dlgtest", rows=_dialog_vars(userid),
                               enter_returns=False)
+                short_msg = None
+            elif head in _SUBMENUS:
+                # Options 4/5/9/10/12/13 open their nested selection sub-menu,
+                # supporting the same dotted jump (e.g. "9.2") as Utilities.
+                _show_submenu(client_socket, _SUBMENUS[head], initial=tail)
                 short_msg = None
             elif option in screen.selections:
                 short_msg = f"OPTION {option} NOT YET IMPLEMENTED"
