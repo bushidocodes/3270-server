@@ -262,6 +262,16 @@ def _library_members():
         "memlist": "Library - Member List",
         "tsohelp": "Logon help",
         "ispfhelp": "ISPF menu help",
+        "viewentry": "View entry panel",
+        "editentry": "Edit entry panel",
+        "browse": "Browse frame",
+        "foreground": "Foreground selection menu",
+        "batch": "Batch selection menu",
+        "ibmprod": "IBM Products menu",
+        "sclm": "SCLM main menu",
+        "workplace": "Object/Action Workplace",
+        "zsystem": "z/OS System applications",
+        "zuser": "z/OS User applications",
     }
     try:
         names = sorted(f[:-4] for f in os.listdir(base) if f.endswith(".dtl"))
@@ -348,12 +358,54 @@ def _show_view(client_socket, entry_panel: str = "viewentry", verb: str = "BROWS
             msg = f"MEMBER {member.upper()} NOT FOUND"
 
 
+def _show_member_list(client_socket):
+    """Utilities -> Library (3.1): the panel-library member list, with ISPF
+    point-and-shoot — put the cursor on a member row and press Enter to browse
+    that member's source. PF7/PF8 page the list; PF3/PF15 returns."""
+    from dtl import load_panel
+    from screen import Text
+
+    members = _library_members()
+    page = 16  # data rows 6..21; row 22 is the footer, row 23 the rule
+    top = 0
+    while True:
+        top = max(0, min(top, max(0, len(members) - 1)))
+        window = members[top:top + page]
+        foot = (f"Member {top + 1}-{top + len(window)} of {len(members)}"
+                "     PF7=Up  PF8=Down  PF3=Exit")[:79]
+        screen = load_panel("memlist", rows=window, MEMFOOT=foot)
+        # Map each rendered data row to its member (the member name renders as a
+        # Text in the Name column); the cursor's row then selects the member.
+        member_by_row = {}
+        for m in window:
+            for it in screen.items:
+                if isinstance(it, Text) and it.text == m["mname"]:
+                    member_by_row[it.row] = m["mname"]
+                    break
+        action = _await_action(client_socket, screen)
+        if action is _LEAVE:
+            return
+        aid_str, _fields, cursor = action
+        if aid_str in ("PF8", "PF20"):
+            top += page
+        elif aid_str in ("PF7", "PF19"):
+            top -= page
+        elif aid_str == "Enter" and cursor is not None:
+            member = member_by_row.get(cursor // 80)
+            if member:
+                path = _member_path(member)
+                if path:
+                    _show_browse(client_socket, member, path)
+        # otherwise just redisplay the current page
+
+
 def _show_submenu(client_socket, panel_name: str, leaves=None, initial=None):
     """Display a nested selection menu (e.g. option 3, Utilities) and drive it
     like the Primary Option Menu: read the option from the panel's <cmdarea>,
     validate it against the panel's <choice> selections. A leaf listed in
-    ``leaves`` ({option: (panel, rows_fn|None)}) opens that sub-panel; any other
-    valid option reports back via &SELMSG. PF3/PF15 returns; PF1 shows help.
+    ``leaves`` ({option: handler(client_socket)}) invokes its handler to show
+    that sub-panel; any other valid option reports back via &SELMSG. PF3/PF15
+    returns; PF1 shows help.
 
     ``initial`` pre-selects a sub-option without displaying the menu first, so a
     dotted jump from the parent (``3.1``) lands straight on the leaf; PF3 from
@@ -379,10 +431,7 @@ def _show_submenu(client_socket, panel_name: str, leaves=None, initial=None):
         # level, so select on the head and ignore any deeper segment.
         head = opt.split(".", 1)[0]
         if head in leaves:
-            sub_panel, rows_fn = leaves[head]
-            # Leaves are read-only display panels: Enter stays, PF3 exits.
-            _show_overlay(client_socket, sub_panel,
-                          rows=rows_fn() if rows_fn else None, enter_returns=False)
+            leaves[head](client_socket)  # a handler that shows the leaf sub-panel
             msg = ""
         elif head in screen.selections:
             msg = f"OPTION {head} ({screen.selections[head].strip()}) NOT YET IMPLEMENTED"
@@ -812,7 +861,7 @@ def handle_client(client_socket, addr):
                 # dotted path (e.g. "3.1") jumps straight to the sub-option,
                 # ISPF-style, without stopping at the utility menu first.
                 _show_submenu(client_socket, "utility",
-                              leaves={"1": ("memlist", _library_members)},
+                              leaves={"1": _show_member_list},
                               initial=tail)
                 short_msg = None
             elif option == "6":

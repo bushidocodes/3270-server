@@ -337,6 +337,8 @@ def test_library_members_lists_real_panels():
     assert {"LOGON", "ISPF", "UTILITY", "MEMLIST"} <= names
     assert all(set(m) == {"mname", "mtype", "mdesc"} for m in members)
     assert all(m["mtype"] == "Panel(DTL)" for m in members)
+    # every real panel has a description (no blank rows in the list)
+    assert all(m["mdesc"] for m in members)
 
 
 # ── View / Browse member resolution (option 1) ──────────────────────────────
