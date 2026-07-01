@@ -423,8 +423,11 @@ def _show_submenu(client_socket, panel_name: str, leaves=None, initial=None):
             action = _await_action(client_socket, screen)
             if action is _LEAVE:
                 return
-            _aid_str, fields, _cursor = action
+            aid_str, fields, cursor = action
             opt = (screen.command_value(fields) or "").strip().upper()
+            # Point-and-shoot: Enter on a choice row selects it when nothing typed.
+            if not opt and aid_str == "Enter":
+                opt = screen.selection_at(cursor) or ""
             if not opt:
                 continue
         # A further dotted tail would forward into a deeper leaf; we nest one
@@ -819,13 +822,16 @@ def handle_client(client_socket, addr):
             result = read_client_input(client_socket)
             if result is None:
                 return
-            aid, fields, _ = result
+            aid, fields, cursor = result
             print(f"AID={hex(aid)}, fields={redact_fields(fields)}")
 
             aid_str = aid_to_string(aid)
             # Read the option from the panel's <cmdarea> (its ZCMD command
             # field), resolved by role rather than a hard-coded address.
             option = (screen.command_value(fields) or "").strip().upper()
+            # Point-and-shoot: with no typed option, Enter on a choice row picks it.
+            if not option and aid_str == "Enter":
+                option = screen.selection_at(cursor) or ""
 
             cmd = screen.command_for(aid_str)
             if option == "X" or cmd in _LEAVE_COMMANDS:

@@ -164,6 +164,29 @@ def test_selfld_lays_out_choices_on_incrementing_rows():
     assert s.items[3] == Text(5, 1, "10", DisplayIntensity.HIGH)
 
 
+def test_choice_records_selection_rows_for_point_and_shoot():
+    # Each choice also records the row it renders on, so the cursor can select
+    # it (point-and-shoot). selection_at(cursor) resolves a cursor address.
+    s = load_dtl(
+        '<panel><selfld row="4" numcol="1" namecol="4" desccol="21">'
+        '<choice num="0" name="A">  desc-a</choice>'
+        '<choice num="3" name="B">  desc-b</choice>'
+        '</selfld></panel>'
+    )
+    assert s.selection_rows == {4: "0", 5: "3"}
+    assert s.selection_at(4 * 80 + 10) == "0"   # cursor anywhere on row 4 -> "0"
+    assert s.selection_at(5 * 80 + 0) == "3"
+    assert s.selection_at(9 * 80 + 1) is None    # not on a choice row
+    assert s.selection_at(None) is None
+
+
+def test_ispf_menu_selection_rows_map_options():
+    s = load_panel("ispf", ZUSER="IBMUSER ", ZTIME="13:45")
+    # cursor on the Utilities line selects option 3; the Exit line selects X
+    assert s.selection_at(7 * 80 + 5) == "3"
+    assert s.selection_at(18 * 80 + 5) == "X"
+
+
 def test_choice_matchval_defaults_to_num_and_records_selections():
     s = load_dtl(
         '<panel><selfld row="4" numcol="1" namecol="4" desccol="21">'

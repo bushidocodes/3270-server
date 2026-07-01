@@ -1011,6 +1011,9 @@ class _DTLParser(HTMLParser):
         matchval = a.get("matchval", a.get("num", "")).strip().upper()
         if matchval:
             self.screen.selections[matchval] = a.get("name", "").strip()
+            # Remember which row this choice renders on, so the cursor can
+            # select it (point-and-shoot).
+            self.screen.selection_rows[row] = matchval
 
     def _emit_action_bar(self, ab):
         """Lay the action-bar choice labels out across the bar's row (high
