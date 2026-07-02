@@ -82,24 +82,69 @@ def test_screen_render_threads_color_flag():
     assert SFE in scr.render(color=True)
 
 
-# ── DTL colour attributes ────────────────────────────────────────────────────
+# ── DTL COLOR attribute (a real DTL attribute on field elements) ─────────────
 
-def test_dtl_color_attribute_parsed():
-    s = load_panel_src('<info row="1" col="1" color="turquoise">HELLO</info>')
-    text = next(i for i in s.items if isinstance(i, Text))
-    assert text.color is Color.TURQUOISE
+def test_dtl_dtafld_color_is_on_the_field_not_the_prompt():
+    # DTL's COLOR on a <dtafld> colours the entry field; the caption/prompt is a
+    # CUA element with its own (default) colour.
+    s = load_panel_src(
+        '<dtafld row="1" col="1" fldcol="20" datavar="u" entwidth="8"'
+        ' color="turq">Name ===></dtafld>')
+    prompt = next(i for i in s.items if isinstance(i, Text))
+    field = next(i for i in s.items if isinstance(i, Field))
+    assert prompt.color is None
+    assert field.color is Color.TURQUOISE
     assert SFE in s.render(color=True)
     assert SFE not in s.render(color=False)
 
 
-def test_dtl_fldcolor_differs_from_prompt():
-    s = load_panel_src(
-        '<dtafld row="1" col="1" fldcol="20" datavar="u" entwidth="8"'
-        ' color="turquoise" fldcolor="white">Name ===></dtafld>')
-    prompt = next(i for i in s.items if isinstance(i, Text))
+def test_dtl_color_keywords():
+    for kw, want in [("white", Color.WHITE), ("red", Color.RED), ("blue", Color.BLUE),
+                     ("green", Color.GREEN), ("pink", Color.PINK),
+                     ("yellow", Color.YELLOW), ("turq", Color.TURQUOISE)]:
+        s = load_panel_src(
+            f'<dtafld row="1" col="1" fldcol="10" datavar="u" color="{kw}">X</dtafld>')
+        field = next(i for i in s.items if isinstance(i, Field))
+        assert field.color is want, kw
+
+
+def test_dtl_color_percent_variable():
+    # COLOR=%VAR takes its value from a dialog variable (like &VAR substitution).
+    s = load_dtl('<panel><dtafld row="1" col="1" fldcol="10" datavar="u"'
+                 ' color="%HILITEC">X</dtafld></panel>', HILITEC="red")
     field = next(i for i in s.items if isinstance(i, Field))
-    assert prompt.color is Color.TURQUOISE
-    assert field.color is Color.WHITE
+    assert field.color is Color.RED
+
+
+def test_dtl_info_is_not_color_bearing():
+    # <info> is not a COLOR-bearing element; a stray color= is ignored (no SFE).
+    s = load_panel_src('<info row="1" col="1" color="red">HELLO</info>')
+    assert SFE not in s.render(color=True)
+
+
+def test_dtl_hilite_attribute():
+    s = load_panel_src(
+        '<dtafld row="1" col="1" fldcol="10" datavar="u"'
+        ' color="green" hilite="reverse">X</dtafld>')
+    field = next(i for i in s.items if isinstance(i, Field))
+    assert field.highlight is Highlight.REVERSE
+
+
+def test_dtl_selfld_colors_choices():
+    s = load_panel_src(
+        '<selfld row="3" numcol="2" namecol="5" desccol="10" color="turq">'
+        '<choice num="1" name="A">Alpha</choice></selfld>')
+    texts = [i for i in s.items if isinstance(i, Text)]
+    assert texts and all(t.color is Color.TURQUOISE for t in texts)
+
+
+def test_dtl_lstcol_colors_cells():
+    s = load_dtl(
+        '<panel><lstfld row="2" col="1">'
+        '<lstcol datavar="v" usage="out" colwidth="6" color="yellow">Val</lstcol>'
+        '</lstfld></panel>', rows=[{"v": "HI"}])
+    cell = next(i for i in s.items if isinstance(i, Text) and i.text.strip() == "HI")
+    assert cell.color is Color.YELLOW
 
 
 # ── logon panel end-to-end ───────────────────────────────────────────────────
