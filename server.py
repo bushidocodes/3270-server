@@ -1,6 +1,7 @@
 import socket
 import binascii
 import threading
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
@@ -96,6 +97,76 @@ IC = 0x13
 # send_tso_logon / send_ispf_menu below.
 
 
+# ── terminal models ──────────────────────────────────────────────────────────
+# The client tells us its device type during Telnet TERMINAL-TYPE negotiation
+# (e.g. "IBM-3278-2", "IBM-3279-4-E"). Every 3270 model shares a 24x80 *default*
+# presentation space — that is what ERASE_WRITE (0xF5) selects, and it is what
+# all the bundled panels are authored for, so they render identically on every
+# model. The model number only enlarges the *alternate* space, which is selected
+# by ERASE/WRITE ALTERNATE (0x7E); using it (to lay panels out across a model
+# 3/4/5's extra rows/columns) is a separate, larger piece of work. For now we
+# detect and record the negotiated model so the session knows what it is talking
+# to, exposes it as an ISPF dialog variable (ZTERM), and is ready for wide-panel
+# support without guessing the geometry later.
+
+# Model number -> alternate-screen (rows, cols). The default space is always
+# 24x80; models 3/4/5 differ only in their alternate size.
+_MODEL_DIMENSIONS = {
+    2: (24, 80),
+    3: (32, 80),
+    4: (43, 80),
+    5: (27, 132),
+}
+
+
+@dataclass(frozen=True)
+class TerminalModel:
+    """A negotiated 3270 terminal model, parsed from its TERMINAL-TYPE string.
+
+    ``default_rows``/``default_cols`` are the 24x80 space every model shares and
+    that the panels currently render on; ``alt_rows``/``alt_cols`` are the
+    model's larger alternate space (equal to the default for model 2).
+    """
+
+    term_type: str          # the negotiated string, e.g. "IBM-3278-2"
+    model: int              # 2..5 (2 for unknown / IBM-DYNAMIC until Query lands)
+    alt_rows: int
+    alt_cols: int
+    extended: bool = False  # "-E" suffix: extended data stream (color/query/…)
+    color: bool = False     # 3279-family device: colour-capable
+    default_rows: int = 24
+    default_cols: int = 80
+
+
+def parse_terminal_type(term_type: str) -> TerminalModel:
+    """Classify a Telnet TERMINAL-TYPE string into a :class:`TerminalModel`.
+
+    Understands the IBM ``IBM-<device>-<model>[-E]`` convention (3278 mono /
+    3279 colour, models 2–5) and ``IBM-DYNAMIC``. Anything unrecognised — an
+    empty string, ``IBM-DYNAMIC`` (whose real size comes from a Query Reply we
+    do not yet implement), or a model outside 2–5 — falls back to model 2, the
+    universal 24x80 baseline, so the session always has a usable geometry.
+    """
+    t = (term_type or "").strip().upper()
+    extended = t.endswith("-E")
+    core = t[:-2] if extended else t
+    parts = core.split("-")
+    device = parts[1] if len(parts) > 1 else ""
+    color = device == "3279"
+    model = 2
+    if len(parts) > 2 and parts[2].isdigit() and int(parts[2]) in _MODEL_DIMENSIONS:
+        model = int(parts[2])
+    rows, cols = _MODEL_DIMENSIONS[model]
+    return TerminalModel(
+        term_type=t or "IBM-3278-2",
+        model=model,
+        alt_rows=rows,
+        alt_cols=cols,
+        extended=extended,
+        color=color,
+    )
+
+
 # Credentials — keys are uppercase userids
 _CREDENTIALS = {
     "IBMUSER": "SYS1",
@@ -171,11 +242,13 @@ def send_ispf_menu(client_socket, userid: str, short_msg: str = None):
     return screen
 
 
-def _dialog_vars(userid: str):
+def _dialog_vars(userid: str, model: "TerminalModel" = None):
     """The live ISPF dialog variables shown by Dialog Test (option 7), as
     ``{vname, vvalue}`` rows for the panel's ``<lstfld>`` table. These are real
-    ISPF system-variable names with this session's current values."""
+    ISPF system-variable names with this session's current values — including
+    ``ZTERM``, the terminal model negotiated at connect time."""
     now = datetime.now()
+    term = model.term_type if model else "IBM-3278-2"
     return [
         {"vname": "ZUSER",   "vvalue": userid},
         {"vname": "ZPREFIX", "vvalue": userid},
@@ -183,6 +256,7 @@ def _dialog_vars(userid: str):
         {"vname": "ZTIME",   "vvalue": now.strftime("%H:%M")},
         {"vname": "ZDATE",   "vvalue": now.strftime("%y/%m/%d")},
         {"vname": "ZSCREEN", "vvalue": "1"},
+        {"vname": "ZTERM",   "vvalue": term},
         {"vname": "ZENVIR",  "vvalue": "ISPF 7.1"},
         {"vname": "ZKEYS",   "vvalue": "DLGTKEYS"},
     ]
@@ -654,6 +728,8 @@ def tn3270_negotiate(client_socket):
     got_binary = False
     got_eor = False
     got_term = False
+    # The client's device type, captured from its TERMINAL-TYPE IS reply below.
+    term_type = None
 
     negot = bytearray()
     negot.extend([IAC, WILL, BINARY])
@@ -737,6 +813,13 @@ def tn3270_negotiate(client_socket):
 
     print("Negotiation complete: binary={}, eor={}, term={}".format(got_binary, got_eor, got_term))
 
+    model = parse_terminal_type(term_type)
+    print(f"Terminal model: {model.term_type} "
+          f"(model {model.model}, alt {model.alt_rows}x{model.alt_cols}, "
+          f"{'colour' if model.color else 'mono'}"
+          f"{', extended' if model.extended else ''})")
+    return model
+
 
 # ISPF commands that leave the current panel. A panel's <keyl> binds function
 # keys (PF3/PF15) to one of these; the session loop acts on the resolved command
@@ -769,7 +852,7 @@ def _messages():
 
 def handle_client(client_socket, addr):
     print(f"Connection from {addr}")
-    tn3270_negotiate(client_socket)
+    model = tn3270_negotiate(client_socket)
     client_socket.settimeout(600)
 
     while True:
@@ -878,7 +961,8 @@ def handle_client(client_socket, addr):
                 # Option 7 (Dialog Test) opens the variable-display sub-panel,
                 # its <lstfld> table populated from the live session variables.
                 # It's a display panel: Enter stays, only PF3 exits.
-                _show_overlay(client_socket, "dlgtest", rows=_dialog_vars(userid),
+                _show_overlay(client_socket, "dlgtest",
+                              rows=_dialog_vars(userid, model),
                               enter_returns=False)
                 short_msg = None
             elif head in _SUBMENUS:
