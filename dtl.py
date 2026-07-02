@@ -111,7 +111,7 @@ uppercase). An undefined reference is left untouched rather than blanked.
 import re
 from html.parser import HTMLParser
 
-from screen import Screen, Text, Field, DisplayIntensity
+from screen import Screen, Text, Field, DisplayIntensity, Color, Highlight
 
 # An ISPF dialog-variable reference in panel source: ``&&`` (escaped literal
 # ampersand) or ``&NAME`` with an optional terminating ``.``. A name is 1–8
@@ -171,6 +171,30 @@ _INTENSITY = {
     "highlighted": DisplayIntensity.HIGHLIGHTED,
 }
 
+# DTL colour/highlight attribute names → the screen model's enums. A field's
+# colour is emitted only to colour-capable terminals (Screen.render(color=True));
+# a mono terminal ignores it, so panels stay byte-identical there.
+_COLORS = {
+    "blue": Color.BLUE,
+    "red": Color.RED,
+    "pink": Color.PINK,
+    "magenta": Color.PINK,
+    "green": Color.GREEN,
+    "turquoise": Color.TURQUOISE,
+    "turq": Color.TURQUOISE,
+    "cyan": Color.TURQUOISE,
+    "yellow": Color.YELLOW,
+    "white": Color.WHITE,
+}
+
+_HIGHLIGHTS = {
+    "blink": Highlight.BLINK,
+    "reverse": Highlight.REVERSE,
+    "rvideo": Highlight.REVERSE,
+    "uscore": Highlight.UNDERSCORE,
+    "underscore": Highlight.UNDERSCORE,
+}
+
 # Block tags whose text flows as protected lines (like <info>): paragraphs,
 # list items (<li>/<dt>/<dd>/<pt>/<pd>/<lp>), and preformatted <lines>. Their
 # list containers (<ul>/<ol>/<dl>/<parml>/<sl>) are transparent — ignored.
@@ -203,6 +227,16 @@ def _bool_attr(attrs, key, default=False):
 
 def _intensity(attrs, key="intensity", default=DisplayIntensity.NORMAL):
     return _INTENSITY.get(str(attrs.get(key, "")).lower(), default)
+
+
+def _color(attrs):
+    """The Color for a tag's ``color=`` attribute, or None if absent/unknown."""
+    return _COLORS.get(str(attrs.get("color", "")).lower())
+
+
+def _highlight(attrs):
+    """The Highlight for a tag's ``highlight=`` attribute, or None."""
+    return _HIGHLIGHTS.get(str(attrs.get("highlight", "")).lower())
 
 
 class DTLError(ValueError):
@@ -860,7 +894,8 @@ class _DTLParser(HTMLParser):
         if "fill" in a:
             content = a["fill"] * int(a.get("width", 0))
             row, col, _ = self._resolve_pos(a, "info")
-            self.screen.add(Text(row, col, content, _intensity(a)))
+            self.screen.add(Text(row, col, content, _intensity(a),
+                                 color=_color(a), highlight=_highlight(a)))
             return
         if "row" in a:
             # Explicit position: emit content exactly as written (no wrap), so
@@ -870,7 +905,8 @@ class _DTLParser(HTMLParser):
             if not content.strip():
                 return
             row, col, _ = self._resolve_pos(a, "info")
-            self.screen.add(Text(row, col, content, _intensity(a)))
+            self.screen.add(Text(row, col, content, _intensity(a),
+                                 color=_color(a), highlight=_highlight(a)))
             return
         # Flowed text: normalize whitespace and word-wrap to the panel width.
         text = " ".join(content.split())
@@ -901,7 +937,12 @@ class _DTLParser(HTMLParser):
                 f"panel width {self.screen.width}"
             )
         if content:
-            self.screen.add(Text(row, col, content, _intensity(a)))
+            # The prompt takes the tag's colour; the input field takes an
+            # optional separate ``fldcolor`` (e.g. a turquoise label over a white
+            # entry), falling back to the tag colour when unspecified.
+            self.screen.add(Text(row, col, content, _intensity(a),
+                                 color=_color(a), highlight=_highlight(a)))
+        field_color = _COLORS.get(str(a.get("fldcolor", "")).lower()) or _color(a)
         field = Field(
             row=row,
             col=fldcol,
@@ -912,6 +953,8 @@ class _DTLParser(HTMLParser):
             hidden=_bool_attr(a, "hidden"),
             cursor=_bool_attr(a, "cursor"),
             mdt=_bool_attr(a, "mdt", default=True),
+            color=field_color,
+            highlight=_highlight(a),
         )
         self.screen.add(field)
         self._attach_validation(name)

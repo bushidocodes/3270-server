@@ -138,9 +138,14 @@ Screens are built with authentic 3270 orders:
 | ERASE_WRITE | `0xF5` | Clear screen and write new data |
 | SBA | `0x11` | Set Buffer Address — position the write cursor |
 | SF | `0x1D` | Start Field — define a protected or unprotected input field |
+| SFE | `0x29` | Start Field Extended — a field carrying colour / highlighting (colour terminals only) |
 | IC | `0x13` | Insert Cursor — place the cursor in an input field |
 
 The Write Control Character (WCC) sent after ERASE_WRITE uses `0x43` — the correct x3270/wc3270 bit layout (`WCC_RESET_BIT | WCC_KEYBOARD_RESTORE_BIT | WCC_RESET_MDT_BIT`) — so the keyboard unlocks immediately after every screen update.
+
+### Colour and highlighting (extended attributes)
+
+A screen item can declare a `color` (blue, red, pink, green, turquoise, yellow, white) and/or `highlight` (blink, reverse, underscore). These are **extended attributes**, carried by a Start Field Extended (`0x29`) order — a pair count followed by the basic field attribute plus one `type`/`value` pair per extended attribute (foreground colour is type `0x42`, highlighting `0x41`). Colour is **opt-in per item and gated on the terminal**: a screen renders extended attributes only when the connected terminal negotiated colour (a 3279-family device, or one whose Query Reply reported colour). A mono terminal — or an item with no colour — emits the classic Start Field (`0x1D`), so those data streams are **byte-for-byte unchanged**. The TSO/E logon panel is colourised (`panels/logon.dtl`); the ISPF menu and sub-panels remain mono for now.
 
 ### Query / Query Reply (structured fields)
 
@@ -230,7 +235,10 @@ centered over its columns; below them, model rows render each column as a protec
 `<area>`/`<region>` (flow boxes — see below). ISPF
 dialog variables are referenced `&`-style — `&ZUSER`, `&ZTIME` — and substituted at load time
 (e.g. the live user id and clock on the ISPF status line); `&&` is a literal ampersand and a
-trailing `.` terminates a reference. Messages live separately in a `<msgmbr>` (see `messages/`).
+trailing `.` terminates a reference. A `<info>`/`<dtafld>` may also carry a `color`
+(blue/red/pink/green/turquoise/yellow/white) and/or `highlight` (blink/reverse/underscore); a
+`<dtafld>` can give its input field a separate `fldcolor`. These emit as extended attributes on
+colour terminals and are ignored on mono ones. Messages live separately in a `<msgmbr>` (see `messages/`).
 As in real DTL the source is SGML: files may open with a `<!DOCTYPE DM SYSTEM>` prolog,
 tag/attribute names are case-insensitive, and boolean attributes may be minimized
 (`<dtafld hidden>`).

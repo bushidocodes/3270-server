@@ -18,35 +18,39 @@
     <vardcl name="perform" varclass="NUMFLD"/>
   </varlist>
 
-  <info row="0" col="18" intensity="high">--------  z/OS V2R5.0 TSO/E LOGON  --------</info>
+  <!-- Colours (color=) are emitted only to colour-capable terminals; a mono
+       terminal ignores them and the panel renders byte-for-byte as before. The
+       scheme mirrors a real z/OS logon: white title, blue rules, turquoise
+       prompts, white input entries, a red security warning. -->
+  <info row="0" col="18" intensity="high" color="white">--------  z/OS V2R5.0 TSO/E LOGON  --------</info>
 
-  <topinst row="2" col="1">Enter LOGON parameters below:</topinst>
-  <topinst row="2" col="42">RACF LOGON parameters:</topinst>
-  <info row="3" col="1" fill="-" width="37"/>
-  <info row="3" col="42" fill="-" width="37"/>
+  <topinst row="2" col="1" color="white">Enter LOGON parameters below:</topinst>
+  <topinst row="2" col="42" color="white">RACF LOGON parameters:</topinst>
+  <info row="3" col="1" fill="-" width="37" color="blue"/>
+  <info row="3" col="42" fill="-" width="37" color="blue"/>
 
   <!-- Flow box: these three fields flow down from row 5, col 1; with 13-char
        prompts and fldgap=2 their entries land at col 16 -- the same positions the
        explicit row/fldcol attributes used to give (proven by the golden test). -->
   <area row="5" col="1" fldgap="2">
-    <dtafld datavar="userid" entwidth="8" cursor="yes">Userid   ===></dtafld>
-    <dtafld datavar="password" entwidth="8" hidden="yes">Password ===></dtafld>
-    <dtafld datavar="procedure" entwidth="8" default="IKJACCNT">Procedure===></dtafld>
+    <dtafld datavar="userid" entwidth="8" cursor="yes" color="turquoise" fldcolor="white">Userid   ===></dtafld>
+    <dtafld datavar="password" entwidth="8" hidden="yes" color="turquoise">Password ===></dtafld>
+    <dtafld datavar="procedure" entwidth="8" default="IKJACCNT" color="turquoise" fldcolor="white">Procedure===></dtafld>
   </area>
-  <dtafld row="7" col="42" fldcol="60" datavar="acct" entwidth="8">Acct Nmbr    ===></dtafld>
-  <dtafld row="8" col="1" fldcol="16" datavar="size" entwidth="5" default="00150">Size     ===></dtafld>
-  <dtafld row="8" col="42" fldcol="60" datavar="perform" entwidth="8">Perform      ===></dtafld>
-  <dtafld row="9" col="1" fldcol="16" datavar="command" entwidth="62">Command  ===></dtafld>
-  <dtafld row="11" col="1" fldcol="19" datavar="dsname" entwidth="59">PDS/E Dsname ===></dtafld>
+  <dtafld row="7" col="42" fldcol="60" datavar="acct" entwidth="8" color="turquoise" fldcolor="white">Acct Nmbr    ===></dtafld>
+  <dtafld row="8" col="1" fldcol="16" datavar="size" entwidth="5" default="00150" color="turquoise" fldcolor="white">Size     ===></dtafld>
+  <dtafld row="8" col="42" fldcol="60" datavar="perform" entwidth="8" color="turquoise" fldcolor="white">Perform      ===></dtafld>
+  <dtafld row="9" col="1" fldcol="16" datavar="command" entwidth="62" color="turquoise" fldcolor="white">Command  ===></dtafld>
+  <dtafld row="11" col="1" fldcol="19" datavar="dsname" entwidth="59" color="turquoise" fldcolor="white">PDS/E Dsname ===></dtafld>
 
-  <info row="12" col="42">Mail      ===> Yes</info>
-  <info row="13" col="42">Reconnect ===> Auto</info>
-  <info row="14" col="42">OIDcard   ===> None</info>
+  <info row="12" col="42" color="turquoise">Mail      ===> Yes</info>
+  <info row="13" col="42" color="turquoise">Reconnect ===> Auto</info>
+  <info row="14" col="42" color="turquoise">OIDcard   ===> None</info>
 
-  <info row="15" col="1" intensity="highlighted">*** Authorized users only. Unauthorized access is prohibited. ***</info>
-  <paninst row="16" col="1">Press ENTER to logon to TSO/E</paninst>
-  <info row="17" col="1">PF1=HELP   PF3=LOGOFF</info>
-  <info row="21" col="1">ENTER AN END COMMAND TO LOGOFF</info>
+  <info row="15" col="1" intensity="highlighted" color="red">*** Authorized users only. Unauthorized access is prohibited. ***</info>
+  <paninst row="16" col="1" color="white">Press ENTER to logon to TSO/E</paninst>
+  <info row="17" col="1" color="turquoise">PF1=HELP   PF3=LOGOFF</info>
+  <info row="21" col="1" color="turquoise">ENTER AN END COMMAND TO LOGOFF</info>
 
   <!-- Keylist: PF3/PF15 leave the panel (logoff). Metadata only -- the visible
        "PF1=HELP PF3=LOGOFF" line above is the displayed function-key area. -->
