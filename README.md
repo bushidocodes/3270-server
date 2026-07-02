@@ -121,7 +121,7 @@ x3270 localhost:2323
 
 ### Connect with any emulator
 
-Point your emulator at `localhost`, port `2323`. The server negotiates TN3270E binary mode, EOR, and terminal-type options automatically and supports IBM-3278 model 2–5 terminals.
+Point your emulator at `localhost`, port `2323`. The server performs basic TN3270 (RFC 1576) negotiation — BINARY, EOR, and TERMINAL-TYPE — automatically. It detects the terminal model your emulator reports (3278/3279, models 2–5) and records it (exposed as the `ZTERM` dialog variable under option 7); screens are drawn on the 24×80 default presentation space that every one of those models shares, so any of them renders identically. (Full TN3270E — RFC 2355 — and laying panels out across a model 3/4/5's larger *alternate* screen are not yet implemented.)
 
 ## How it works
 
@@ -185,7 +185,8 @@ Key functions:
 
 | Function | What it does |
 |----------|-------------|
-| `tn3270_negotiate` | Performs Telnet option handshake |
+| `tn3270_negotiate` | Performs the Telnet option handshake and returns the negotiated `TerminalModel` |
+| `parse_terminal_type` | Classifies a TERMINAL-TYPE string (e.g. `IBM-3279-4-E`) into a `TerminalModel` (model 2–5, size, colour) |
 | `dtl.load_panel` | Parses a `panels/*.dtl` source into a `Screen` |
 | `screen.Screen.render` | Renders a `Screen` to a 3270 data stream |
 | `screen.Screen.parse` | Maps a client response onto named fields |
@@ -265,7 +266,8 @@ To add more users, extend the `_CREDENTIALS` dict at the top of `server.py`.
 
 ## References
 
-- [RFC 2355 — TN3270E](https://tools.ietf.org/html/rfc2355)
+- [RFC 1576 — TN3270 Current Practices](https://tools.ietf.org/html/rfc1576) — the basic (non-E) negotiation this server implements
+- [RFC 2355 — TN3270E](https://tools.ietf.org/html/rfc2355) — the extended protocol (not yet implemented)
 - [IBM 3270 Data Stream Programming Reference](https://www.ibm.com/docs/en/zos/2.5.0?topic=reference-3270-data-stream)
 - [IBM ISPF Dialog Tag Language Guide and Reference](https://www.ibm.com/docs/en/SSLTBW_2.4.0/pdf/f54dt00_v2r4.pdf) — the SGML format the `panels/*.dtl` syntax is modeled on
 - [x3270 / wc3270 emulator](https://x3270.miraheze.org/wiki/Main_Page)
