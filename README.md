@@ -121,7 +121,7 @@ x3270 localhost:2323
 
 ### Connect with any emulator
 
-Point your emulator at `localhost`, port `2323`. The server performs basic TN3270 (RFC 1576) negotiation — BINARY, EOR, and TERMINAL-TYPE — automatically. It detects the terminal model your emulator reports (3278/3279, models 2–5) and records it (exposed as the `ZTERM` dialog variable under option 7); screens are drawn on the 24×80 default presentation space that every one of those models shares, so any of them renders identically. (Full TN3270E — RFC 2355 — and laying panels out across a model 3/4/5's larger *alternate* screen are not yet implemented.)
+Point your emulator at `localhost`, port `2323`. The server performs basic TN3270 (RFC 1576) negotiation — BINARY, EOR, and TERMINAL-TYPE — automatically. It detects the terminal model your emulator reports (3278/3279, models 2–5) and records it (exposed as the `ZTERM` dialog variable under option 7). If your emulator advertises the extended data stream (an `-E` terminal type), the server then sends a **Read Partition (Query)** and folds the terminal's own **Query Reply** — its real usable area, colour, and highlighting support — back into what it knows about the session (authoritative where the type string is only a hint, e.g. `IBM-DYNAMIC`). Screens are drawn on the 24×80 default presentation space that every one of those models shares, so any of them renders identically. (Full TN3270E — RFC 2355 — and laying panels out across a model 3/4/5's larger *alternate* screen are not yet implemented.)
 
 ## How it works
 
@@ -141,6 +141,10 @@ Screens are built with authentic 3270 orders:
 | IC | `0x13` | Insert Cursor — place the cursor in an input field |
 
 The Write Control Character (WCC) sent after ERASE_WRITE uses `0x43` — the correct x3270/wc3270 bit layout (`WCC_RESET_BIT | WCC_KEYBOARD_RESTORE_BIT | WCC_RESET_MDT_BIT`) — so the keyboard unlocks immediately after every screen update.
+
+### Query / Query Reply (structured fields)
+
+The TERMINAL-TYPE string is only a hint. The authoritative way to learn a terminal's real geometry and capabilities is the 3270 **Query**: the host sends a Write Structured Field carrying a Read Partition (Query) request (`F3 00 05 01 FF 02`), and the terminal answers with an inbound **AID `0x88`** followed by Query Reply structured fields describing its usable area, colour, highlighting, and more. The server sends this query to extended (`-E`) terminals only — a base terminal may not answer, and the session must not block waiting — then parses the reply (`parse_query_reply`) and reconciles it into the negotiated `TerminalModel` (e.g. resolving an `IBM-DYNAMIC` terminal's true size, or confirming colour support).
 
 ### Field parsing
 
@@ -187,9 +191,12 @@ Key functions:
 |----------|-------------|
 | `tn3270_negotiate` | Performs the Telnet option handshake and returns the negotiated `TerminalModel` |
 | `parse_terminal_type` | Classifies a TERMINAL-TYPE string (e.g. `IBM-3279-4-E`) into a `TerminalModel` (model 2–5, size, colour) |
+| `query_terminal` | Sends a Read Partition (Query) to an extended terminal and folds its Query Reply (real size, colour) into the `TerminalModel` |
+| `parse_query_reply` | Parses an inbound Query Reply record (AID `0x88`) into a capabilities dict |
 | `dtl.load_panel` | Parses a `panels/*.dtl` source into a `Screen` |
 | `screen.Screen.render` | Renders a `Screen` to a 3270 data stream |
 | `screen.Screen.parse` | Maps a client response onto named fields |
+| `read_record` | Reads one IAC-EOR-terminated 3270 record (shared by AID replies and Query replies) |
 | `read_client_input` | Reads and parses an AID response from the client |
 | `encode_pack_addr` | Converts (row, col) to a 12-bit 3270 buffer address |
 | `handle_client` | Main session loop: logon → ISPF → logoff |

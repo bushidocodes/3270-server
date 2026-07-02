@@ -1,7 +1,7 @@
 import socket
 import binascii
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import Enum
 
@@ -165,6 +165,112 @@ def parse_terminal_type(term_type: str) -> TerminalModel:
         extended=extended,
         color=color,
     )
+
+
+# ── structured fields: Query / Query Reply ───────────────────────────────────
+# The TERMINAL-TYPE string is only a hint. The authoritative way for a host to
+# learn a terminal's real geometry and capabilities is the Query: the host sends
+# a Read Partition (Query) structured field, and the terminal answers (inbound
+# AID 0x88) with a set of Query Reply structured fields describing its usable
+# area, colour, highlighting, and more. This is also how an IBM-DYNAMIC terminal
+# reports the size the type string can't. We fold the reply back into the
+# TerminalModel so the session knows the terminal's true size and colour support.
+
+WSF = 0xF3                  # Write Structured Field command (outbound)
+SF_READ_PARTITION = 0x01    # structured-field id: Read Partition
+SF_QUERY_REPLY = 0x81       # structured-field id: Query Reply (inbound)
+AID_SF = 0x88               # inbound AID that introduces Query Reply data
+
+# Query Reply codes (QCODE) we interpret.
+QR_USABLE_AREA = 0x81
+QR_COLOR = 0x86
+QR_HIGHLIGHT = 0x87
+
+
+def read_partition_query() -> bytes:
+    """The outbound Write-Structured-Field stream that asks the terminal to
+    describe itself — a Read Partition (Query) structured field.
+
+    Layout: ``F3`` (WSF command) then one 5-byte structured field
+    ``00 05 01 FF 02`` — length 0x0005 (counts the length bytes), id 0x01
+    (Read Partition), partition 0xFF (the whole device), type 0x02 (Query).
+    """
+    return bytes([WSF, 0x00, 0x05, SF_READ_PARTITION, 0xFF, 0x02])
+
+
+def parse_query_reply(record: bytes) -> dict:
+    """Parse an inbound Query Reply record into a capabilities dict.
+
+    ``record`` is the payload between the inbound AID and the IAC EOR (an AID
+    0x88 followed by a run of ``[len_hi][len_lo][0x81][qcode][payload…]``
+    structured fields; each ``len`` counts itself). Returns
+    ``{qcodes, usable_rows, usable_cols, color, highlight}``. Malformed or
+    truncated fields are skipped defensively so a hostile client cannot crash
+    the parse.
+    """
+    caps = {"qcodes": set(), "usable_rows": None, "usable_cols": None,
+            "color": False, "highlight": False}
+    if not record or record[0] != AID_SF:
+        return caps
+    i = 1
+    while i + 2 <= len(record):
+        length = (record[i] << 8) | record[i + 1]
+        if length < 4 or i + length > len(record):
+            break
+        sf = record[i:i + length]
+        i += length
+        if sf[2] != SF_QUERY_REPLY:
+            continue
+        qcode = sf[3]
+        caps["qcodes"].add(qcode)
+        if qcode == QR_USABLE_AREA and len(sf) >= 10:
+            # sf[4],sf[5] = flags; sf[6:8] = width (cols); sf[8:10] = height (rows)
+            caps["usable_cols"] = (sf[6] << 8) | sf[7]
+            caps["usable_rows"] = (sf[8] << 8) | sf[9]
+        elif qcode == QR_COLOR:
+            caps["color"] = True
+        elif qcode == QR_HIGHLIGHT:
+            caps["highlight"] = True
+    return caps
+
+
+def query_terminal(client_socket, model: "TerminalModel") -> "TerminalModel":
+    """Ask an extended-data-stream terminal to describe itself and fold the
+    reply into ``model``.
+
+    Only extended (``-E``) terminals are queried — a base terminal may not
+    answer, and we must not block the session waiting for a reply it will never
+    send. The reply's usable area becomes the model's authoritative alternate
+    size (resolving IBM-DYNAMIC), and a Color Query Reply confirms colour
+    support. On any error, silence, or non-reply, ``model`` is returned
+    unchanged.
+    """
+    if not model.extended:
+        return model
+    # Frame the WSF stream as a 3270 record: terminate it with IAC EOR the way
+    # every outbound screen is (see screen.Screen.render), or the client will
+    # keep waiting for the end of the record and never reply.
+    record_out = read_partition_query() + bytes([IAC, EOR])
+    try:
+        print("TX:", binascii.hexlify(record_out))
+        client_socket.sendall(record_out)
+        record = read_record(client_socket)
+    except OSError:
+        return model
+    if not record:
+        return model
+    caps = parse_query_reply(record)
+    print("Query Reply: qcodes={}, usable={}x{}, color={}, highlight={}".format(
+        sorted(hex(q) for q in caps["qcodes"]),
+        caps["usable_cols"], caps["usable_rows"],
+        caps["color"], caps["highlight"]))
+    updates = {}
+    if caps["usable_cols"] and caps["usable_rows"]:
+        updates["alt_cols"] = caps["usable_cols"]
+        updates["alt_rows"] = caps["usable_rows"]
+    if caps["color"]:
+        updates["color"] = True
+    return replace(model, **updates) if updates else model
 
 
 # Credentials — keys are uppercase userids
@@ -661,7 +767,13 @@ def aid_to_string(aid: int):
 MAX_BUFFER_SIZE = 65536  # 64 KiB; a legitimate 3270 data stream is at most a few KB
 
 
-def read_client_input(client_socket):
+def read_record(client_socket):
+    """Read one IAC-EOR-terminated 3270 record and return its payload (the bytes
+    before the terminator), or ``None`` on disconnect or oversize.
+
+    Shared by :func:`read_client_input` (AID replies) and :func:`query_terminal`
+    (structured-field Query replies), which decode the payload differently.
+    """
     buffer = bytearray()
     while True:
         data = client_socket.recv(1024)
@@ -672,11 +784,11 @@ def read_client_input(client_socket):
             print(f"WARNING: client buffer exceeded {MAX_BUFFER_SIZE} bytes; closing connection")
             return None
         if len(buffer) >= 2 and buffer[-2:] == bytes([IAC, EOR]):
-            break
+            return bytes(buffer[:-2])
 
-    # Strip IAC EOR
-    buffer = buffer[:-2]
 
+def read_client_input(client_socket):
+    buffer = read_record(client_socket)
     if not buffer:
         return None
     aid = buffer[0]
@@ -853,6 +965,10 @@ def _messages():
 def handle_client(client_socket, addr):
     print(f"Connection from {addr}")
     model = tn3270_negotiate(client_socket)
+    # Ask an extended terminal to describe itself (real size, colour); a base
+    # terminal is left untouched. Uses the 60s negotiation timeout still in
+    # effect, so a silent client can't wedge the session before the 600s below.
+    model = query_terminal(client_socket, model)
     client_socket.settimeout(600)
 
     while True:
