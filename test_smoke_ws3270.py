@@ -265,3 +265,27 @@ def test_ws3270_logs_in_over_tls(tls_cert):
 
     assert "z/OS V2R5.0 TSO/E LOGON" in out, out[:800]
     assert "ISPF Primary Option Menu" in out, out[:800]
+
+
+def test_ws3270_invalid_option_keeps_typed_input():
+    """Typing an invalid option on the ISPF menu redisplays the message *in
+    place* with a plain Write, so the typed option survives — real ISPF
+    behaviour. Verified two ways: the emulator's screen still shows the typed
+    "ZZ" next to the message, and its trace shows the redisplay was a `Write`
+    (not an `EraseWrite`, which would have repainted and cleared the field)."""
+    _require_emulator()
+    port = _serve_one_client()
+    out, trace = _drive_traced(port, [
+        "Wait(20,InputField)",
+        "String(IBMUSER)", "Tab()", "String(SYS1)", "Enter()",
+        "Wait(20,Unlock)",           # ISPF menu
+        "String(ZZ)", "Enter()",     # an invalid option
+        "Wait(20,Unlock)",           # the in-place message redisplay
+        "Ascii()",
+        "Quit()",
+    ])
+
+    # The typed option is still on the command line, beside the error message.
+    assert "ZZ" in out and "INVALID OPTION: ZZ" in out, out[-1500:]
+    # The redisplay reached the emulator as a plain Write, not an EraseWrite.
+    assert "< Write(" in trace, trace[-2000:]

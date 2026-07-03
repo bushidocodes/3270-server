@@ -153,12 +153,15 @@ Screens are built with authentic 3270 orders:
 |-------|-----|---------|
 | ERASE_WRITE | `0xF5` | Clear screen and write new data (24×80 default space) |
 | ERASE_WRITE_ALTERNATE | `0x7E` | Like ERASE_WRITE, but select the model's larger *alternate* space (models 3/4/5) |
+| WRITE | `0xF1` | Plain write — patch part of the screen without erasing (see partial updates below) |
 | SBA | `0x11` | Set Buffer Address — position the write cursor |
 | SF | `0x1D` | Start Field — define a protected or unprotected input field |
 | SFE | `0x29` | Start Field Extended — a field carrying colour / highlighting (colour terminals only) |
 | IC | `0x13` | Insert Cursor — place the cursor in an input field |
 
 The Write Control Character (WCC) sent after ERASE_WRITE uses `0x43` — the correct x3270/wc3270 bit layout (`WCC_RESET_BIT | WCC_KEYBOARD_RESTORE_BIT | WCC_RESET_MDT_BIT`) — so the keyboard unlocks immediately after every screen update.
+
+**Partial updates.** A full screen is an ERASE/WRITE that repaints everything and resets the modified-data tags. When only a message line changes, the server instead sends a plain **WRITE** (`0xF1`, via `Screen.render_partial`) that patches just the addressed positions with a WCC of `0x42` (keyboard-restore but **not** reset-MDT). Nothing else is repainted and the modified tags are left alone, so what the user has typed stays on screen and modified — the way real ISPF redisplays an "INVALID OPTION" message without clearing the command line. The ISPF Primary Option Menu uses this for its message line.
 
 ### Colour and highlighting (extended attributes)
 
