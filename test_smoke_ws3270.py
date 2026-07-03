@@ -74,15 +74,15 @@ def _serve_one_client():
     return port
 
 
-def _drive(port, actions):
-    """Run the emulator against 127.0.0.1:port with a list of action commands,
-    returning its combined output. A 60s hang (the #87 bug) can't wedge the run:
-    the per-action Wait() timeouts bound it, and subprocess timeout is the
-    backstop."""
+def _drive(port, actions, model="2"):
+    """Run the emulator (as the given ``model``) against 127.0.0.1:port with a
+    list of action commands, returning its combined output. A 60s hang (the #87
+    bug) can't wedge the run: the per-action Wait() timeouts bound it, and
+    subprocess timeout is the backstop."""
     script = "\n".join(actions) + "\n"
     try:
         proc = subprocess.run(
-            [EMULATOR, "-model", "2", f"127.0.0.1:{port}"],
+            [EMULATOR, "-model", model, f"127.0.0.1:{port}"],
             input=script, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=60,
         )
@@ -122,3 +122,26 @@ def test_ws3270_logs_in_and_navigates():
     # proving the TN3270E DEVICE-TYPE (or TERMINAL-TYPE) flowed through the model.
     assert "Dialog Test" in out
     assert "ZTERM" in out
+
+
+def test_ws3270_model_3_browse_uses_the_alternate_screen():
+    """A model-3 emulator (32 rows) browsing a member sees more lines per page —
+    proving ERASE/WRITE ALTERNATE and the larger geometry work on a real
+    terminal, not just synthetically."""
+    _require_emulator()
+    port = _serve_one_client()
+    out = _drive(port, [
+        "Wait(20,InputField)",
+        "String(IBMUSER)", "Tab()", "String(SYS1)", "Enter()",
+        "Wait(20,Output)",       # ISPF menu
+        "String(1)", "Enter()",  # option 1 → View
+        "Wait(10,Output)",       # View entry panel
+        "String(ISPF)", "Enter()",   # browse the ISPF menu's own source
+        "Wait(10,Output)",       # the Browse screen
+        "Ascii()",
+        "Quit()",
+    ], model="3")
+
+    # 32-row screen → 30 lines per page (row 0 header, last row footer). A model-2
+    # (24-row) screen would show "Lines 1-22 of".
+    assert "Lines 1-30 of" in out, out[-1200:]

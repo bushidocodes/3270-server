@@ -655,30 +655,47 @@ def _member_path(member: str):
     return path if os.path.isfile(path) else None
 
 
-def _show_browse(client_socket, member: str, path: str, verb: str = "BROWSE"):
-    """Browse a panel-library member's source (ISPF option 1 View, or option 2
-    Edit with verb="EDIT"). Renders the file's lines at rows 1..22 with a header/
-    footer, paging with PF7/PF8; PF3/PF15 returns to the entry panel."""
-    from dtl import load_panel
-    from screen import Text
+def _screen_size(model):
+    """The presentation-space ``(rows, cols)`` to render on for this terminal:
+    the model's alternate size for models 3/4/5 (32x80, 43x80, 27x132), else the
+    24x80 default that every model shares."""
+    if model is None:
+        return 24, 80
+    return model.alt_rows, model.alt_cols
 
+
+def _show_browse(client_socket, member: str, path: str, verb: str = "BROWSE",
+                 model=None):
+    """Browse a panel-library member's source (ISPF option 1 View, or option 2
+    Edit with verb="EDIT"). Renders the file's lines below a header, with the
+    footer rule on the last row, paging with PF7/PF8; PF3/PF15 returns to the
+    entry panel. On a larger terminal (model 3/4/5) the panel is drawn on the
+    alternate screen, so a taller/wider screen shows more lines per page."""
+    from dtl import load_panel
+    from screen import Text, DisplayIntensity
+
+    rows, cols = _screen_size(model)
+    alternate = rows > 24 or cols > 80     # bigger than the 24x80 default space
+    page = rows - 2                        # row 0 is the header, the last row the footer
+    line_width = cols - 1                  # leave the attribute byte a column
     with open(path, encoding="utf-8") as fh:
         lines = fh.read().splitlines()
-    page = 22  # row 0 is the header, row 23 the footer
     top = 0
     while True:
         top = max(0, min(top, max(0, len(lines) - 1)))
         shown_end = min(top + page, len(lines))
-        title = (f"{verb}    ISPF.ISPPLIB({member.upper()})".ljust(54)
-                 + f"Line {top + 1:08d}")[:79]
+        title = (f"{verb}    ISPF.ISPPLIB({member.upper()})".ljust(cols - 25)
+                 + f"Line {top + 1:08d}")[:line_width]
         foot = (f"Lines {top + 1}-{shown_end} of {len(lines)}"
-                "     PF7=Up  PF8=Down  PF3=Exit")[:79]
-        screen = load_panel("browse", BRTITLE=title, BRFOOT=foot)
+                "     PF7=Up  PF8=Down  PF3=Exit")[:line_width]
+        screen = load_panel("browse", BRTITLE=title)
+        screen.width, screen.depth, screen.alternate = cols, rows, alternate
         for i, ln in enumerate(lines[top:top + page]):
             # Browsed content is arbitrary; drop any byte the EBCDIC (cp037)
             # code page can't encode so the render can never crash.
             safe = ln.encode("cp037", "replace").decode("cp037")
-            screen.add(Text(1 + i, 0, safe[:79]))
+            screen.add(Text(1 + i, 0, safe[:line_width]))
+        screen.add(Text(rows - 1, 0, foot, DisplayIntensity.HIGH))
         _send_screen(client_socket, screen)
         result = read_client_input(client_socket)
         if result is None:
@@ -694,7 +711,8 @@ def _show_browse(client_socket, member: str, path: str, verb: str = "BROWSE"):
         # any other key just redisplays the current page
 
 
-def _show_view(client_socket, entry_panel: str = "viewentry", verb: str = "BROWSE"):
+def _show_view(client_socket, entry_panel: str = "viewentry", verb: str = "BROWSE",
+               model=None):
     """ISPF option 1 (View) / option 2 (Edit): prompt for a panel-library member
     on ``entry_panel`` and open its source (as ``verb`` — BROWSE or EDIT). An
     unknown member is reported via &VIEWMSG; PF3/PF15 returns."""
@@ -712,7 +730,7 @@ def _show_view(client_socket, entry_panel: str = "viewentry", verb: str = "BROWS
             continue
         path = _member_path(member)
         if path:
-            _show_browse(client_socket, member, path, verb=verb)
+            _show_browse(client_socket, member, path, verb=verb, model=model)
             msg = ""
         else:
             msg = f"MEMBER {member.upper()} NOT FOUND"
@@ -1305,11 +1323,12 @@ def handle_client(client_socket, addr):
                 short_msg = None
             elif option == "1":
                 # Option 1 (View) prompts for a member and browses its source.
-                _show_view(client_socket)
+                _show_view(client_socket, model=model)
                 short_msg = None
             elif option == "2":
                 # Option 2 (Edit) prompts for a member and opens it (view-only).
-                _show_view(client_socket, entry_panel="editentry", verb="EDIT")
+                _show_view(client_socket, entry_panel="editentry", verb="EDIT",
+                           model=model)
                 short_msg = None
             elif option == "11":
                 # Option 11 (Workplace) opens an informational panel.

@@ -121,7 +121,7 @@ x3270 localhost:2323
 
 ### Connect with any emulator
 
-Point your emulator at `localhost`, port `2323`. The server negotiates **TN3270E (RFC 2355)** when the emulator supports it — the TN3270E option, a `DEVICE-TYPE`/`FUNCTIONS` sub-negotiation, and a 5-byte data header on every record — and otherwise falls back to **basic TN3270 (RFC 1576)** (BINARY, EOR, TERMINAL-TYPE). Either way it detects the terminal model your emulator reports (3278/3279, models 2–5) and records it (exposed as the `ZTERM` dialog variable under option 7). If your emulator advertises the extended data stream (an `-E` terminal type), the server then sends a **Read Partition (Query)** and folds the terminal's own **Query Reply** — its real usable area, colour, and highlighting support — back into what it knows about the session (authoritative where the type string is only a hint, e.g. `IBM-DYNAMIC`). Screens are drawn on the 24×80 default presentation space that every one of those models shares, so any of them renders identically. If the emulator negotiates the **`RESPONSES`** function, the server requests an acknowledgement for each screen it sends and consumes the client's positive/negative response messages. (The other optional functions — BIND-IMAGE/SCS/SYSREQ — and rendering across a model 3/4/5's larger *alternate* screen are the remaining TN3270E-adjacent gaps.)
+Point your emulator at `localhost`, port `2323`. The server negotiates **TN3270E (RFC 2355)** when the emulator supports it — the TN3270E option, a `DEVICE-TYPE`/`FUNCTIONS` sub-negotiation, and a 5-byte data header on every record — and otherwise falls back to **basic TN3270 (RFC 1576)** (BINARY, EOR, TERMINAL-TYPE). Either way it detects the terminal model your emulator reports (3278/3279, models 2–5) and records it (exposed as the `ZTERM` dialog variable under option 7). If your emulator advertises the extended data stream (an `-E` terminal type), the server then sends a **Read Partition (Query)** and folds the terminal's own **Query Reply** — its real usable area, colour, and highlighting support — back into what it knows about the session (authoritative where the type string is only a hint, e.g. `IBM-DYNAMIC`). Most panels are drawn on the 24×80 default presentation space that every model shares, so they render identically everywhere. On a **model 3/4/5** terminal, the scrollable **Browse** panel (View/Edit, option 1/2) instead renders on the terminal's larger *alternate* screen (32×80, 43×80, or 27×132) via `ERASE/WRITE ALTERNATE`, so more of a member's source is visible per page (30/41/25 lines instead of 22). If the emulator negotiates the **`RESPONSES`** function, the server requests an acknowledgement for each screen it sends and consumes the client's positive/negative response messages. (The other optional functions — BIND-IMAGE/SCS/SYSREQ — remain unimplemented, and only Browse uses the alternate screen so far.)
 
 ## How it works
 
@@ -137,7 +137,8 @@ Screens are built with authentic 3270 orders:
 
 | Order | Hex | Purpose |
 |-------|-----|---------|
-| ERASE_WRITE | `0xF5` | Clear screen and write new data |
+| ERASE_WRITE | `0xF5` | Clear screen and write new data (24×80 default space) |
+| ERASE_WRITE_ALTERNATE | `0x7E` | Like ERASE_WRITE, but select the model's larger *alternate* space (models 3/4/5) |
 | SBA | `0x11` | Set Buffer Address — position the write cursor |
 | SF | `0x1D` | Start Field — define a protected or unprotected input field |
 | SFE | `0x29` | Start Field Extended — a field carrying colour / highlighting (colour terminals only) |
