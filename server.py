@@ -142,6 +142,13 @@ E_RSF_ALWAYS_RESPONSE = 0x02
 E_RSF_POSITIVE = 0x00     # inbound: positive response (record processed)
 E_RSF_NEGATIVE = 0x01     # inbound: negative response (error; body = sense code)
 
+# How many times a NAK'd (negatively-acknowledged) record is retransmitted before
+# the server gives up — a small cap so a persistently-failing screen can't loop.
+_RESPONSE_MAX_RETRIES = 2
+# Upper bound on outstanding (unacknowledged) records tracked for retransmission,
+# so a client that stops sending responses can't grow the map without limit.
+_RESPONSE_PENDING_CAP = 128
+
 # TN3270E FUNCTIONS (negotiable capabilities). We support BIND-IMAGE (so the
 # session can be bound, which enables the ATTN key), RESPONSES, SYSREQ, and
 # CONTENTION-RESOLUTION (the half-duplex send-permission handshake).
@@ -228,8 +235,18 @@ class TN3270EStream:
         self.last_response = None    # (seq, positive_bool, code) of the last ack
         self._rxbuf = bytearray()    # inbound bytes not yet framed into records
         self.last_screen = None      # last 3270-DATA record sent (for redisplay)
+        # Records sent under RESPONSES and not yet acknowledged: seq -> (data,
+        # retries). A positive response prunes its entry; a negative one
+        # retransmits it (up to _RESPONSE_MAX_RETRIES) so a NAK'd screen recovers.
+        self._pending = {}
 
     def sendall(self, data):
+        self.last_screen = data      # remember it so SYSREQ resume can redisplay
+        self._send_3270(data, retries=0)
+
+    def _send_3270(self, data, retries):
+        """Frame and send one 3270-DATA record. Under RESPONSES it carries a fresh
+        sequence and is tracked in ``_pending`` for possible retransmission."""
         # REQUEST-FLAG: with CONTENTION-RESOLUTION we grant the client permission
         # to send on the 3270 session (SEND-DATA) with every screen, so it never
         # has to bid before returning input.
@@ -239,10 +256,12 @@ class TN3270EStream:
             self._seq = (self._seq + 1) & 0xFFFF
             header = bytes([E_DT_3270_DATA, request_flag, E_RSF_ALWAYS_RESPONSE,
                             (self._seq >> 8) & 0xFF, self._seq & 0xFF])
+            self._pending[self._seq] = (data, retries)
+            if len(self._pending) > _RESPONSE_PENDING_CAP:   # bound the memory
+                self._pending.pop(next(iter(self._pending)))
         else:
             # No RESPONSES function: no response wanted, sequence number 0.
             header = bytes([E_DT_3270_DATA, request_flag, E_RSF_NO_RESPONSE, 0x00, 0x00])
-        self.last_screen = data      # remember it so SYSREQ resume can redisplay
         self._sock.sendall(header + data)
 
     def send_bind(self, image=_BIND_IMAGE):
@@ -274,9 +293,15 @@ class TN3270EStream:
             self.sendall(self.last_screen)
 
     def on_response(self, payload: bytes):
-        """Record a client RESPONSE message (already includes its 5-byte header).
+        """Handle a client RESPONSE message (already includes its 5-byte header).
         Byte 2 is positive/negative; bytes 3-4 the acked sequence number; any
-        body byte is the sense/response code."""
+        body byte is the sense/response code.
+
+        A positive response acknowledges the record — drop it from ``_pending``.
+        A negative response (the client couldn't process the screen — a
+        data-stream error) **retransmits** that record under a fresh sequence, up
+        to :data:`_RESPONSE_MAX_RETRIES` times, so the session recovers instead of
+        being left out of sync. Beyond the cap we give up rather than loop."""
         positive = len(payload) > 2 and payload[2] == E_RSF_POSITIVE
         seq = (payload[3] << 8 | payload[4]) if len(payload) >= 5 else None
         code = payload[5] if len(payload) >= 6 else None
@@ -284,6 +309,16 @@ class TN3270EStream:
         kind = "positive" if positive else "negative"
         print(f"TN3270E {kind} response for seq {seq}"
               + (f", code {hex(code)}" if code is not None else ""))
+
+        entry = self._pending.pop(seq, None) if seq is not None else None
+        if positive or entry is None:
+            return   # acknowledged, or an unknown/already-recovered sequence
+        data, retries = entry
+        if retries >= _RESPONSE_MAX_RETRIES:
+            print(f"TN3270E: giving up on seq {seq} after {retries} retransmit(s)")
+            return
+        print(f"TN3270E: retransmitting seq {seq} (attempt {retries + 1})")
+        self._send_3270(data, retries + 1)
 
     def next_event(self):
         """Return the next inbound event, or ``None`` on disconnect:

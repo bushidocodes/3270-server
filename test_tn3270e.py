@@ -231,16 +231,63 @@ def test_positive_response_is_consumed_then_input_processed(e_session):
     assert menu[2] == 0x02 and (menu[3] << 8 | menu[4]) == 2   # next sequence
 
 
-def test_negative_response_is_handled_not_fatal(e_session):
+def test_negative_response_retransmits_the_record(e_session):
+    # A negative response (the client couldn't process the screen) makes the
+    # server retransmit that record under a fresh sequence, so the session
+    # recovers rather than being left out of sync.
     leftover, _ = _negotiate_e(e_session, responses=True)
     logon = _read_record(e_session, leftover)
     seq = (logon[3] << 8) | logon[4]
-    # A negative response (with a sense code) is logged and consumed; the session
-    # continues and still processes the following input.
     e_session.sendall(_response_msg(seq, positive=False, code=0x08))
+    resend = _read_record(e_session)                 # the retransmitted logon
+    assert resend[5] == ERASE_WRITE                  # same panel…
+    assert resend[5:] == logon[5:]                   # …identical data…
+    assert (resend[3] << 8 | resend[4]) == seq + 1   # …under a new sequence
+    # And the session still works: acknowledge the resend and log in.
+    e_session.sendall(_response_msg(seq + 1, positive=True))
     e_session.sendall(_reply_e({USERID_ADDR: "IBMUSER", PASSWORD_ADDR: "SYS1"}))
     menu = _read_record(e_session)
     assert "ISPF Primary Option Menu" in menu.decode("cp037", errors="replace")
+
+
+def test_positive_response_prunes_pending_no_retransmit(e_session):
+    # A positive response leaves nothing to retransmit — the next record the
+    # client sees is the menu, not a resend.
+    leftover, _ = _negotiate_e(e_session, responses=True)
+    logon = _read_record(e_session, leftover)
+    seq = (logon[3] << 8) | logon[4]
+    e_session.sendall(_response_msg(seq, positive=True))
+    e_session.sendall(_reply_e({USERID_ADDR: "IBMUSER", PASSWORD_ADDR: "SYS1"}))
+    menu = _read_record(e_session)
+    assert "ISPF Primary Option Menu" in menu.decode("cp037", errors="replace")
+    assert (menu[3] << 8 | menu[4]) == seq + 1       # menu is seq 2, no resend at 2
+
+
+class _CountingSock:
+    def __init__(self):
+        self.records = []
+
+    def sendall(self, data):
+        self.records.append(bytes(data))
+
+
+def test_retransmit_gives_up_after_the_retry_cap():
+    # A record that keeps being NAK'd is retransmitted up to the cap, then the
+    # server stops rather than looping forever.
+    from server import TN3270EStream, _RESPONSE_MAX_RETRIES, E_DT_RESPONSE
+
+    st = TN3270EStream(_CountingSock(), responses=True)
+    st.sendall(bytes([ERASE_WRITE]) + b"SCREEN")     # seq 1
+
+    def nak(seq):
+        st.on_response(bytes([E_DT_RESPONSE, 0x00, 0x01,
+                              (seq >> 8) & 0xFF, seq & 0xFF, 0x08]))
+
+    for seq in range(1, _RESPONSE_MAX_RETRIES + 2):  # NAK each successive resend
+        nak(seq)
+    sent = [r for r in st._sock.records if b"SCREEN" in r]
+    # the original send plus exactly _RESPONSE_MAX_RETRIES retransmissions
+    assert len(sent) == 1 + _RESPONSE_MAX_RETRIES
 
 
 def test_client_declining_responses_gets_no_response_flag(e_session):
