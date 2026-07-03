@@ -299,9 +299,9 @@ keys to commands the way ISPF does, e.g. PF3 → `EXIT`, instead of hard-coding 
 ### Tag reference and coverage
 
 [`docs/dtl-tags-reference.md`](docs/dtl-tags-reference.md) mirrors IBM's DTL *Table 1. Tag summary*
-(all 96 tags, with end-tag rules, attributes, and nesting) and annotates each with this parser's
-support status — **44 supported, 3 partial, 49 unimplemented** — linking every gap to its tracking
-issue.
+(all 96 tags, with end-tag rules, attributes and their values, and nesting) and annotates each with
+this parser's support status, judged on **attribute coverage** — **5 fully supported, 42 partial
+(render but ignore some attributes), 49 unimplemented** — linking every gap to its tracking issue.
 
 ### Conformance corpus
 
