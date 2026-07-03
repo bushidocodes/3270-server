@@ -18,6 +18,13 @@
     <vardcl name="perform" varclass="NUMFLD"/>
   </varlist>
 
+  <!-- Colour: DTL's COLOR attribute is carried by field elements (<dtafld>,
+       <selfld>, <lstcol>, ...), not by <info>/<topinst> text — those take their
+       colour from their CUA element type. So the entry fields below are given
+       COLOR=WHITE (the field, per the DTL semantics); it is emitted only to
+       colour-capable terminals, and a mono terminal renders byte-for-byte as
+       before. Colouring the info-text title/rules/warning by CUA type is a
+       separate step. -->
   <info row="0" col="18" intensity="high">--------  z/OS V2R5.0 TSO/E LOGON  --------</info>
 
   <topinst row="2" col="1">Enter LOGON parameters below:</topinst>
@@ -29,15 +36,15 @@
        prompts and fldgap=2 their entries land at col 16 -- the same positions the
        explicit row/fldcol attributes used to give (proven by the golden test). -->
   <area row="5" col="1" fldgap="2">
-    <dtafld datavar="userid" entwidth="8" cursor="yes">Userid   ===></dtafld>
+    <dtafld datavar="userid" entwidth="8" cursor="yes" color="white">Userid   ===></dtafld>
     <dtafld datavar="password" entwidth="8" hidden="yes">Password ===></dtafld>
-    <dtafld datavar="procedure" entwidth="8" default="IKJACCNT">Procedure===></dtafld>
+    <dtafld datavar="procedure" entwidth="8" default="IKJACCNT" color="white">Procedure===></dtafld>
   </area>
-  <dtafld row="7" col="42" fldcol="60" datavar="acct" entwidth="8">Acct Nmbr    ===></dtafld>
-  <dtafld row="8" col="1" fldcol="16" datavar="size" entwidth="5" default="00150">Size     ===></dtafld>
-  <dtafld row="8" col="42" fldcol="60" datavar="perform" entwidth="8">Perform      ===></dtafld>
-  <dtafld row="9" col="1" fldcol="16" datavar="command" entwidth="62">Command  ===></dtafld>
-  <dtafld row="11" col="1" fldcol="19" datavar="dsname" entwidth="59">PDS/E Dsname ===></dtafld>
+  <dtafld row="7" col="42" fldcol="60" datavar="acct" entwidth="8" color="white">Acct Nmbr    ===></dtafld>
+  <dtafld row="8" col="1" fldcol="16" datavar="size" entwidth="5" default="00150" color="white">Size     ===></dtafld>
+  <dtafld row="8" col="42" fldcol="60" datavar="perform" entwidth="8" color="white">Perform      ===></dtafld>
+  <dtafld row="9" col="1" fldcol="16" datavar="command" entwidth="62" color="white">Command  ===></dtafld>
+  <dtafld row="11" col="1" fldcol="19" datavar="dsname" entwidth="59" color="white">PDS/E Dsname ===></dtafld>
 
   <info row="12" col="42">Mail      ===> Yes</info>
   <info row="13" col="42">Reconnect ===> Auto</info>

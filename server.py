@@ -313,25 +313,37 @@ def redact_fields(fields):
     }
 
 
-def _send_screen(client_socket, screen):
-    """Render a screen.Screen to the 3270 data stream and send it."""
-    data = screen.render()
+def _wants_color(model) -> bool:
+    """Whether to render colour for this session — only when the terminal
+    negotiated colour support (a 3279-family or query-confirmed terminal)."""
+    return bool(model is not None and model.color)
+
+
+def _send_screen(client_socket, screen, color: bool = False):
+    """Render a screen.Screen to the 3270 data stream and send it. ``color``
+    enables extended (colour/highlight) attributes; a mono terminal leaves it
+    false, so the bytes are unchanged."""
+    data = screen.render(color=color)
     print("TX:", binascii.hexlify(data))
     client_socket.sendall(data)
 
 
-def send_tso_logon(client_socket, error_msg: str = None):
-    """Send the z/OS TSO/E LOGON panel, rendered from panels/logon.dtl."""
+def send_tso_logon(client_socket, error_msg: str = None, model=None):
+    """Send the z/OS TSO/E LOGON panel, rendered from panels/logon.dtl. On a
+    colour terminal the panel's declared colours are emitted and a logon error
+    is shown in red."""
     # Imported lazily: screen.py imports primitives from this module, so a
     # top-level import here would create a circular import at load time.
     from dtl import load_panel
-    from screen import Text
+    from screen import Text, Color
 
+    color = _wants_color(model)
     screen = load_panel("logon")
     if error_msg:
         col = max(0, (80 - len(error_msg)) // 2)
-        screen.add(Text(19, col, error_msg, DisplayIntensity.HIGH))
-    _send_screen(client_socket, screen)
+        screen.add(Text(19, col, error_msg, DisplayIntensity.HIGH,
+                        color=Color.RED if color else None))
+    _send_screen(client_socket, screen, color=color)
     return screen
 
 
@@ -976,7 +988,7 @@ def handle_client(client_socket, addr):
         error_msg = None
         userid = None
         while True:
-            screen = send_tso_logon(client_socket, error_msg)
+            screen = send_tso_logon(client_socket, error_msg, model=model)
             result = read_client_input(client_socket)
             if result is None:
                 return

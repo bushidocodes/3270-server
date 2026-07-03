@@ -138,9 +138,16 @@ Screens are built with authentic 3270 orders:
 | ERASE_WRITE | `0xF5` | Clear screen and write new data |
 | SBA | `0x11` | Set Buffer Address — position the write cursor |
 | SF | `0x1D` | Start Field — define a protected or unprotected input field |
+| SFE | `0x29` | Start Field Extended — a field carrying colour / highlighting (colour terminals only) |
 | IC | `0x13` | Insert Cursor — place the cursor in an input field |
 
 The Write Control Character (WCC) sent after ERASE_WRITE uses `0x43` — the correct x3270/wc3270 bit layout (`WCC_RESET_BIT | WCC_KEYBOARD_RESTORE_BIT | WCC_RESET_MDT_BIT`) — so the keyboard unlocks immediately after every screen update.
+
+### Colour and highlighting (extended attributes)
+
+DTL's **`COLOR`** attribute (`WHITE | RED | BLUE | GREEN | PINK | YELLOW | TURQ`, or `%varname` to take the colour from a dialog variable) and **`HILITE`** attribute (`USCORE | BLINK | REVERSE`) are carried by the CUA element tags that accept them — `<dtafld>` (the entry field), `<selfld>` (its choices), `<lstcol>` (its cells), and others (`<hp>`, `<note>`/`<notel>`/`<nt>`). Plain text tags such as `<info>`/`<topinst>` are *not* COLOR-bearing — they take their colour from their CUA element type.
+
+On the wire these become **extended attributes**, carried by a Start Field Extended (`0x29`) order — a pair count followed by the basic field attribute plus one `type`/`value` pair per extended attribute (foreground colour is type `0x42`, highlighting `0x41`). Rendering is **gated on the terminal**: a screen emits extended attributes only when the connected terminal negotiated colour (a 3279-family device, or one whose Query Reply reported colour). A mono terminal — or an item with no colour — emits the classic Start Field (`0x1D`), so those data streams are **byte-for-byte unchanged**. The TSO/E logon panel gives its entry fields `COLOR=WHITE` (`panels/logon.dtl`); colouring the info-text titles/rules by CUA element type, and the `<ATTR>`/`<DA>` attribute-character construct, are follow-ons.
 
 ### Query / Query Reply (structured fields)
 
@@ -230,7 +237,10 @@ centered over its columns; below them, model rows render each column as a protec
 `<area>`/`<region>` (flow boxes — see below). ISPF
 dialog variables are referenced `&`-style — `&ZUSER`, `&ZTIME` — and substituted at load time
 (e.g. the live user id and clock on the ISPF status line); `&&` is a literal ampersand and a
-trailing `.` terminates a reference. Messages live separately in a `<msgmbr>` (see `messages/`).
+trailing `.` terminates a reference. A field element (`<dtafld>`, `<selfld>`, `<lstcol>`, …) may
+carry DTL's `COLOR` (`WHITE|RED|BLUE|GREEN|PINK|YELLOW|TURQ`, or `%varname`) and/or `HILITE`
+(`USCORE|BLINK|REVERSE`); these emit as extended attributes on colour terminals and are ignored on
+mono ones. Messages live separately in a `<msgmbr>` (see `messages/`).
 As in real DTL the source is SGML: files may open with a `<!DOCTYPE DM SYSTEM>` prolog,
 tag/attribute names are case-insensitive, and boolean attributes may be minimized
 (`<dtafld hidden>`).

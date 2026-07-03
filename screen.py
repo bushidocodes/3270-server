@@ -14,6 +14,7 @@ match the hand-written screens exactly. The declarative DTL front-end
 """
 
 from dataclasses import dataclass, field as _dc_field
+from enum import Enum
 from typing import List, Optional, Dict, Tuple
 
 from server import (
@@ -31,6 +32,63 @@ from server import (
 )
 
 ERASE_WRITE = 0xF5
+
+# Start Field Extended: like SF (0x1D), but the attribute is expressed as a
+# count followed by that many (type, value) pairs, so a field can carry colour
+# and highlighting in addition to the basic 3270 field attribute. Only sent to
+# terminals that negotiated the extended data stream; a mono terminal always
+# gets plain SF, so its data stream is byte-for-byte unchanged.
+SFE = 0x29
+XA_BASIC = 0xC0        # pair type: the all-character / basic field attribute
+XA_HIGHLIGHT = 0x41    # pair type: extended highlighting
+XA_FOREGROUND = 0x42   # pair type: foreground colour
+
+
+class Color(Enum):
+    """3270 extended foreground colours (attribute type 0x42)."""
+    DEFAULT = 0x00
+    BLUE = 0xF1
+    RED = 0xF2
+    PINK = 0xF3
+    GREEN = 0xF4
+    TURQUOISE = 0xF5
+    YELLOW = 0xF6
+    WHITE = 0xF7
+
+
+class Highlight(Enum):
+    """3270 extended highlighting (attribute type 0x41)."""
+    DEFAULT = 0x00
+    BLINK = 0xF1
+    REVERSE = 0xF2
+    UNDERSCORE = 0xF4
+
+
+def _emit_field_start(buf: bytearray, fa: int,
+                      color: Optional[Color], highlight: Optional[Highlight]) -> None:
+    """Emit a field start into ``buf``.
+
+    With no extended attributes this is the classic ``SF`` + attribute byte —
+    byte-for-byte what the mono panels have always produced. With a colour
+    and/or highlight it is an ``SFE`` carrying the basic field attribute
+    (type 0xC0) plus one pair per extended attribute.
+    """
+    pairs = []
+    if color is not None and color != Color.DEFAULT:
+        pairs.append((XA_FOREGROUND, color.value))
+    if highlight is not None and highlight != Highlight.DEFAULT:
+        pairs.append((XA_HIGHLIGHT, highlight.value))
+    if not pairs:
+        buf.append(SF)
+        buf.append(fa)
+        return
+    buf.append(SFE)
+    buf.append(1 + len(pairs))   # pair count includes the basic-attribute pair
+    buf.append(XA_BASIC)
+    buf.append(fa)
+    for xa_type, xa_value in pairs:
+        buf.append(xa_type)
+        buf.append(xa_value)
 
 
 def _check_failure(check: dict, value: str):
@@ -72,11 +130,15 @@ class Text:
     col: int
     text: str
     intensity: DisplayIntensity = DisplayIntensity.NORMAL
+    color: Optional[Color] = None
+    highlight: Optional[Highlight] = None
 
-    def render(self, buf: bytearray) -> None:
+    def render(self, buf: bytearray, color: bool = False) -> None:
         _emit_sba(buf, self.row, self.col)
-        buf.append(SF)
-        buf.append(field_attribute(display=self.intensity, protected=True))
+        fa = field_attribute(display=self.intensity, protected=True)
+        _emit_field_start(buf, fa,
+                          self.color if color else None,
+                          self.highlight if color else None)
         buf.extend(to_ebcdic(self.text))
 
 
@@ -102,24 +164,30 @@ class Field:
     mdt: bool = True
     cursor: bool = False
     terminator: bool = True
+    color: Optional[Color] = None
+    highlight: Optional[Highlight] = None
 
     @property
     def data_addr(self) -> int:
         """Linear buffer address (row*80 + col) where this field's data starts."""
         return self.row * 80 + (self.col + 1)
 
-    def render(self, buf: bytearray) -> None:
+    def render(self, buf: bytearray, color: bool = False) -> None:
         display = DisplayIntensity.NON_DISPLAY if self.hidden else self.intensity
         ftype = FieldType.NUMERIC if self.numeric else FieldType.ALPHANUMERIC
         _emit_sba(buf, self.row, self.col)
-        buf.append(SF)
-        buf.append(
-            field_attribute(
-                display=display,
-                protected=False,
-                field_type=ftype,
-                mdt=self.mdt,
-            )
+        fa = field_attribute(
+            display=display,
+            protected=False,
+            field_type=ftype,
+            mdt=self.mdt,
+        )
+        # A hidden (password) field keeps its non-display attribute; colouring it
+        # would be pointless and could fight the non-display intensity.
+        _emit_field_start(
+            buf, fa,
+            self.color if (color and not self.hidden) else None,
+            self.highlight if (color and not self.hidden) else None,
         )
         buf.extend(to_ebcdic(self.default.ljust(self.length)[: self.length]))
         if self.terminator:
@@ -272,7 +340,12 @@ class Screen:
     def field(self, row, col, length, **kw) -> "Screen":
         return self.add(Field(row, col, length, **kw))
 
-    def render(self) -> bytes:
+    def render(self, color: bool = False) -> bytes:
+        """Render to a 3270 data stream. When ``color`` is true, items carrying
+        a colour/highlight emit Start Field Extended; otherwise (a mono terminal,
+        or an item with no colour) they emit plain Start Field, so the mono data
+        stream is byte-for-byte identical to before extended attributes existed.
+        """
         buf = bytearray()
         if self.erase:
             buf.append(ERASE_WRITE)
@@ -284,7 +357,7 @@ class Screen:
             )
         )
         for item in self.items:
-            item.render(buf)
+            item.render(buf, color=color)
         if self.cursor_at is not None:
             _emit_sba(buf, self.cursor_at[0], self.cursor_at[1])
             buf.append(IC)

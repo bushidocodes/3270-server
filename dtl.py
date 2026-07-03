@@ -111,7 +111,7 @@ uppercase). An undefined reference is left untouched rather than blanked.
 import re
 from html.parser import HTMLParser
 
-from screen import Screen, Text, Field, DisplayIntensity
+from screen import Screen, Text, Field, DisplayIntensity, Color, Highlight
 
 # An ISPF dialog-variable reference in panel source: ``&&`` (escaped literal
 # ampersand) or ``&NAME`` with an optional terminating ``.``. A name is 1–8
@@ -171,6 +171,36 @@ _INTENSITY = {
     "highlighted": DisplayIntensity.HIGHLIGHTED,
 }
 
+# DTL COLOR / HILITE attribute values → the screen model's enums. These are real
+# DTL attributes (COLOR=WHITE|RED|BLUE|GREEN|PINK|YELLOW|TURQ|%var, HILITE=USCORE|
+# BLINK|REVERSE) carried by the CUA element tags that accept them (<dtafld>,
+# <selfld>, <lstcol>, <hp>, <note>/<notel>/<nt>, <attr>). The canonical keywords
+# are the DTL ones; a few friendly aliases are tolerated. Colour is emitted only
+# to colour-capable terminals (Screen.render(color=True)); a mono terminal
+# ignores it, so panels stay byte-identical there.
+_COLORS = {
+    "white": Color.WHITE,
+    "red": Color.RED,
+    "blue": Color.BLUE,
+    "green": Color.GREEN,
+    "pink": Color.PINK,
+    "yellow": Color.YELLOW,
+    "turq": Color.TURQUOISE,
+    # tolerated aliases
+    "turquoise": Color.TURQUOISE,
+    "cyan": Color.TURQUOISE,
+    "magenta": Color.PINK,
+}
+
+_HIGHLIGHTS = {
+    "uscore": Highlight.UNDERSCORE,
+    "blink": Highlight.BLINK,
+    "reverse": Highlight.REVERSE,
+    # tolerated aliases
+    "underscore": Highlight.UNDERSCORE,
+    "rvideo": Highlight.REVERSE,
+}
+
 # Block tags whose text flows as protected lines (like <info>): paragraphs,
 # list items (<li>/<dt>/<dd>/<pt>/<pd>/<lp>), and preformatted <lines>. Their
 # list containers (<ul>/<ol>/<dl>/<parml>/<sl>) are transparent — ignored.
@@ -203,6 +233,19 @@ def _bool_attr(attrs, key, default=False):
 
 def _intensity(attrs, key="intensity", default=DisplayIntensity.NORMAL):
     return _INTENSITY.get(str(attrs.get(key, "")).lower(), default)
+
+
+def _resolve_color(value, subs):
+    """Map a DTL COLOR value to a :class:`Color`, or None if absent/unknown.
+
+    A ``%name`` value is a dialog-variable reference: its colour comes from the
+    substitution ``subs`` (the same dict that resolves ``&NAME`` references),
+    mirroring DTL's ``COLOR=%varname``.
+    """
+    v = str(value or "").strip()
+    if v.startswith("%"):
+        v = str((subs or {}).get(v[1:].upper(), ""))
+    return _COLORS.get(v.strip().lower())
 
 
 class DTLError(ValueError):
@@ -239,6 +282,17 @@ class _DTLParser(HTMLParser):
         self._lstfld = None       # active <lstfld> table {"cols", "groups", …}
         self._lstgrp = None       # current <lstgrp> column group, or None
         self._rows = None         # data rows for the list field (datavar→value)
+        self._subs = {}           # &NAME/%NAME substitution values (for COLOR=%var)
+
+    # ── colour / highlight attributes ────────────────────────────────────────
+
+    def _color(self, a):
+        """The Color for a tag's COLOR= attribute (honouring %var), or None."""
+        return _resolve_color(a.get("color"), self._subs)
+
+    def _hilite(self, a):
+        """The Highlight for a tag's HILITE= attribute, or None."""
+        return _HIGHLIGHTS.get(str(a.get("hilite", "")).strip().lower())
 
     # ── SGML event handling ──────────────────────────────────────────────────
 
@@ -288,6 +342,9 @@ class _DTLParser(HTMLParser):
                 "desccol": int(a.get("desccol", 21)),
                 "numwidth": int(a.get("numwidth", 2)),
                 "numintensity": _intensity(a, "numintensity", DisplayIntensity.HIGH),
+                # DTL COLOR on a <selfld> colours its choices; a <choice> may
+                # override with its own COLOR.
+                "color": self._color(a),
                 "ctx": ctx,
             }
         elif tag == "dtafldd":
@@ -776,6 +833,7 @@ class _DTLParser(HTMLParser):
             "usage": "out" if a.get("usage", "").lower() == "out" else "in",
             "line": int(a.get("line", 1)),
             "align": a.get("align", "start").lower(),
+            "color": self._color(a),   # DTL COLOR on a <lstcol> colours its cells
             "group": self._lstgrp,
         })
 
@@ -837,12 +895,14 @@ class _DTLParser(HTMLParser):
                 raw = "" if entry is None else str(entry.get(c["datavar"], ""))
                 value = self._align(raw, c["width"], c["align"])
                 if c["usage"] == "out":
-                    self.screen.add(Text(cy, c["x"], value, DisplayIntensity.NORMAL))
+                    self.screen.add(Text(cy, c["x"], value, DisplayIntensity.NORMAL,
+                                         color=c.get("color")))
                 else:
                     self.screen.add(Field(
                         row=cy, col=c["x"], length=c["width"],
                         name=c["datavar"] or None, default=value,
                         terminator=id(c) in last_in_ids,
+                        color=c.get("color"),
                     ))
             row += entry_height
         return row
@@ -901,6 +961,8 @@ class _DTLParser(HTMLParser):
                 f"panel width {self.screen.width}"
             )
         if content:
+            # The prompt/caption is a CUA element with its own (default) colour;
+            # DTL's COLOR on a <dtafld> colours the *field*, not the caption.
             self.screen.add(Text(row, col, content, _intensity(a)))
         field = Field(
             row=row,
@@ -912,6 +974,8 @@ class _DTLParser(HTMLParser):
             hidden=_bool_attr(a, "hidden"),
             cursor=_bool_attr(a, "cursor"),
             mdt=_bool_attr(a, "mdt", default=True),
+            color=self._color(a),          # DTL COLOR= colours the entry field
+            highlight=self._hilite(a),
         )
         self.screen.add(field)
         self._attach_validation(name)
@@ -1001,10 +1065,12 @@ class _DTLParser(HTMLParser):
         if sf is None:
             raise DTLError("<choice> outside of a <selfld>")
         row = sf["row"]
+        # The choice's colour: its own COLOR overrides the <selfld>'s.
+        color = self._color(a) or sf.get("color")
         self.screen.add(Text(row, sf["numcol"], a.get("num", "").ljust(sf["numwidth"]),
-                             sf["numintensity"]))
-        self.screen.add(Text(row, sf["namecol"], a.get("name", "")))
-        self.screen.add(Text(row, sf["desccol"], content))
+                             sf["numintensity"], color=color))
+        self.screen.add(Text(row, sf["namecol"], a.get("name", ""), color=color))
+        self.screen.add(Text(row, sf["desccol"], content, color=color))
         sf["row"] = row + 1
         # Record the selection value the user types to pick this choice. It
         # defaults to the displayed number; an explicit ``matchval`` overrides.
@@ -1052,6 +1118,7 @@ def load_dtl(source: str, rows=None, **subs) -> Screen:
     source = _substitute(source, subs)
     parser = _DTLParser()
     parser._rows = rows
+    parser._subs = {k.upper(): v for k, v in (subs or {}).items()}
     parser.feed(source)
     parser.close()
     return parser.screen
