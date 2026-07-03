@@ -425,6 +425,9 @@ class TerminalModel:
     tn3270e_sysreq: bool = False     # TN3270E SYSREQ function agreed
     tn3270e_bind_image: bool = False  # TN3270E BIND-IMAGE function agreed
     tn3270e_contention: bool = False  # TN3270E CONTENTION-RESOLUTION function agreed
+    # QCODEs the terminal advertised in its Query Reply (basic-TN3270 -E only),
+    # e.g. {0x81, 0x85, 0x86, 0x87}. Empty when no Query was answered.
+    query_caps: frozenset = frozenset()
 
 
 def parse_terminal_type(term_type: str) -> TerminalModel:
@@ -474,21 +477,41 @@ SF_READ_PARTITION = 0x01    # structured-field id: Read Partition
 SF_QUERY_REPLY = 0x81       # structured-field id: Query Reply (inbound)
 AID_SF = 0x88               # inbound AID that introduces Query Reply data
 
-# Query Reply codes (QCODE) we interpret.
+# Read Partition request types (byte after the partition id).
+SF_RP_QUERY = 0x02          # plain Query
+SF_RP_QLIST = 0x03          # Query List
+SF_RPQ_ALL = 0x80           # ...request type: return all supported QCODEs
+
+# Query Reply codes (QCODE) we recognise (3270ds.h QR_*).
+QR_SUMMARY = 0x80           # lists every QCODE the terminal supports
 QR_USABLE_AREA = 0x81
+QR_ALPHA_PART = 0x84        # alphanumeric partitions
+QR_CHARSETS = 0x85          # character sets
 QR_COLOR = 0x86
-QR_HIGHLIGHT = 0x87
+QR_HIGHLIGHT = 0x87         # (extended) highlighting
+QR_REPLY_MODES = 0x88
+
+
+def _iac_escape(data: bytes) -> bytes:
+    """Double every IAC (0xFF) so the Telnet layer carries it as data rather
+    than a command. The Read Partition query's partition byte is 0xFF, so an
+    unescaped query is mis-framed by the terminal (it was, silently, until now)."""
+    return data.replace(b"\xff", b"\xff\xff")
 
 
 def read_partition_query() -> bytes:
-    """The outbound Write-Structured-Field stream that asks the terminal to
-    describe itself — a Read Partition (Query) structured field.
+    """The plain Read Partition (Query) structured field: ``F3`` (WSF) then
+    ``00 05 01 FF 02`` — length 0x0005, id 0x01 (Read Partition), partition 0xFF
+    (whole device), type 0x02 (Query). Logical bytes; the caller IAC-escapes."""
+    return bytes([WSF, 0x00, 0x05, SF_READ_PARTITION, 0xFF, SF_RP_QUERY])
 
-    Layout: ``F3`` (WSF command) then one 5-byte structured field
-    ``00 05 01 FF 02`` — length 0x0005 (counts the length bytes), id 0x01
-    (Read Partition), partition 0xFF (the whole device), type 0x02 (Query).
-    """
-    return bytes([WSF, 0x00, 0x05, SF_READ_PARTITION, 0xFF, 0x02])
+
+def read_partition_query_list() -> bytes:
+    """A Read Partition **Query List** asking the terminal to enumerate every
+    QCODE it supports: ``F3`` then ``00 06 01 FF 03 80`` — type 0x03 (Query
+    List), request type 0x80 (All). Logical bytes; the caller IAC-escapes. The
+    reply's Summary (QCODE 0x80) lists the full capability set."""
+    return bytes([WSF, 0x00, 0x06, SF_READ_PARTITION, 0xFF, SF_RP_QLIST, SF_RPQ_ALL])
 
 
 def parse_query_reply(record: bytes) -> dict:
@@ -496,13 +519,18 @@ def parse_query_reply(record: bytes) -> dict:
 
     ``record`` is the payload between the inbound AID and the IAC EOR (an AID
     0x88 followed by a run of ``[len_hi][len_lo][0x81][qcode][payload…]``
-    structured fields; each ``len`` counts itself). Returns
-    ``{qcodes, usable_rows, usable_cols, color, highlight}``. Malformed or
-    truncated fields are skipped defensively so a hostile client cannot crash
-    the parse.
+    structured fields; each ``len`` counts itself). Returns ``{qcodes,
+    usable_rows, usable_cols, color, highlight, charsets, reply_modes}``.
+
+    ``qcodes`` is the full set the terminal supports — the union of the QCODEs it
+    returned *and* the ones the **Summary** reply (0x80) enumerates, since a
+    terminal advertises many capabilities (e.g. highlighting) only in the Summary
+    rather than as a standalone reply. The boolean flags are derived from that
+    set. Malformed or truncated fields are skipped defensively.
     """
     caps = {"qcodes": set(), "usable_rows": None, "usable_cols": None,
-            "color": False, "highlight": False}
+            "color": False, "highlight": False, "charsets": False,
+            "reply_modes": False}
     if not record or record[0] != AID_SF:
         return caps
     i = 1
@@ -516,14 +544,18 @@ def parse_query_reply(record: bytes) -> dict:
             continue
         qcode = sf[3]
         caps["qcodes"].add(qcode)
-        if qcode == QR_USABLE_AREA and len(sf) >= 10:
+        if qcode == QR_SUMMARY:
+            # The Summary payload is the list of supported QCODEs.
+            caps["qcodes"].update(sf[4:])
+        elif qcode == QR_USABLE_AREA and len(sf) >= 10:
             # sf[4],sf[5] = flags; sf[6:8] = width (cols); sf[8:10] = height (rows)
             caps["usable_cols"] = (sf[6] << 8) | sf[7]
             caps["usable_rows"] = (sf[8] << 8) | sf[9]
-        elif qcode == QR_COLOR:
-            caps["color"] = True
-        elif qcode == QR_HIGHLIGHT:
-            caps["highlight"] = True
+    # Derive capability flags from the union of returned + Summary-listed QCODEs.
+    caps["color"] = QR_COLOR in caps["qcodes"]
+    caps["highlight"] = QR_HIGHLIGHT in caps["qcodes"]
+    caps["charsets"] = QR_CHARSETS in caps["qcodes"]
+    caps["reply_modes"] = QR_REPLY_MODES in caps["qcodes"]
     return caps
 
 
@@ -542,16 +574,22 @@ def query_terminal(client_socket, model: "TerminalModel") -> "TerminalModel":
     TN3270E emulators (e.g. ws3270) do not answer a Read Partition Query — sending
     one there only stalls the session — so it is skipped. We also wait only
     briefly for the reply (:data:`QUERY_REPLY_TIMEOUT`) so a base terminal that
-    ignores the Query can't block. The reply's usable area becomes the model's
-    authoritative alternate size, and a Color Query Reply confirms colour support.
-    On any error, silence, or non-reply, ``model`` is returned unchanged.
+    ignores the Query can't block.
+
+    A **Query List (All)** is sent so the terminal enumerates its whole
+    capability set (see :func:`read_partition_query_list`). The reply's usable
+    area becomes the model's authoritative alternate size, the advertised QCODEs
+    are recorded on the model (``query_caps``), and colour support is taken from
+    the reply — so a terminal that does *not* report colour overrides the
+    type-string guess. On any error, silence, or non-reply, ``model`` is
+    returned unchanged.
     """
     if not model.extended or model.tn3270e:
         return model
-    # Frame the WSF stream as a 3270 record: terminate it with IAC EOR the way
-    # every outbound screen is (see screen.Screen.render), or the client will
-    # keep waiting for the end of the record and never reply.
-    query = read_partition_query() + bytes([IAC, EOR])
+    # Frame the WSF as a 3270 record: IAC-escape it (the partition byte is 0xFF,
+    # which the Telnet layer would otherwise read as a command) and terminate it
+    # with IAC EOR the way every outbound screen is.
+    query = _iac_escape(read_partition_query_list()) + bytes([IAC, EOR])
     try:
         print("TX:", binascii.hexlify(query))
         client_socket.settimeout(QUERY_REPLY_TIMEOUT)
@@ -562,17 +600,20 @@ def query_terminal(client_socket, model: "TerminalModel") -> "TerminalModel":
     if not record:
         return model
     caps = parse_query_reply(record)
-    print("Query Reply: qcodes={}, usable={}x{}, color={}, highlight={}".format(
-        sorted(hex(q) for q in caps["qcodes"]),
-        caps["usable_cols"], caps["usable_rows"],
-        caps["color"], caps["highlight"]))
-    updates = {}
+    print("Query Reply: qcodes={}, usable={}x{}, color={}, highlight={}, "
+          "charsets={}, reply_modes={}".format(
+              sorted(hex(q) for q in caps["qcodes"]),
+              caps["usable_cols"], caps["usable_rows"],
+              caps["color"], caps["highlight"],
+              caps["charsets"], caps["reply_modes"]))
+    updates = {"query_caps": frozenset(caps["qcodes"])}
     if caps["usable_cols"] and caps["usable_rows"]:
         updates["alt_cols"] = caps["usable_cols"]
         updates["alt_rows"] = caps["usable_rows"]
-    if caps["color"]:
-        updates["color"] = True
-    return replace(model, **updates) if updates else model
+    # The reply is authoritative for colour: a terminal that answers but does not
+    # advertise Colour is mono, even if its type string looked extended.
+    updates["color"] = caps["color"]
+    return replace(model, **updates)
 
 
 # Credentials — keys are uppercase userids
@@ -1160,17 +1201,43 @@ def read_record(client_socket):
     if isinstance(client_socket, TN3270EStream):
         return client_socket.next_data_record()
 
+    # Process the Telnet layer while accumulating: IAC IAC is a literal 0xFF data
+    # byte (collapse it — a Query Reply's colour/partition values are full of
+    # them), IAC EOR ends the record, and a late option triplet or standalone
+    # command is spliced out. (The old "buffer ends with IAC EOR" shortcut both
+    # failed to un-escape and could false-terminate on an escaped 0xFF.)
     buffer = bytearray()
     while True:
+        out = bytearray()
+        i = 0
+        while i < len(buffer):
+            b = buffer[i]
+            if b != IAC:
+                out.append(b)
+                i += 1
+                continue
+            if i + 1 >= len(buffer):
+                break                          # trailing lone IAC: need more bytes
+            c = buffer[i + 1]
+            if c == EOR:
+                return bytes(out)              # record complete
+            if c == IAC:
+                out.append(IAC)                # IAC IAC → one 0xFF data byte
+                i += 2
+                continue
+            if c in (WILL, WONT, DO, DONT):
+                if i + 2 >= len(buffer):
+                    break                      # incomplete option triplet
+                i += 3                         # splice out a late option
+                continue
+            i += 2                             # splice out a standalone command
+        if len(buffer) > MAX_BUFFER_SIZE:
+            print(f"WARNING: client buffer exceeded {MAX_BUFFER_SIZE} bytes; closing connection")
+            return None
         data = client_socket.recv(1024)
         if not data:
             return None
         buffer.extend(data)
-        if len(buffer) > MAX_BUFFER_SIZE:
-            print(f"WARNING: client buffer exceeded {MAX_BUFFER_SIZE} bytes; closing connection")
-            return None
-        if len(buffer) >= 2 and buffer[-2:] == bytes([IAC, EOR]):
-            return bytes(buffer[:-2])
 
 
 # Signals that the SYSREQ SSCP-LU session ended with LOGOFF. The handlers below

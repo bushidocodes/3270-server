@@ -13,7 +13,10 @@ import threading
 import time
 
 import server
-from server import read_partition_query, parse_query_reply
+from server import (
+    read_partition_query, read_partition_query_list, parse_query_reply,
+    _iac_escape,
+)
 
 IAC, EOR, SE = 0xFF, 0xEF, 0xF0
 DO, DONT, WILL, WONT, SB = 253, 254, 251, 252, 250
@@ -51,6 +54,17 @@ def test_read_partition_query_bytes():
     assert read_partition_query() == bytes([0xF3, 0x00, 0x05, 0x01, 0xFF, 0x02])
 
 
+def test_read_partition_query_list_bytes():
+    # F3 (WSF) + a Read Partition Query List (type 0x03) requesting All (0x80).
+    assert read_partition_query_list() == bytes([0xF3, 0x00, 0x06, 0x01, 0xFF, 0x03, 0x80])
+
+
+def test_iac_escape_doubles_ff():
+    # The partition byte 0xFF must be doubled so Telnet carries it as data.
+    assert _iac_escape(read_partition_query_list()) == \
+        bytes([0xF3, 0x00, 0x06, 0x01, 0xFF, 0xFF, 0x03, 0x80])
+
+
 # ── the reply parser ─────────────────────────────────────────────────────────
 
 def test_parse_full_reply():
@@ -64,6 +78,46 @@ def test_parse_usable_area_only():
     caps = parse_query_reply(_reply_record(cols=132, rows=27, color=False, highlight=False))
     assert (caps["usable_cols"], caps["usable_rows"]) == (132, 27)
     assert not caps["color"] and not caps["highlight"]
+
+
+def test_parse_summary_enumerates_capabilities():
+    # A real terminal advertises many capabilities only in the Summary (0x80),
+    # not as standalone replies. The parser must fold the Summary's QCODE list in
+    # — so colour/highlight/etc. are detected from it even with no 0x86/0x87 SF.
+    summary = bytes([0x00, 0x0A, 0x81, server.QR_SUMMARY,
+                     server.QR_SUMMARY, server.QR_USABLE_AREA, server.QR_CHARSETS,
+                     server.QR_COLOR, server.QR_HIGHLIGHT, server.QR_REPLY_MODES])
+    rec = bytes([server.AID_SF]) + summary + _usable_area(80, 24)
+    caps = parse_query_reply(rec)
+    assert caps["color"] and caps["highlight"]
+    assert caps["charsets"] and caps["reply_modes"]
+    assert server.QR_REPLY_MODES in caps["qcodes"]
+
+
+class _ChunkSocket:
+    """A fake socket that hands back preset byte chunks from recv()."""
+    def __init__(self, *chunks):
+        self._chunks = list(chunks)
+
+    def recv(self, n):
+        return self._chunks.pop(0) if self._chunks else b""
+
+
+def test_read_record_unescapes_iac_and_terminates_on_eor():
+    # A record whose data contains 0xFF arrives Telnet-escaped as FF FF; the read
+    # must collapse it back to a single 0xFF and stop at the real IAC EOR — the
+    # bug that made Query Replies (full of 0xFF colour values) unparseable.
+    payload = bytes([0x88, 0x00, 0x06, 0x81, 0x86, 0xFF, 0x00])   # has a data 0xFF
+    wire = payload.replace(b"\xff", b"\xff\xff") + bytes([IAC, EOR])
+    got = server.read_record(_ChunkSocket(wire))
+    assert got == payload
+
+
+def test_read_record_splices_out_late_telnet_option():
+    # A stray option triplet embedded in the stream is removed, not returned.
+    wire = bytes([0x88, IAC, DO, BINARY, 0x00, 0x04, 0x81, 0x86, IAC, EOR])
+    got = server.read_record(_ChunkSocket(wire))
+    assert got == bytes([0x88, 0x00, 0x04, 0x81, 0x86])
 
 
 def test_parse_rejects_non_sf_aid():
@@ -137,8 +191,8 @@ def test_query_terminal_folds_in_reply():
     t.start()
     try:
         cli.settimeout(5)
-        got = cli.recv(64)                       # the WSF Read Partition Query
-        assert got == read_partition_query() + bytes([IAC, EOR])
+        got = cli.recv(64)                       # the WSF Read Partition Query List
+        assert got == _iac_escape(read_partition_query_list()) + bytes([IAC, EOR])
         cli.sendall(_reply_record(cols=80, rows=32, color=True)
                     + bytes([IAC, EOR]))
         t.join(timeout=5)
@@ -236,8 +290,8 @@ def test_extended_client_query_then_logon():
     sock.connect(("127.0.0.1", port))
     try:
         leftover = _negotiate(sock, term=b"IBM-3278-2-E")
-        wsf = _read_record(sock, leftover)             # the Read Partition Query
-        assert wsf == read_partition_query()           # F3 00 05 01 FF 02, IAC EOR stripped
+        wsf = _read_record(sock, leftover)             # the Read Partition Query List
+        assert wsf == _iac_escape(read_partition_query_list())   # IAC EOR stripped
         sock.sendall(_reply_record(cols=80, rows=24) + bytes([IAC, EOR]))
         logon = _read_record(sock)                     # the logon panel
     finally:
