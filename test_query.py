@@ -158,7 +158,10 @@ def _negotiate(sock, term=b"IBM-3278-2-E"):
                     break
                 opt = buf[2]
                 if not (got_binary and got_eor and got_term):
-                    sock.sendall(bytes([IAC, {DO: WILL, DONT: WONT, WILL: DO, WONT: DONT}[cmd], opt]))
+                    reply = {DO: WILL, DONT: WONT, WILL: DO, WONT: DONT}[cmd]
+                    if opt == 40:  # refuse TN3270E → exercise the basic TN3270 path
+                        reply = {DO: WONT, WILL: DONT}.get(cmd, reply)
+                    sock.sendall(bytes([IAC, reply, opt]))
                 if opt == BINARY and cmd in (DO, WILL):
                     got_binary = True
                 if opt == EOR_OPT and cmd in (DO, WILL):

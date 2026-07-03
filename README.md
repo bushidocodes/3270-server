@@ -121,13 +121,15 @@ x3270 localhost:2323
 
 ### Connect with any emulator
 
-Point your emulator at `localhost`, port `2323`. The server performs basic TN3270 (RFC 1576) negotiation — BINARY, EOR, and TERMINAL-TYPE — automatically. It detects the terminal model your emulator reports (3278/3279, models 2–5) and records it (exposed as the `ZTERM` dialog variable under option 7). If your emulator advertises the extended data stream (an `-E` terminal type), the server then sends a **Read Partition (Query)** and folds the terminal's own **Query Reply** — its real usable area, colour, and highlighting support — back into what it knows about the session (authoritative where the type string is only a hint, e.g. `IBM-DYNAMIC`). Screens are drawn on the 24×80 default presentation space that every one of those models shares, so any of them renders identically. (Full TN3270E — RFC 2355 — and laying panels out across a model 3/4/5's larger *alternate* screen are not yet implemented.)
+Point your emulator at `localhost`, port `2323`. The server negotiates **TN3270E (RFC 2355)** when the emulator supports it — the TN3270E option, a `DEVICE-TYPE`/`FUNCTIONS` sub-negotiation, and a 5-byte data header on every record — and otherwise falls back to **basic TN3270 (RFC 1576)** (BINARY, EOR, TERMINAL-TYPE). Either way it detects the terminal model your emulator reports (3278/3279, models 2–5) and records it (exposed as the `ZTERM` dialog variable under option 7). If your emulator advertises the extended data stream (an `-E` terminal type), the server then sends a **Read Partition (Query)** and folds the terminal's own **Query Reply** — its real usable area, colour, and highlighting support — back into what it knows about the session (authoritative where the type string is only a hint, e.g. `IBM-DYNAMIC`). Screens are drawn on the 24×80 default presentation space that every one of those models shares, so any of them renders identically. (An agreed but empty `FUNCTIONS` set — no BIND-IMAGE/RESPONSES/SCS/SYSREQ — and rendering across a model 3/4/5's larger *alternate* screen are the remaining TN3270E-adjacent gaps.)
 
 ## How it works
 
 ### TN3270 protocol
 
-TN3270 is Telnet extended with IBM 3270 data-stream framing. The server performs the full Telnet option negotiation (BINARY, EOR, TERMINAL-TYPE) before sending any screen data.
+TN3270 is Telnet extended with IBM 3270 data-stream framing. The server performs the full Telnet option negotiation (BINARY, EOR, and either TN3270E or TERMINAL-TYPE) before sending any screen data.
+
+**TN3270E (RFC 2355)** is offered first (Telnet option 40). If the client accepts, the server drives the `DEVICE-TYPE` exchange (it sends `SEND DEVICE-TYPE`, the client `REQUEST`s a device type, the server replies `IS` with an assigned device name) and agrees an empty `FUNCTIONS` set — after which **every 3270 record carries a 5-byte data header** (`DATA-TYPE`, `REQUEST-FLAG`, `RESPONSE-FLAG`, 2-byte `SEQ-NUMBER`). That framing is handled by wrapping the session socket in `TN3270EStream` (which prepends the header on send; `read_record` strips it on receive), so the screen code is unchanged. If the client refuses TN3270E, the server falls back to the basic TERMINAL-TYPE exchange.
 
 ### 3270 data stream
 
@@ -292,8 +294,8 @@ To add more users, extend the `_CREDENTIALS` dict at the top of `server.py`.
 
 ## References
 
-- [RFC 1576 — TN3270 Current Practices](https://tools.ietf.org/html/rfc1576) — the basic (non-E) negotiation this server implements
-- [RFC 2355 — TN3270E](https://tools.ietf.org/html/rfc2355) — the extended protocol (not yet implemented)
+- [RFC 1576 — TN3270 Current Practices](https://tools.ietf.org/html/rfc1576) — the basic (non-E) negotiation, used as the fallback
+- [RFC 2355 — TN3270E](https://tools.ietf.org/html/rfc2355) — the extended protocol (option, DEVICE-TYPE/FUNCTIONS, 5-byte header) this server negotiates
 - [IBM 3270 Data Stream Programming Reference](https://www.ibm.com/docs/en/zos/2.5.0?topic=reference-3270-data-stream)
 - [IBM ISPF Dialog Tag Language Guide and Reference](https://www.ibm.com/docs/en/SSLTBW_2.4.0/pdf/f54dt00_v2r4.pdf) — the SGML format the `panels/*.dtl` syntax is modeled on
 - [x3270 / wc3270 emulator](https://x3270.miraheze.org/wiki/Main_Page)
