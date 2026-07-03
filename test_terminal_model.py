@@ -121,7 +121,7 @@ def _negotiate_model(term_type: bytes) -> server.TerminalModel:
     try:
         t = threading.Thread(
             target=lambda: result.__setitem__("model",
-                                              server.tn3270_negotiate(srv)),
+                                              server.tn3270_negotiate(srv)[0]),
             daemon=True,
         )
         t.start()
