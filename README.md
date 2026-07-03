@@ -105,7 +105,19 @@ Lines 1-22 of 54     PF7=Up  PF8=Down  PF3=Exit
 python server.py
 ```
 
-The server listens on port 2323 by default (no root/administrator required, unlike port 23).
+The server listens on port 2323 by default (no root/administrator required, unlike port 23). `python server.py --help` lists the options: `--host`, `--port`, and `--certfile`/`--keyfile` (each also settable via the `TN3270_HOST`, `TN3270_PORT`, `TN3270_CERTFILE`, `TN3270_KEYFILE` environment variables).
+
+### Run over TLS (secure 3270)
+
+Pass a PEM certificate to serve **implicit TLS** — the whole connection is encrypted from the first byte, the way an x3270-family emulator connects when the host is given the `L:` prefix. Credentials typed on the logon panel then never cross the wire in the clear.
+
+```sh
+# a throwaway self-signed cert for local testing
+openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365 -nodes -subj "/CN=localhost"
+python server.py --certfile cert.pem --keyfile key.pem
+```
+
+Then connect with the `L:` prefix, e.g. `wc3270 L:localhost:2323` (add `-noverifycert` for a self-signed cert). Without `--certfile` the server is plaintext, exactly as before.
 
 ### Connect with wc3270 (Windows)
 
@@ -130,6 +142,8 @@ Point your emulator at `localhost`, port `2323`. The server negotiates **TN3270E
 TN3270 is Telnet extended with IBM 3270 data-stream framing. The server performs the full Telnet option negotiation (BINARY, EOR, and either TN3270E or TERMINAL-TYPE) before sending any screen data.
 
 **TN3270E (RFC 2355)** is offered first (Telnet option 40). If the client accepts, the server drives the `DEVICE-TYPE` exchange (it sends `SEND DEVICE-TYPE`, the client `REQUEST`s a device type, the server replies `IS` with an assigned device name) and negotiates `FUNCTIONS` (it supports **`BIND-IMAGE`**, **`RESPONSES`**, and **`SYSREQ`**, agreeing the intersection of those with the client's request) — after which **every 3270 record carries a 5-byte data header** (`DATA-TYPE`, `REQUEST-FLAG`, `RESPONSE-FLAG`, 2-byte `SEQ-NUMBER`). That framing is handled by wrapping the session socket in `TN3270EStream`: it prepends the header on send (and, when `RESPONSES` is active, sets `RESPONSE-FLAG = ALWAYS` under an incrementing sequence and consumes the client's inbound `RESPONSE` messages), while `read_record` strips the header on receive — so the screen code is unchanged. When **`BIND-IMAGE`** is negotiated the server first sends a `DATA-TYPE BIND-IMAGE` message carrying a synthetic SNA BIND (RFC 2355 requires a BIND before any 3270-DATA, and a *bound* session is what makes the client's ATTN key send its `IP`). The **`SYSREQ`** and **ATTN** keys arrive out-of-band as Telnet `AO` and `IP` commands between records; `next_event` surfaces them to the session loop, which runs a small **SSCP-LU** host session (`DATA-TYPE` `SSCP-LU-DATA`/`UNBIND`) for SYSREQ. If the client refuses TN3270E, the server falls back to the basic TERMINAL-TYPE exchange.
+
+When a certificate is configured (`--certfile`), the accepted socket is wrapped in **implicit TLS** (`ssl.SSLContext(PROTOCOL_TLS_SERVER)`) in the per-client thread before any 3270 bytes flow — so a slow or hostile client can't stall the accept loop — after which the entire negotiation and session run over the encrypted socket unchanged (the 3270 code only ever calls `recv`/`sendall`). This matches the `L:` connect prefix used by x3270-family emulators. Plaintext remains the default.
 
 ### 3270 data stream
 

@@ -1,4 +1,6 @@
+import os
 import socket
+import ssl
 import binascii
 import threading
 from dataclasses import dataclass, replace
@@ -1625,11 +1627,31 @@ def handle_client(client_socket, addr):
                 short_msg = None
 
 
-def _client_thread(client_socket, addr):
+def make_tls_context(certfile, keyfile=None):
+    """Build a server-side TLS context from a PEM cert (and key, if separate).
+
+    This is *implicit* TLS: the whole connection is TLS from the first byte, the
+    way an x3270-family emulator connects when the host is given the ``L:``
+    prefix (e.g. ``L:host:992``). ``keyfile`` may be ``None`` if the key is in
+    ``certfile``."""
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(certfile, keyfile)
+    return ctx
+
+
+def _client_thread(client_socket, addr, tls_context=None):
     try:
+        # Implicit TLS: complete the handshake here (in the per-client thread, so
+        # a slow or hostile client can't stall the accept loop) before any 3270
+        # bytes flow. handle_client then reads/writes through the TLS socket
+        # unchanged — TN3270EStream and read_record only use recv/sendall.
+        if tls_context is not None:
+            client_socket = tls_context.wrap_socket(client_socket, server_side=True)
         handle_client(client_socket, addr)
     except _SessionLogoff:
         print(f"Client {addr} logged off via SYSREQ")
+    except ssl.SSLError as e:
+        print(f"TLS handshake with {addr} failed: {e}")
     except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
         print(f"Client {addr} disconnected unexpectedly")
     except Exception as e:
@@ -1638,16 +1660,35 @@ def _client_thread(client_socket, addr):
         client_socket.close()
 
 
-def run_tn3270_server(host="127.0.0.1", port=2323):
+def run_tn3270_server(host="127.0.0.1", port=2323, certfile=None, keyfile=None):
+    """Serve TN3270/TN3270E on ``host:port``. If ``certfile`` is given, every
+    connection is wrapped in implicit TLS (see :func:`make_tls_context`);
+    otherwise the server is plaintext (the default, unchanged)."""
+    tls_context = make_tls_context(certfile, keyfile) if certfile else None
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
         server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server_socket.bind((host, port))
         server_socket.listen(socket.SOMAXCONN)
-        print(f"TN3270 server listening on {host}:{port}")
+        scheme = "TN3270 over TLS" if tls_context else "TN3270"
+        print(f"{scheme} server listening on {host}:{port}")
         while True:
             client_socket, addr = server_socket.accept()
-            threading.Thread(target=_client_thread, args=(client_socket, addr), daemon=True).start()
+            threading.Thread(target=_client_thread,
+                             args=(client_socket, addr, tls_context),
+                             daemon=True).start()
 
 
 if __name__ == "__main__":
-    run_tn3270_server()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="A TN3270/TN3270E TSO/ISPF server.")
+    parser.add_argument("--host", default=os.environ.get("TN3270_HOST", "127.0.0.1"))
+    parser.add_argument("--port", type=int,
+                        default=int(os.environ.get("TN3270_PORT", "2323")))
+    parser.add_argument("--certfile", default=os.environ.get("TN3270_CERTFILE"),
+                        help="PEM certificate; enables implicit TLS when set")
+    parser.add_argument("--keyfile", default=os.environ.get("TN3270_KEYFILE"),
+                        help="PEM private key (omit if the key is in --certfile)")
+    args = parser.parse_args()
+    run_tn3270_server(host=args.host, port=args.port,
+                      certfile=args.certfile, keyfile=args.keyfile)
