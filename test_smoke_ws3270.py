@@ -397,3 +397,86 @@ def test_ws3270_renders_character_level_set_attribute():
     # The emulator processed our SA orders and rendered the line.
     assert "SetAttribute" in trace, trace[-2000:]
     assert "Press ENTER to continue, PF3 to exit" in out, out[-1500:]
+
+
+def test_ws3270_renders_rule_lines_from_ra():
+    """The bundled panels' rule lines / fills are emitted as RA (Repeat to
+    Address) orders rather than literal character runs; the emulator processes
+    them (`RepeatToAddress`) and renders the same panels — a normal login/menu
+    still works, proving the compacted stream is equivalent."""
+    _require_emulator()
+    port = _serve_one_client()
+    out, trace = _drive_traced(port, [
+        "Wait(20,InputField)",
+        "String(IBMUSER)", "Tab()", "String(SYS1)", "Enter()",
+        "Wait(20,Unlock)",
+        "Ascii()",
+        "Quit()",
+    ])
+
+    assert "RepeatToAddress" in trace, trace[-2000:]      # RA on the wire
+    assert "ISPF Primary Option Menu" in out, out[-1500:]  # ...and it renders
+
+
+def _serve_field_then_erase(record, erase):
+    """Serve one screen (``record``), read the client's reply, then send
+    ``erase``; hold the socket briefly so the emulator renders both."""
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+
+    def serve():
+        try:
+            conn, _ = srv.accept()
+            model, _ = server.tn3270_negotiate(conn)
+            sock = conn
+            if model.tn3270e:
+                sock = server.TN3270EStream(
+                    conn, responses=model.tn3270e_responses, sysreq=model.tn3270e_sysreq,
+                    bind_image=model.tn3270e_bind_image, contention=model.tn3270e_contention)
+                if model.tn3270e_bind_image:
+                    sock.send_bind()
+            sock.sendall(record)
+            server.read_record(sock)              # the client's reply (typed text)
+            sock.sendall(erase)
+            sock.settimeout(6)
+            try:
+                sock.recv(1024)                   # hold open until the emulator quits
+            except OSError:
+                pass
+        except Exception:
+            pass
+        finally:
+            srv.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    return port
+
+
+def test_ws3270_eua_clears_input_but_keeps_protected_text():
+    """EUA (Erase Unprotected to Address) clears the entry field the user typed
+    into while leaving the protected label on screen — verified on a real
+    emulator via its rendered screen and the `EraseUnprotected` trace."""
+    _require_emulator()
+    from screen import Screen, Text, Field
+
+    scr = Screen()
+    scr.add(Text(2, 1, "NAME:"))
+    scr.add(Field(2, 8, 10, name="nm", cursor=True))
+    port = _serve_field_then_erase(scr.render(), scr.render_erase_input(cursor_at=(2, 8)))
+    out, trace = _drive_traced(port, [
+        "Wait(20,Unlock)",
+        "String(HELLO)", "Snap()", "Snap(Ascii,2,0,80)", "Enter()",
+        "Wait(20,Unlock)",
+        "Ascii(2,0,80)",
+        "Quit()",
+    ])
+
+    rows = [l.replace("data:", "").rstrip() for l in out.splitlines() if "NAME:" in l]
+    assert rows, out[-1500:]
+    assert "HELLO" in rows[0]                      # typed into the field…
+    assert "HELLO" not in rows[-1]                 # …cleared after EUA
+    assert "NAME:" in rows[-1]                      # …protected label kept
+    assert "EraseUnprotected" in trace, trace[-2000:]
