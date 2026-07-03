@@ -8,7 +8,7 @@ menu's message line in place without clobbering the typed option.
 """
 import server
 from screen import (
-    Screen, Text, DisplayIntensity, WRITE, ERASE_WRITE, SBA, IC, SF,
+    Screen, Text, DisplayIntensity, WRITE, ERASE_WRITE, SBA, IC, SF, RA,
 )
 from dtl import load_panel
 
@@ -108,4 +108,8 @@ def test_empty_message_clears_the_line():
     sock = _FakeSocket()
     server._update_menu_message(sock, screen, None)
     assert sock.sent[0] == WRITE
-    assert b"\x40" * 54 in sock.sent          # the whole message field blanked
+    # The all-blank 54-column message field is cleared with a single RA
+    # (repeat-space) order rather than 54 literal spaces.
+    ra = sock.sent.index(RA)
+    assert sock.sent[ra + 3] == 0x40          # RA fills with EBCDIC space
+    assert b"\x40" * 54 not in sock.sent       # ...not a literal run

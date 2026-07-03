@@ -160,9 +160,15 @@ Screens are built with authentic 3270 orders:
 | SF | `0x1D` | Start Field — define a protected or unprotected input field |
 | SFE | `0x29` | Start Field Extended — a field carrying colour / highlighting (colour terminals only) |
 | SA | `0x28` | Set Attribute — change colour/highlight for the following characters *within* a field (colour terminals only) |
+| RA | `0x3C` | Repeat to Address — fill a run of one character (rule lines / fills) in 4 bytes instead of one per character |
+| EUA | `0x12` | Erase Unprotected to Address — null the input fields, leaving protected text (see clearing input below) |
 | IC | `0x13` | Insert Cursor — place the cursor in an input field |
 
 The Write Control Character (WCC) sent after ERASE_WRITE uses `0x43` — the correct x3270/wc3270 bit layout (`WCC_RESET_BIT | WCC_KEYBOARD_RESTORE_BIT | WCC_RESET_MDT_BIT`) — so the keyboard unlocks immediately after every screen update.
+
+**Compact fills (RA).** A rule line or fill is a run of one repeated character. Instead of one byte per character, `Text.render` emits a single **Repeat to Address** (`RA`, `0x3C`) order for any run of 5+ identical characters — 4 bytes regardless of length. The rendered result is identical (verified against ws3270, which processes `RepeatToAddress`); only the wire stream is shorter. Because both the DTL parser and the `screens.py` builders render through the same code, the panels stay byte-for-byte equal to each other.
+
+**Clearing input (EUA).** `Screen.render_erase_input()` sends a plain Write with an **Erase Unprotected to Address** (`EUA`, `0x12`) order that nulls every *unprotected* (input) field while leaving the protected text on screen — the native "clear the entry fields" operation. It pairs with `render_partial` to reset a form's input in place without repainting the panel (verified on ws3270: a typed field clears while its label stays).
 
 **Character-level colour.** A field's colour normally comes from its field start (SF/SFE) and applies to the whole field. `Text.rich(...)` builds a single field whose text is coloured in segments — an emphasised keyword inside a line of normal text — by emitting **Set Attribute** (`SA`, `0x28`) orders between the runs, so it needn't be split into separate fields. Like SFE, SA is emitted only on a colour render; a mono terminal just gets the concatenated text, byte-for-byte unchanged. (Verified against ws3270, which renders the runs in their individual colours.)
 

@@ -58,6 +58,18 @@ SA = 0x28
 XA_BASIC = 0xC0        # pair type: the all-character / basic field attribute
 XA_HIGHLIGHT = 0x41    # pair type: extended highlighting
 XA_FOREGROUND = 0x42   # pair type: foreground colour
+# Repeat to Address: fill the buffer from the current position up to a stop
+# address with one repeated character — 4 bytes for any run length, versus one
+# byte per character. Used for rule lines / fills (see Text.render). The rendered
+# result is identical; only the wire stream is shorter.
+RA = 0x3C
+# Erase Unprotected to Address: null every *unprotected* position from the
+# current position to a stop address, leaving protected text intact — the native
+# "clear the input fields" order (see Screen.render_erase_input).
+EUA = 0x12
+# A run of the same character at least this long is worth compacting into an RA
+# order (RA is 4 bytes, so it wins for runs of 5+).
+_RA_MIN_RUN = 5
 
 
 class Color(Enum):
@@ -180,6 +192,14 @@ def _emit_sba(buf: bytearray, row: int, col: int, cols: int = 80) -> None:
     buf.extend(encode_pack_addr(row, col, cols))
 
 
+def _emit_ra(buf: bytearray, stop: int, char_byte: int, cols: int = 80) -> None:
+    """Repeat ``char_byte`` from the current buffer position up to (not
+    including) the linear ``stop`` address."""
+    buf.append(RA)
+    buf.extend(encode_pack_addr(stop // cols, stop % cols, cols))
+    buf.append(char_byte)
+
+
 @dataclass
 class Text:
     """Protected, non-editable text positioned at ``(row, col)``.
@@ -224,6 +244,12 @@ class Text:
         _emit_field_start(buf, fa, base_color, base_highlight)
         if self.runs is not None and color:
             _emit_attr_runs(buf, self.runs, base_color, base_highlight)
+        elif len(self.text) >= _RA_MIN_RUN and len(set(self.text)) == 1:
+            # A long run of one character (a rule line / fill) — repeat it with a
+            # single RA order instead of one byte per character. The field start
+            # occupies self.col, so the run begins at self.col + 1.
+            start = self.row * cols + self.col + 1
+            _emit_ra(buf, start + len(self.text), to_ebcdic(self.text[0])[0], cols)
         else:
             buf.extend(to_ebcdic(self.text))
 
@@ -476,6 +502,34 @@ class Screen:
         )
         for item in items:
             item.render(buf, color=color, cols=self.width)
+        if cursor_at is not None:
+            _emit_sba(buf, cursor_at[0], cursor_at[1], self.width)
+            buf.append(IC)
+        buf.extend([IAC, EOR])
+        return bytes(buf)
+
+    def render_erase_input(self, cursor_at: Optional[Tuple[int, int]] = None) -> bytes:
+        """Render a plain **Write** that erases every *unprotected* (input) field
+        with an **EUA** order, leaving the protected text on screen intact — the
+        native "clear the entry fields" operation. Pairs with :meth:`render_partial`
+        to reset a form's input in place, without repainting the whole panel.
+
+        Positions at the top of the buffer and issues EUA back to the top, so the
+        erase wraps the whole presentation space (every unprotected field). The
+        WCC resets the modified-data tags, so the cleared fields read as empty.
+        ``cursor_at`` optionally repositions the cursor.
+        """
+        buf = bytearray([WRITE])
+        buf.extend(
+            write_control_character(
+                reset_mdts=True,            # the cleared fields are no longer modified
+                keyboard_restore=True,
+                sound_alarm=self.sound_alarm,
+            )
+        )
+        _emit_sba(buf, 0, 0, self.width)   # to the top of the buffer …
+        buf.append(EUA)
+        buf.extend(encode_pack_addr(0, 0, self.width))   # … erase around to the top
         if cursor_at is not None:
             _emit_sba(buf, cursor_at[0], cursor_at[1], self.width)
             buf.append(IC)
