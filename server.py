@@ -463,6 +463,12 @@ class TerminalModel:
     # QCODEs the terminal advertised in its Query Reply (basic-TN3270 -E only),
     # e.g. {0x81, 0x85, 0x86, 0x87}. Empty when no Query was answered.
     query_caps: frozenset = frozenset()
+    # Decoded from the Character Sets Query Reply (0x85) payload, so the send path
+    # can gate features on what the terminal actually supports (see query_terminal).
+    graphic_escape: bool = False    # advertises the alternate graphic (GE) set
+    dbcs_capable: bool = False       # advertises a double-byte (DBCS) set
+    base_cgcsgid: int = None         # base set's CGCSGID (GCSGID<<16 | CPGID), or None
+    char_sets: tuple = ()            # ((set, flags, lcid, cgcsgid), …) descriptors
     # The client refused the 3270 binary framing — a line-mode (NVT/ASCII) client,
     # not a 3270 terminal. The session runs as a plain-ASCII TSO READY loop.
     nvt: bool = False
@@ -529,6 +535,12 @@ QR_COLOR = 0x86
 QR_HIGHLIGHT = 0x87         # (extended) highlighting
 QR_REPLY_MODES = 0x88
 
+# Character Sets Query Reply (0x85) FLAGS byte (GA23-0059 Character Sets QR).
+CS_FLAG_GE = 0x80          # the alternate graphic (Graphic Escape) set is present
+CS_FLAG_DBCS = 0x04        # a double-byte (DBCS) character set is present
+CS_FLAG_CGCSGID = 0x02     # each descriptor carries a 4-byte CGCSGID
+CS_DBCS_SET = 0x20         # per-descriptor FLAGS bit: this set is double-byte
+
 
 def _iac_escape(data: bytes) -> bytes:
     """Double every IAC (0xFF) so the Telnet layer carries it as data rather
@@ -568,7 +580,9 @@ def parse_query_reply(record: bytes) -> dict:
     """
     caps = {"qcodes": set(), "usable_rows": None, "usable_cols": None,
             "color": False, "highlight": False, "charsets": False,
-            "reply_modes": False}
+            "reply_modes": False,
+            # Filled from the Character Sets (0x85) reply payload, when present:
+            "char_sets": [], "ge": False, "dbcs": False, "base_cgcsgid": None}
     if not record or record[0] != AID_SF:
         return caps
     i = 1
@@ -589,6 +603,27 @@ def parse_query_reply(record: bytes) -> dict:
             # sf[4],sf[5] = flags; sf[6:8] = width (cols); sf[8:10] = height (rows)
             caps["usable_cols"] = (sf[6] << 8) | sf[7]
             caps["usable_rows"] = (sf[8] << 8) | sf[9]
+        elif qcode == QR_CHARSETS and len(sf) >= 13:
+            # Character Sets reply: sf[4]=FLAGS, sf[5]=more-flags, sf[6:8]=SDW/SDH,
+            # sf[8:12]=load-PS format types, sf[12]=DL (descriptor length), then a
+            # list of DL-byte descriptors: SET, FLAGS, LCID, [DBCS: SW SH SUBSN
+            # SUBSN,] CGCSGID(4). See x3270 do_qr_charsets (Common/sf.c).
+            flags = sf[4]
+            caps["ge"] = bool(flags & CS_FLAG_GE)
+            has_cgcsgid = bool(flags & CS_FLAG_CGCSGID)
+            dl = sf[12]
+            pos = 13
+            while dl >= 3 and pos + dl <= len(sf):
+                d = sf[pos:pos + dl]
+                cgcsgid = int.from_bytes(d[dl - 4:dl], "big") \
+                    if (has_cgcsgid and dl >= 7) else None
+                caps["char_sets"].append(
+                    {"set": d[0], "flags": d[1], "lcid": d[2], "cgcsgid": cgcsgid})
+                pos += dl
+            caps["dbcs"] = bool(flags & CS_FLAG_DBCS) or \
+                any(e["flags"] & CS_DBCS_SET for e in caps["char_sets"])
+            base = next((e for e in caps["char_sets"] if e["set"] == 0x00), None)
+            caps["base_cgcsgid"] = base["cgcsgid"] if base else None
     # Derive capability flags from the union of returned + Summary-listed QCODEs.
     caps["color"] = QR_COLOR in caps["qcodes"]
     caps["highlight"] = QR_HIGHLIGHT in caps["qcodes"]
@@ -638,12 +673,15 @@ def query_terminal(client_socket, model: "TerminalModel") -> "TerminalModel":
     if not record:
         return model
     caps = parse_query_reply(record)
+    base_cgcsgid = ("0x{:08x}".format(caps["base_cgcsgid"])
+                    if caps["base_cgcsgid"] is not None else None)
     print("Query Reply: qcodes={}, usable={}x{}, color={}, highlight={}, "
-          "charsets={}, reply_modes={}".format(
+          "charsets={}, reply_modes={}, ge={}, dbcs={}, base_cgcsgid={}".format(
               sorted(hex(q) for q in caps["qcodes"]),
               caps["usable_cols"], caps["usable_rows"],
               caps["color"], caps["highlight"],
-              caps["charsets"], caps["reply_modes"]))
+              caps["charsets"], caps["reply_modes"],
+              caps["ge"], caps["dbcs"], base_cgcsgid))
     updates = {"query_caps": frozenset(caps["qcodes"])}
     if caps["usable_cols"] and caps["usable_rows"]:
         updates["alt_cols"] = caps["usable_cols"]
@@ -651,6 +689,17 @@ def query_terminal(client_socket, model: "TerminalModel") -> "TerminalModel":
     # The reply is authoritative for colour: a terminal that answers but does not
     # advertise Colour is mono, even if its type string looked extended.
     updates["color"] = caps["color"]
+    # Character-set discovery: record what the terminal actually supports so the
+    # send path can gate Graphic Escape / alternate code page / DBCS on it,
+    # rather than emitting those blind (only present when the 0x85 reply carried
+    # a payload).
+    if caps["char_sets"]:
+        updates["graphic_escape"] = caps["ge"]
+        updates["dbcs_capable"] = caps["dbcs"]
+        updates["base_cgcsgid"] = caps["base_cgcsgid"]
+        updates["char_sets"] = tuple(
+            (e["set"], e["flags"], e["lcid"], e["cgcsgid"])
+            for e in caps["char_sets"])
     return replace(model, **updates)
 
 

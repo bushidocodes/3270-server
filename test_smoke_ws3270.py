@@ -513,3 +513,52 @@ def test_ws3270_renders_graphic_escape_line_drawing():
     # '-' (apla2uc[]); a 20-long run of either is unmistakably our border, not the
     # "GRAPHIC ESCAPE BORDER" label between the edges.
     assert ("─" * 20 in out) or ("-" * 20 in out), out[-1500:]
+
+
+def _query_one_terminal():
+    """Negotiate a real client and run the production `query_terminal` against it,
+    capturing the resulting model — so a smoke test can assert what the server
+    discovered from a real terminal's Query Reply. Returns (port, result, thread);
+    result["model"] is filled once the client has been queried."""
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+    result = {}
+
+    def serve():
+        conn = None
+        try:
+            conn, _ = srv.accept()
+            model, _ = server.tn3270_negotiate(conn)
+            result["model"] = server.query_terminal(conn, model)
+        except Exception as exc:            # pragma: no cover - diagnostics only
+            result["err"] = repr(exc)
+        finally:
+            if conn is not None:
+                conn.close()
+            srv.close()
+
+    t = threading.Thread(target=serve, daemon=True)
+    t.start()
+    return port, result, t
+
+
+def test_ws3270_charset_discovery_reports_graphic_escape():
+    """Querying a real ws3270 (basic-TN3270 -E) decodes its Character Sets reply:
+    the server discovers Graphic Escape support and the base/APL CGCSGIDs from the
+    actual 0x85 payload — proving the parser works against a real terminal, and
+    that #136's GE emission has a real capability to gate on."""
+    _require_emulator()
+    port, result, t = _query_one_terminal()
+    _drive_traced(port, ["Wait(4,Output)", "Quit()"], basic=True)
+    t.join(5)
+
+    model = result.get("model")
+    assert model is not None, result
+    assert model.graphic_escape is True                  # advertises the GE set
+    assert model.base_cgcsgid is not None
+    assert (model.base_cgcsgid & 0xFFFF) == 37           # base CPGID 37 = CP037
+    # The APL / line-drawing graphic set (CP310) GE draws from.
+    assert any((cg & 0xFFFF) == 310 for (_s, _f, _l, cg) in model.char_sets), model.char_sets
