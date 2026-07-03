@@ -222,3 +222,27 @@ def test_ws3270_sysreq_logoff_ends_the_session():
 
     # The emulator received our UNBIND, ending the session from the host side.
     assert "RCVD TN3270E(UNBIND" in trace, trace[-2000:]
+
+
+def test_ws3270_bind_image_binds_and_enables_attn():
+    """With BIND-IMAGE negotiated the server sends an SNA BIND, which the real
+    emulator accepts (`RCVD TN3270E(BIND-IMAGE…)`, parsed without error). Being
+    bound is what lets the emulator's ATTN key reach us: `Attn()` then sends
+    Telnet IP, where before binding ws3270 would only lock its keyboard. Both are
+    asserted on the deterministic protocol trace."""
+    _require_emulator()
+    port = _serve_one_client()
+    _, trace = _drive_traced(port, [
+        "Wait(20,InputField)",
+        "String(IBMUSER)", "Tab()", "String(SYS1)", "Enter()",
+        "Wait(20,Unlock)",       # login fully processed, ISPF menu drawn
+        "Attn()",                # only sends IP once the session is bound
+        "Wait(5,Output)",        # the server redisplays in response
+        "Quit()",
+    ])
+
+    # The emulator received and accepted our BIND (no "invalid" in the parse)...
+    assert "RCVD TN3270E(BIND-IMAGE" in trace, trace[-2000:]
+    assert "< BIND " in trace and "invalid" not in trace.split("< BIND", 1)[1][:120]
+    # ...and, now bound, sent ATTN as Telnet IP.
+    assert "SENT IP" in trace, trace[-2000:]

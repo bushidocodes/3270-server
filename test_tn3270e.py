@@ -20,8 +20,10 @@ BINARY, TERMINAL_TYPE, EOR_OPT, TN3270E = 0, 24, 25, 40
 # TN3270E sub-commands
 E_CONNECT, E_DEVICE_TYPE, E_FUNCTIONS, E_IS, E_REQUEST, E_SEND = 1, 2, 3, 4, 7, 8
 E_DT_RESPONSE = 0x02       # RESPONSE data-type (inbound acknowledgement)
+E_DT_BIND_IMAGE = 0x03     # BIND-IMAGE data-type (binds the LU-LU session)
 E_DT_UNBIND = 0x04         # UNBIND data-type (session ended)
 E_DT_SSCP_LU_DATA = 0x07   # SSCP-LU data-type (the SYSREQ host session)
+E_FUNC_BIND_IMAGE = 0      # the BIND-IMAGE function code
 E_FUNC_RESPONSES = 2       # the RESPONSES function code
 E_FUNC_SYSREQ = 4          # the SYSREQ function code
 AO = 0xF5                  # Telnet Abort Output → the SYSREQ key
@@ -39,11 +41,12 @@ def _e_sb(sock, payload):
     sock.sendall(bytes([IAC, SB, TN3270E]) + bytes(payload) + bytes([IAC, SE]))
 
 
-def _negotiate_e(sock, devtype=b"IBM-3278-2", responses=False, sysreq=False):
+def _negotiate_e(sock, devtype=b"IBM-3278-2", responses=False, sysreq=False,
+                 bind_image=False):
     """Drive the server's negotiation as a TN3270E client. Accepts TN3270E,
     answers SEND DEVICE-TYPE with a DEVICE-TYPE REQUEST, and settles FUNCTIONS —
-    agreeing the RESPONSES and/or SYSREQ functions when requested, else an empty
-    set. Returns (leftover_bytes, device_is_seen)."""
+    agreeing the BIND-IMAGE / RESPONSES / SYSREQ functions when requested, else
+    an empty set. Returns (leftover_bytes, device_is_seen)."""
     buf = bytearray()
     seen_device_is = False
     deadline = time.time() + 10
@@ -76,7 +79,8 @@ def _negotiate_e(sock, devtype=b"IBM-3278-2", responses=False, sysreq=False):
                 elif opt == TN3270E and sub[:2] == bytes([E_DEVICE_TYPE, E_IS]):
                     seen_device_is = True
                 elif opt == TN3270E and sub[:2] == bytes([E_FUNCTIONS, E_REQUEST]):
-                    funcs = bytes(([E_FUNC_RESPONSES] if responses else [])
+                    funcs = bytes(([E_FUNC_BIND_IMAGE] if bind_image else [])
+                                  + ([E_FUNC_RESPONSES] if responses else [])
                                   + ([E_FUNC_SYSREQ] if sysreq else []))
                     _e_sb(sock, bytes([E_FUNCTIONS, E_IS]) + funcs)       # agree the set
                 del buf[:se + 2]
@@ -291,3 +295,38 @@ def test_attn_redisplays_the_current_panel(e_session):
     again = _read_record(e_session)
     assert again[0] == 0x00 and again[5] == ERASE_WRITE     # redisplayed panel
     assert "TSO/E LOGON" in again.decode("cp037", errors="replace")
+
+
+# ── the BIND-IMAGE function ──────────────────────────────────────────────────
+
+def test_bind_image_sent_before_first_screen(e_session):
+    # With BIND-IMAGE negotiated, the server must bind the session (DATA-TYPE
+    # BIND-IMAGE) before it may send any 3270-DATA (RFC 2355 §10.3). So the very
+    # first record is the BIND, and the logon panel follows.
+    leftover, _ = _negotiate_e(e_session, bind_image=True)
+    bind = _read_record(e_session, leftover)
+    assert bind[0] == E_DT_BIND_IMAGE
+    assert bind[5] == 0x31                                   # SNA BIND request code
+    assert bind[5 + 24] == 0x03                             # screen-size code
+    logon = _read_record(e_session)
+    assert logon[0] == 0x00 and logon[5] == ERASE_WRITE
+    assert "TSO/E LOGON" in logon.decode("cp037", errors="replace")
+
+
+def test_no_bind_image_when_function_not_agreed(e_session):
+    # A client that doesn't agree BIND-IMAGE gets no BIND; the first record is
+    # the logon panel, exactly as before.
+    leftover, _ = _negotiate_e(e_session, bind_image=False)
+    first = _read_record(e_session, leftover)
+    assert first[0] == 0x00 and first[5] == ERASE_WRITE
+
+
+def test_bind_image_then_login_round_trip(e_session):
+    # Binding doesn't disturb the session: after the BIND and logon panel, a
+    # normal login reaches the ISPF menu.
+    leftover, _ = _negotiate_e(e_session, bind_image=True)
+    _read_record(e_session, leftover)                       # BIND
+    _read_record(e_session)                                 # logon panel
+    e_session.sendall(_reply_e({USERID_ADDR: "IBMUSER", PASSWORD_ADDR: "SYS1"}))
+    menu = _read_record(e_session)
+    assert "ISPF Primary Option Menu" in menu.decode("cp037", errors="replace")

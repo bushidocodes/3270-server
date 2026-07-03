@@ -121,6 +121,7 @@ IP = 244   # Interrupt Process → the ATTN key
 # TN3270E DATA-TYPE header byte values (header byte 0).
 E_DT_3270_DATA = 0x00
 E_DT_RESPONSE = 0x02
+E_DT_BIND_IMAGE = 0x03     # the SNA BIND image (binds the LU-LU session)
 E_DT_UNBIND = 0x04
 E_DT_SSCP_LU_DATA = 0x07   # the SSCP-LU session (used in SYSREQ "suspended" mode)
 
@@ -132,13 +133,35 @@ E_RSF_ALWAYS_RESPONSE = 0x02
 E_RSF_POSITIVE = 0x00     # inbound: positive response (record processed)
 E_RSF_NEGATIVE = 0x01     # inbound: negative response (error; body = sense code)
 
-# TN3270E FUNCTIONS (negotiable capabilities). We support RESPONSES only.
+# TN3270E FUNCTIONS (negotiable capabilities). We support BIND-IMAGE (so the
+# session can be bound, which enables the ATTN key), RESPONSES, and SYSREQ.
 E_FUNC_BIND_IMAGE = 0
 E_FUNC_DATA_STREAM_CTL = 1
 E_FUNC_RESPONSES = 2
 E_FUNC_SCS_CTL_CODES = 3
 E_FUNC_SYSREQ = 4
-E_SUPPORTED_FUNCTIONS = frozenset({E_FUNC_RESPONSES, E_FUNC_SYSREQ})
+E_SUPPORTED_FUNCTIONS = frozenset({E_FUNC_BIND_IMAGE, E_FUNC_RESPONSES, E_FUNC_SYSREQ})
+
+
+# A synthetic SNA BIND image for the LU-LU session, sent (DATA-TYPE BIND-IMAGE)
+# once BIND-IMAGE is negotiated. We are not a real SNA gateway, so this is a
+# well-formed, conventional LU2 (3270 display) BIND that x3270 parses happily.
+# The byte at offset 24 is the screen-size code: 0x03 = "default 24x80,
+# alternate = the terminal's own maximum" — model-agnostic, so it never shrinks
+# a model 3/4/5 alternate screen (as a fixed 24x80 code would). Offset 27 is the
+# PLU (application) name length; the name follows in EBCDIC. See RFC 2355 §10.3
+# and the x3270 BIND parser (3270ds.h BIND_OFF_*, telnet.c process_bind).
+_BIND_IMAGE = bytes([
+    0x31,                                            # 0: BIND request code
+    0x01, 0x03, 0x03, 0xB1, 0x90, 0x30, 0x80, 0x00,  # 1-8: FM/TS profiles, protocols
+    0x02, 0x85, 0x87,                                # 9-11: pacing, max RU sec/pri
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  # 12-19
+    0x18, 0x50, 0x18, 0x50,                          # 20-23: RD/CD/RA/CA (24x80)
+    0x03,                                            # 24: screen-size code
+    0x00, 0x00,                                      # 25-26
+    0x08,                                            # 27: PLU name length
+]) + to_ebcdic("IBMTSO01") + bytes([0x00])           # 28-35: PLU name, then a pad
+# byte so buflen strictly exceeds offset 28 + name length (x3270 needs the '>').
 
 
 def _strip_leading_telnet(rec: bytes) -> bytes:
@@ -179,10 +202,12 @@ class TN3270EStream:
     ``read_record``, which knows where a record ends (at IAC EOR).
     """
 
-    def __init__(self, sock, responses=False, sysreq=False):
+    def __init__(self, sock, responses=False, sysreq=False, bind_image=False):
         self._sock = sock
         self.responses = responses   # RESPONSES function negotiated?
         self.sysreq = sysreq         # SYSREQ function negotiated?
+        self.bind_image = bind_image  # BIND-IMAGE function negotiated?
+        self.bound = False           # has a BIND-IMAGE been sent (session bound)?
         self._seq = 0                # outbound sequence number (mod 2^16)
         self.last_response = None    # (seq, positive_bool, code) of the last ack
         self._rxbuf = bytearray()    # inbound bytes not yet framed into records
@@ -200,6 +225,15 @@ class TN3270EStream:
         self.last_screen = data      # remember it so SYSREQ resume can redisplay
         self._sock.sendall(header + data)
 
+    def send_bind(self, image=_BIND_IMAGE):
+        """Send the SNA BIND image (DATA-TYPE BIND-IMAGE), binding the LU-LU
+        session. Required once BIND-IMAGE is negotiated: the client won't accept
+        3270-DATA until it has seen a BIND (RFC 2355 §10.3), and being bound is
+        what lets the client's ATTN key send its Telnet IP. Idempotent."""
+        header = bytes([E_DT_BIND_IMAGE, 0x00, E_RSF_NO_RESPONSE, 0x00, 0x00])
+        self._sock.sendall(header + image + bytes([IAC, EOR]))
+        self.bound = True
+
     def send_sscp(self, text):
         """Send an SSCP-LU-DATA message (unformatted EBCDIC text) — used while the
         SYSREQ key has put the session in the SSCP-LU (suspended) mode."""
@@ -211,6 +245,7 @@ class TN3270EStream:
         'normal end of session' (RFC 2355 §10.3)."""
         self._sock.sendall(bytes([E_DT_UNBIND, 0x00, E_RSF_NO_RESPONSE, 0x00, 0x00,
                                   reason, IAC, EOR]))
+        self.bound = False
 
     def redisplay(self):
         """Re-send the last 3270 screen (used to restore the panel after the
@@ -368,6 +403,7 @@ class TerminalModel:
     tn3270e: bool = False            # TN3270E (RFC 2355) negotiated for this session
     tn3270e_responses: bool = False  # TN3270E RESPONSES function agreed
     tn3270e_sysreq: bool = False     # TN3270E SYSREQ function agreed
+    tn3270e_bind_image: bool = False  # TN3270E BIND-IMAGE function agreed
 
 
 def parse_terminal_type(term_type: str) -> TerminalModel:
@@ -1186,11 +1222,10 @@ def _handle_attn(client_socket):
     long-running transaction to cancel here, we acknowledge it by redisplaying
     the current panel so the terminal is never left with a locked keyboard.
 
-    Note: x3270-family emulators only send ATTN once the TN3270E session is
-    *bound* (the BIND-IMAGE function, which we don't implement); until then their
-    Attn action just locks the keyboard locally and nothing reaches us. This
-    handler therefore fires for a plain-TN3270 client (or a bound TN3270E one),
-    which is what the unit test exercises with a raw IAC IP."""
+    An x3270-family emulator only sends ATTN once the TN3270E session is *bound*
+    (its Attn action otherwise just locks the keyboard locally), which is why we
+    send a BIND-IMAGE at session start when that function is negotiated — see
+    :meth:`TN3270EStream.send_bind`. A plain-TN3270 client sends IP directly."""
     print("ATTN: redisplaying current screen")
     client_socket.redisplay()
 
@@ -1250,7 +1285,7 @@ def tn3270_negotiate(client_socket):
 
     got_binary = got_eor = got_term = False
     e_state = "unknown"          # "unknown" until the client accepts/refuses
-    got_device = got_functions = responses = sysreq = False
+    got_device = got_functions = responses = sysreq = bind_image = False
     term_type = None
 
     negot = bytearray()
@@ -1351,6 +1386,7 @@ def tn3270_negotiate(client_socket):
                     if funcs is not None:
                         responses = E_FUNC_RESPONSES in funcs
                         sysreq = E_FUNC_SYSREQ in funcs
+                        bind_image = E_FUNC_BIND_IMAGE in funcs
                 i = se_pos + 2
                 continue
 
@@ -1361,7 +1397,7 @@ def tn3270_negotiate(client_socket):
     model = parse_terminal_type(term_type)
     if e_active:
         model = replace(model, tn3270e=True, tn3270e_responses=responses,
-                        tn3270e_sysreq=sysreq)
+                        tn3270e_sysreq=sysreq, tn3270e_bind_image=bind_image)
     print("Negotiation complete: binary={}, eor={}, tn3270e={}, device={}".format(
         got_binary, got_eor, e_active, model.term_type))
     print(f"Terminal model: {model.term_type} "
@@ -1370,7 +1406,8 @@ def tn3270_negotiate(client_socket):
           f"{', extended' if model.extended else ''}"
           f"{', TN3270E' if e_active else ''}"
           f"{', RESPONSES' if e_active and responses else ''}"
-          f"{', SYSREQ' if e_active and sysreq else ''})")
+          f"{', SYSREQ' if e_active and sysreq else ''}"
+          f"{', BIND-IMAGE' if e_active and bind_image else ''})")
     return model
 
 
@@ -1441,7 +1478,8 @@ def handle_client(client_socket, addr):
     # read_record) — transparently to all the screen-sending code below.
     if model.tn3270e:
         client_socket = TN3270EStream(client_socket, responses=model.tn3270e_responses,
-                                      sysreq=model.tn3270e_sysreq)
+                                      sysreq=model.tn3270e_sysreq,
+                                      bind_image=model.tn3270e_bind_image)
     # Ask an extended terminal to describe itself (real size, colour); a base
     # terminal is left untouched. Uses the 60s negotiation timeout still in
     # effect, so a silent client can't wedge the session before the 600s below.
@@ -1450,6 +1488,11 @@ def handle_client(client_socket, addr):
     # Record the session's colour capability so every panel renders in colour on
     # a colour terminal (see _send_screen / _session).
     _session.color = _wants_color(model)
+    # If BIND-IMAGE was negotiated, bind the LU-LU session before the first
+    # screen: the client won't accept 3270-DATA until it has seen a BIND, and
+    # being bound is what lets its ATTN key reach us (RFC 2355 §10.3).
+    if model.tn3270e_bind_image:
+        client_socket.send_bind()
 
     while True:
         # Logon loop
