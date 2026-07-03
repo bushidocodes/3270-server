@@ -428,6 +428,9 @@ class TerminalModel:
     # QCODEs the terminal advertised in its Query Reply (basic-TN3270 -E only),
     # e.g. {0x81, 0x85, 0x86, 0x87}. Empty when no Query was answered.
     query_caps: frozenset = frozenset()
+    # The client refused the 3270 binary framing — a line-mode (NVT/ASCII) client,
+    # not a 3270 terminal. The session runs as a plain-ASCII TSO READY loop.
+    nvt: bool = False
 
 
 def parse_terminal_type(term_type: str) -> TerminalModel:
@@ -1404,6 +1407,8 @@ def tn3270_negotiate(client_socket):
     got_device = got_functions = responses = sysreq = bind_image = False
     contention = False
     term_type = None
+    nvt = False                  # client refused 3270 framing → line-mode (NVT)
+    nvt_pending = b""            # any line-mode input typed during negotiation
 
     negot = bytearray()
     negot += bytes([IAC, WILL, BINARY, IAC, DO, BINARY])
@@ -1423,6 +1428,8 @@ def tn3270_negotiate(client_socket):
     offered_do = {BINARY, EOR_OPT, TERMINAL_TYPE, TN3270E}
 
     def done():
+        if nvt:
+            return True   # a line-mode client — stop negotiating, run NVT
         if e_state == "active":
             return got_binary and got_eor and got_device and got_functions
         if e_state == "off":
@@ -1439,8 +1446,11 @@ def tn3270_negotiate(client_socket):
         i = 0
         while i < len(buffer):
             if buffer[i] != IAC:
-                i += 1
-                continue
+                # Plain (non-IAC) data mid-negotiation means a line-mode NVT
+                # client is typing, not a 3270 terminal completing options.
+                nvt = True
+                nvt_pending = bytes(buffer[i:])
+                break
             if i + 1 >= len(buffer):
                 break  # IAC at recv boundary; wait for more data
             cmd = buffer[i + 1]
@@ -1477,6 +1487,10 @@ def tn3270_negotiate(client_socket):
                     if opt in offered_do:
                         client_socket.sendall(bytes([IAC, DONT, opt]))
                         offered_do.discard(opt)
+                # A client that refuses 8-bit BINARY can't carry a 3270 data
+                # stream — it's a line-mode (NVT) client.
+                if opt == BINARY and cmd in (WONT, DONT):
+                    nvt = True
                 i += 3
                 continue
 
@@ -1511,6 +1525,10 @@ def tn3270_negotiate(client_socket):
             print("Unknown IAC command:", cmd)
             i += 2
 
+    if nvt:
+        print("Negotiation complete: line-mode (NVT) client — no 3270 framing")
+        return replace(parse_terminal_type(term_type), nvt=True), nvt_pending
+
     e_active = e_state == "active"
     model = parse_terminal_type(term_type)
     if e_active:
@@ -1528,7 +1546,7 @@ def tn3270_negotiate(client_socket):
           f"{', SYSREQ' if e_active and sysreq else ''}"
           f"{', BIND-IMAGE' if e_active and bind_image else ''}"
           f"{', CONTENTION-RESOLUTION' if e_active and contention else ''})")
-    return model
+    return model, b""
 
 
 def _handle_tn3270e_sb(sock, sub: bytes, got_device: bool, got_functions: bool):
@@ -1590,9 +1608,93 @@ def _messages():
     return _message_catalog
 
 
+_NVT_BANNER = (
+    "z/OS 2.5  TSO/E  (line mode)\n"
+    "\n"
+    "This is a line-mode (NVT) session — your client did not negotiate the 3270\n"
+    "data stream. Full-screen ISPF needs a 3270 terminal (e.g. wc3270/x3270).\n"
+    "Type HELP for commands, LOGOFF to disconnect.\n"
+)
+
+
+def _strip_nvt(raw: bytes) -> str:
+    """Decode one line of NVT input to ASCII, dropping any Telnet control bytes
+    (IAC option triplets / commands) and CR/NUL that a line-mode client may
+    interleave with the typed text."""
+    out = bytearray()
+    i = 0
+    while i < len(raw):
+        b = raw[i]
+        if b == IAC:
+            if i + 1 < len(raw) and raw[i + 1] in (WILL, WONT, DO, DONT):
+                i += 3
+            else:
+                i += 2                 # IAC IAC (data 0xFF) or a bare command
+            continue
+        if b not in (0x0D, 0x00):      # drop CR and NUL (CR LF / CR NUL line ends)
+            out.append(b)
+        i += 1
+    return out.decode("ascii", "replace")
+
+
+def run_nvt_session(client_socket, initial=b""):
+    """Serve a plain-ASCII **NVT (line-mode)** session — a minimal TSO ``READY``
+    command loop — to a client that refused the 3270 binary framing. Commands:
+    ``TIME``, ``HELP``, ``ISPF`` (explains a 3270 terminal is required), and
+    ``LOGOFF``/``LOGOUT``/``EXIT``/``QUIT`` to disconnect; any other verb gets the
+    authentic ``COMMAND xxx NOT FOUND``. Line-mode clients local-echo, so we send
+    only responses and the ``READY`` prompt."""
+    print("NVT: line-mode session")
+    client_socket.settimeout(600)
+
+    def send(text):
+        client_socket.sendall(text.replace("\n", "\r\n").encode("ascii", "replace"))
+
+    send("\n" + _NVT_BANNER + "\n")
+    buf = bytearray(initial)
+    need_prompt = True
+    while True:
+        if need_prompt:
+            send("READY\n")
+            need_prompt = False
+        nl = buf.find(b"\n")
+        if nl == -1:
+            try:
+                chunk = client_socket.recv(1024)
+            except OSError:
+                return
+            if not chunk:
+                return
+            buf.extend(chunk)
+            continue
+        line = _strip_nvt(bytes(buf[:nl]))
+        del buf[:nl + 1]
+        cmd = line.strip()
+        need_prompt = True
+        if not cmd:
+            continue
+        verb = cmd.split()[0].upper()
+        if verb in ("LOGOFF", "LOGOUT", "EXIT", "QUIT", "BYE"):
+            send("IKJ56470I LINE-MODE SESSION ENDED\n")
+            return
+        if verb in ("ISPF", "ISPPDF", "PDF"):
+            send("ISPF requires a full-screen 3270 terminal; "
+                 "connect a 3270 emulator.\n")
+            continue
+        if verb == "HELP":
+            send("Commands: TIME, ISPF, HELP, LOGOFF\n")
+            continue
+        send(_run_tso_command(cmd) + "\n")
+
+
 def handle_client(client_socket, addr):
     print(f"Connection from {addr}")
-    model = tn3270_negotiate(client_socket)
+    model, nvt_pending = tn3270_negotiate(client_socket)
+    # A line-mode (NVT/ASCII) client can't carry a 3270 data stream; serve it a
+    # plain-text TSO READY session instead of a hung 3270 negotiation.
+    if model.nvt:
+        run_nvt_session(client_socket, nvt_pending)
+        return
     # When TN3270E was negotiated, wrap the socket so every subsequent record is
     # framed with the 5-byte data header (and inbound headers are stripped in
     # read_record) — transparently to all the screen-sending code below.
