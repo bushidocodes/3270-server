@@ -249,9 +249,16 @@ tag/attribute names are case-insensitive, and boolean attributes may be minimize
 
 Placement is normally explicit (`row`/`col`), but an `<area>`/`<region>` flow box lets contained
 elements omit positions: they flow down one line each from the box's origin, and a field that
-omits `fldcol` gets its entry after the prompt (`col + len(prompt) + fldgap`). Explicit positions
-still win, so this is opt-in — the bundled panels remain byte-for-byte identical. (Authentic DTL
-auto-flows the whole document; this is a deliberate, smaller step toward that.)
+omits `fldcol` gets its entry after the prompt (`col + len(prompt) + fldgap`). A **`<dtacol>`** is a
+flow box that also carries default column widths — `pmtwidth` fixes the prompt column so every
+field's entry lines up at `col + pmtwidth`, and `entwidth` supplies a default field width — and a
+**`<divider>`** draws a horizontal rule across the box. Explicit positions still win, so this is
+opt-in — the bundled panels remain byte-for-byte identical. (Authentic DTL auto-flows the whole
+document; this is a deliberate, smaller step toward that.)
+
+Variable declarations (`<varclass>`/`<varlist>`/`<vardcl>`) are optional, as in `ISPDTLC`: a stray
+or missing `<vardcl>` is tolerated (the converter issues a suppressible warning) rather than
+aborting the panel, so a source file that references variables without declaring them still renders.
 
 A `<keyl>` is pure metadata — it renders nothing — but the server reads it to resolve function
 keys to commands the way ISPF does, e.g. PF3 → `EXIT`, instead of hard-coding key numbers:

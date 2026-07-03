@@ -440,6 +440,33 @@ class _DTLParser(HTMLParser):
             }
         elif tag == "attr":
             self._emit_attr(a)
+        elif tag == "dtacol":
+            # A data-column flow box: like <area>, but it also carries default
+            # prompt/entry widths (PMTWIDTH/ENTWIDTH) that its <dtafld>s inherit
+            # so their captions and entries line up in a column.
+            parent = self._areas[-1] if self._areas else None
+            self._areas.append({
+                "row": int(a["row"]) if "row" in a else (parent["row"] if parent else 0),
+                "col": int(a["col"]) if "col" in a else (parent["col"] if parent else 1),
+                "fldgap": int(a["fldgap"]) if "fldgap" in a
+                          else (parent["fldgap"] if parent else 1),
+                "explicit": "row" in a,
+                "parent": parent,
+                "pmtwidth": int(a["pmtwidth"]) if "pmtwidth" in a
+                            else (parent.get("pmtwidth") if parent else None),
+                "entwidth": int(a["entwidth"]) if "entwidth" in a
+                            else (parent.get("entwidth") if parent else None),
+            })
+        elif tag == "divider":
+            # A horizontal rule spanning the rest of the flow box's width.
+            ctx = self._areas[-1] if self._areas else None
+            if ctx is not None or "row" in a:
+                row = int(a["row"]) if "row" in a else ctx["row"]
+                col = int(a["col"]) if "col" in a else (ctx["col"] if ctx else 1)
+                if ctx is not None:
+                    ctx["row"] = row + 1
+                width = max(1, self.screen.width - col - 1)
+                self.screen.add(Text(row, col, "-" * width))
         elif tag in ("area", "region"):
             # A flow box. With explicit row/col it is a positioned sub-box; with
             # neither it transparently continues the enclosing flow (so its
@@ -574,7 +601,7 @@ class _DTLParser(HTMLParser):
         if tag == "msgmbr":
             self._in_msgmbr = False
             return
-        if tag in ("area", "region"):
+        if tag in ("area", "region", "dtacol"):
             if self._areas:
                 ctx = self._areas.pop()
                 parent = ctx.get("parent")
@@ -1044,17 +1071,27 @@ class _DTLParser(HTMLParser):
 
     def _add_field(self, a, content, tag, name):
         """Emit a prompt (if any) plus an unprotected input field; return it."""
+        # A flowed field (omitted end tag) captures the newline + indentation of
+        # the following line into its caption; collapse it, as <info> does, so the
+        # prompt is clean. Single-line captions are untouched (byte-identical).
+        if "\n" in content:
+            content = re.sub(r"\s*\n\s*", " ", content).strip()
         row, col, ctx = self._resolve_pos(a, tag)
+        pmtwidth = ctx.get("pmtwidth") if ctx else None
         if "fldcol" in a:
             fldcol = int(a["fldcol"])
+        elif pmtwidth:
+            fldcol = col + pmtwidth        # <dtacol>: entry at a fixed prompt column
         elif ctx is not None:
             fldcol = col + len(content) + ctx["fldgap"]  # entry flows after prompt
         else:
             fldcol = col
         # Entry width: explicit ``entwidth`` wins; otherwise fall back to the
-        # variable's display length (``dispmaxlen``) or a small default, so
-        # auto-flow guide fields that size via the variable still render.
-        length = int(a.get("entwidth", a.get("dispmaxlen", 8)))
+        # variable's display length (``dispmaxlen``), the enclosing <dtacol>'s
+        # default entry width, or a small default, so auto-flow guide fields that
+        # size via the column or the variable still render.
+        default_ew = (ctx.get("entwidth") if ctx else None) or 8
+        length = int(a.get("entwidth", a.get("dispmaxlen", default_ew)))
         if fldcol + length > self.screen.width:
             raise DTLError(
                 f"<{tag}> field at col {fldcol} width {length} overflows "
@@ -1144,11 +1181,12 @@ class _DTLParser(HTMLParser):
         # ignore them rather than failing the panel, so real DTL still loads.
 
     def _emit_vardcl(self, a):
-        if not self._in_varlist:
-            raise DTLError("<vardcl> outside of a <varlist>")
+        # A <vardcl> belongs in a <varlist>, but tolerate a stray one (some guide
+        # examples begin mid-declaration) rather than aborting the whole panel —
+        # a declaration with no name simply carries nothing to record.
         name = a.get("name")
         if not name:
-            raise DTLError("<vardcl> missing required attribute 'name'")
+            return
         self._vardcls[name.upper()] = {"varclass": a.get("varclass", "")}
 
     def _emit_dtafld(self, a, content):

@@ -34,8 +34,9 @@ EXAMPLE_FILES = sorted(glob.glob(os.path.join(_DIR, "*.dtl")))
 # land so the corpus can only get *more* renderable, never less. 0 before
 # auto-flow; 18 once a panel became an implicit flow box (#51); 87 with implicit
 # end tags + text/list tags (#52); 126 with panel-title text + nested-list
-# bullets/indentation; 132 with <msg suffix> + lenient unsupported <checki>.
-RENDER_BASELINE = 132
+# bullets/indentation; 132 with <msg suffix> + lenient unsupported <checki>;
+# 134 with <dtacol>/<divider> + tolerating a stray <vardcl> (as ISPDTLC does).
+RENDER_BASELINE = 134
 
 
 def _load(path):
