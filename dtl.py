@@ -283,6 +283,7 @@ class _DTLParser(HTMLParser):
         self._lstgrp = None       # current <lstgrp> column group, or None
         self._rows = None         # data rows for the list field (datavar→value)
         self._subs = {}           # &NAME/%NAME substitution values (for COLOR=%var)
+        self._da = None           # active <da> data area {row, col, attrs, body}
 
     # ── colour / highlight attributes ────────────────────────────────────────
 
@@ -426,6 +427,19 @@ class _DTLParser(HTMLParser):
             if self._lstfld is None:
                 raise DTLError("<lstcol> outside of a <lstfld>")
             self._tag, self._attrs, self._chars = "lstcol", a, []  # capture heading
+        elif tag == "da":
+            # A data area: a free-form region whose body text carries inline
+            # attribute characters (defined by nested <attr>) that start colour/
+            # type fields, like the classic ISPF )ATTR + )BODY model.
+            ctx = self._areas[-1] if self._areas else None
+            self._da = {
+                "row": int(a["row"]) if "row" in a else (ctx["row"] if ctx else 0),
+                "col": int(a["col"]) if "col" in a else (ctx["col"] if ctx else 1),
+                "attrs": {}, "body": [],
+                "ctx": None if "row" in a else ctx,   # flow only if unpositioned
+            }
+        elif tag == "attr":
+            self._emit_attr(a)
         elif tag in ("area", "region"):
             # A flow box. With explicit row/col it is a positioned sub-box; with
             # neither it transparently continues the enclosing flow (so its
@@ -469,6 +483,8 @@ class _DTLParser(HTMLParser):
             self._cur_pdc["chars"].append(data)
         elif self._cur_abc is not None:
             self._cur_abc["chars"].append(data)
+        elif self._da is not None:
+            self._da["body"].append(data)
         elif self._tag is not None:
             self._chars.append(data)
 
@@ -480,9 +496,16 @@ class _DTLParser(HTMLParser):
         # end tag is handled below via the normal `tag == self._tag` path.
         if self._tag is not None and tag != self._tag and tag != "dtafldd":
             self._emit_current()  # flush at the current list depth, before any pop
+        if tag == "da":
+            self._emit_da()
+            self._da = None
+            return
         if tag in ("ul", "ol", "dl", "parml") and self._lists:
             self._lists.pop()
         if tag in ("panel", "help"):
+            if self._da is not None:      # a <da> with an omitted end tag
+                self._emit_da()
+                self._da = None
             self._areas.clear()  # drop the panel's implicit flow box
             return
         if tag == "selfld":
@@ -941,6 +964,83 @@ class _DTLParser(HTMLParser):
             # A paragraph inside a list aligns with the list's item text.
             col += len(self._lists) * self._LIST_INDENT
         self._emit_flow_lines(text, row, col, ctx)
+
+    # ── data area (<da> / <attr>) ────────────────────────────────────────────
+
+    def _emit_attr(self, a):
+        """Register one <attr> attribute-character definition on the active <da>.
+
+        Mirrors DTL's ``<ATTR ATTRCHAR=x TYPE=... COLOR=... HILITE=... PADC=...>``:
+        the character ``x`` appearing in the data area's body starts a field of
+        that type/colour (``datain`` → input, ``dataout``/``char`` → protected).
+        """
+        if self._da is None:
+            # Panel-scope <attr> (a CUA )ATTR-style type definition, e.g.
+            # TYPE=FP/NEF/NT) applies to the panel body, which we don't yet model
+            # by attribute character — ignore it rather than aborting the panel.
+            return
+        ch = a.get("attrchar")
+        if not ch:
+            raise DTLError("<attr> missing required attribute 'attrchar'")
+        self._da["attrs"][ch] = {
+            "type": str(a.get("type", "char")).strip().lower(),
+            "color": self._color(a),
+            "hilite": self._hilite(a),
+            "intens": _intensity(a, "intens", DisplayIntensity.NORMAL),
+            "padc": (a.get("padc") or " ")[:1],
+        }
+
+    def _emit_da(self):
+        """Render the active data area's body. Its lines (dedented, blank edges
+        trimmed) are laid out from the area's origin; within a line, each
+        attribute character starts a field whose text runs to the next attribute
+        character. A mono render is unaffected by any colours (as everywhere)."""
+        da = self._da
+        if da is None:
+            return
+        lines = "".join(da["body"]).split("\n")
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        while lines and not lines[-1].strip():
+            lines.pop()
+        if not lines:
+            return
+        indent = min((len(ln) - len(ln.lstrip(" ")) for ln in lines if ln.strip()),
+                     default=0)
+        for i, ln in enumerate(lines):
+            self._emit_da_line(ln[indent:], da["row"] + i, da["col"], da["attrs"])
+        if da.get("ctx") is not None:      # advance the enclosing flow past it
+            da["ctx"]["row"] = da["row"] + len(lines)
+
+    def _emit_da_line(self, line, row, base, attrs):
+        """Lay out one data-area line: attribute characters delimit fields; the
+        run after each starts at that column (the attribute byte occupies the
+        character cell, exactly as on a real 3270)."""
+        n = len(line)
+        idx = 0
+        while idx < n:
+            j = idx + 1
+            while j < n and line[j] not in attrs:
+                j += 1
+            if line[idx] in attrs:
+                self._emit_da_field(attrs[line[idx]], row, base + idx, line[idx + 1:j])
+            elif line[idx:j].strip():
+                # Literal text with no governing attribute char (unusual): plain.
+                self.screen.add(Text(row, base + idx, line[idx:j]))
+            idx = j
+
+    def _emit_da_field(self, spec, row, col, content):
+        if spec["type"] == "datain":
+            # The run after the attribute char is the field's extent (pad-char
+            # placeholders in the source), not initial data — so it sets the
+            # width and the field starts empty.
+            self.screen.add(Field(
+                row=row, col=col, length=max(1, len(content)), default="",
+                color=spec["color"], highlight=spec["hilite"],
+            ))
+        else:  # dataout / char / text → protected display field
+            self.screen.add(Text(row, col, content, spec["intens"],
+                                 color=spec["color"], highlight=spec["hilite"]))
 
     def _add_field(self, a, content, tag, name):
         """Emit a prompt (if any) plus an unprotected input field; return it."""
