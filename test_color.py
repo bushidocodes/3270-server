@@ -8,7 +8,7 @@ carrying the basic field attribute plus colour/highlight pairs.
 """
 import server
 from screen import (
-    Screen, Text, Field, Color, Highlight,
+    Screen, Text, Field, Color, Highlight, _role_colour,
     SF, SFE, XA_BASIC, XA_FOREGROUND, XA_HIGHLIGHT,
 )
 from dtl import load_panel, load_dtl
@@ -116,10 +116,15 @@ def test_dtl_color_percent_variable():
     assert field.color is Color.RED
 
 
-def test_dtl_info_is_not_color_bearing():
-    # <info> is not a COLOR-bearing element; a stray color= is ignored (no SFE).
+def test_dtl_info_takes_cua_colour_not_explicit_color():
+    # <info> is not COLOR-bearing: a stray color= is ignored. But on a colour
+    # terminal it still renders in its CUA role colour (normal text → green),
+    # never the explicit red.
     s = load_panel_src('<info row="1" col="1" color="red">HELLO</info>')
-    assert SFE not in s.render(color=True)
+    data = s.render(color=True)
+    assert bytes([XA_FOREGROUND, Color.GREEN.value]) in data     # CUA green applied
+    assert bytes([XA_FOREGROUND, Color.RED.value]) not in data   # explicit red ignored
+    assert SFE not in s.render(color=False)                      # mono unchanged
 
 
 def test_dtl_hilite_attribute():
@@ -182,3 +187,40 @@ def test_logon_error_is_red_on_color_terminal():
                           model=color_model)
     # The red error field renders as SFE ... 42 F2 (foreground red).
     assert bytes([XA_FOREGROUND, Color.RED.value]) in sock.sent
+
+
+# ── CUA element-role colouring (matches real z/OS ISPF) ──────────────────────
+
+def test_cua_menu_colours_match_zos():
+    """The ISPF menu is coloured by CUA element role, matching a real z/OS
+    Primary Option Menu: white title/numbers, turquoise keywords/entry, green
+    prompt/descriptions/text, blue separator rules."""
+    s = load_panel("ispf", ZUSER="IBMUSER ", ZTIME="13:45")
+    by_role = {}
+    for it in s.items:
+        r = getattr(it, "role", None)
+        if r and r not in by_role:
+            by_role[r] = _role_colour(it.color, it.role)
+    assert by_role["title"] is Color.WHITE
+    assert by_role["prompt"] is Color.GREEN
+    assert by_role["field"] is Color.TURQUOISE
+    assert by_role["num"] is Color.WHITE
+    assert by_role["name"] is Color.TURQUOISE
+    assert by_role["desc"] is Color.GREEN
+    assert by_role["text"] is Color.GREEN
+    assert by_role["rule"] is Color.BLUE
+
+
+def test_ispf_menu_mono_is_byte_identical_colour_adds_sfe():
+    s = load_panel("ispf", ZUSER="IBMUSER ", ZTIME="13:45")
+    assert SFE not in s.render(color=False)   # mono: unchanged, no extended attrs
+    assert SFE in s.render(color=True)         # colour terminal: CUA colours emit SFE
+
+
+def test_explicit_color_overrides_cua_role():
+    # A logon entry field carries an explicit COLOR=WHITE, overriding the field
+    # role's turquoise default.
+    s = load_panel("logon")
+    field = next(i for i in s.items if isinstance(i, Field) and i.name == "userid")
+    assert field.role == "field"
+    assert _role_colour(field.color, field.role) is Color.WHITE   # explicit wins

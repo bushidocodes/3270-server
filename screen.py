@@ -69,6 +69,33 @@ class Highlight(Enum):
     UNDERSCORE = 0xF4
 
 
+# CUA element role → default z/OS ISPF colour. An item carries a role (from the
+# DTL element it came from); on a colour terminal an item with no explicit colour
+# renders in its role's colour, matching real ISPF (white title, green
+# prompts/text, turquoise option keywords + column headings, white option numbers,
+# blue separator rules). Applied only when rendering in colour, so mono is
+# byte-for-byte unchanged.
+_CUA_COLORS = {
+    "title":   Color.WHITE,      # panel title (centred heading)
+    "rule":    Color.BLUE,       # separator / fill lines
+    "inst":    Color.WHITE,      # top/panel instructions
+    "text":    Color.GREEN,      # normal text, field/status labels
+    "prompt":  Color.GREEN,      # field prompt ("Option ===>")
+    "field":   Color.TURQUOISE,  # unprotected entry field
+    "num":     Color.WHITE,      # point-and-shoot choice number
+    "name":    Color.TURQUOISE,  # choice keyword / name
+    "desc":    Color.GREEN,      # choice description
+    "heading": Color.TURQUOISE,  # list column heading
+    "cell":    Color.TURQUOISE,  # list data cell
+}
+
+
+def _role_colour(color: Optional[Color], role: Optional[str]) -> Optional[Color]:
+    """The effective colour for an item: its explicit colour, else its CUA role's
+    default colour, else None."""
+    return color if color is not None else _CUA_COLORS.get(role)
+
+
 def _emit_field_start(buf: bytearray, fa: int,
                       color: Optional[Color], highlight: Optional[Highlight]) -> None:
     """Emit a field start into ``buf``.
@@ -137,12 +164,15 @@ class Text:
     intensity: DisplayIntensity = DisplayIntensity.NORMAL
     color: Optional[Color] = None
     highlight: Optional[Highlight] = None
+    # CUA element role (e.g. "title", "num") → a default colour on colour
+    # terminals. Not part of identity: two items that render alike are equal.
+    role: Optional[str] = _dc_field(default=None, compare=False)
 
     def render(self, buf: bytearray, color: bool = False, cols: int = 80) -> None:
         _emit_sba(buf, self.row, self.col, cols)
         fa = field_attribute(display=self.intensity, protected=True)
         _emit_field_start(buf, fa,
-                          self.color if color else None,
+                          _role_colour(self.color, self.role) if color else None,
                           self.highlight if color else None)
         buf.extend(to_ebcdic(self.text))
 
@@ -171,6 +201,7 @@ class Field:
     terminator: bool = True
     color: Optional[Color] = None
     highlight: Optional[Highlight] = None
+    role: Optional[str] = _dc_field(default=None, compare=False)
 
     @property
     def data_addr(self) -> int:
@@ -191,7 +222,7 @@ class Field:
         # would be pointless and could fight the non-display intensity.
         _emit_field_start(
             buf, fa,
-            self.color if (color and not self.hidden) else None,
+            _role_colour(self.color, self.role) if (color and not self.hidden) else None,
             self.highlight if (color and not self.hidden) else None,
         )
         buf.extend(to_ebcdic(self.default.ljust(self.length)[: self.length]))
