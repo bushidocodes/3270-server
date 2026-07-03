@@ -901,6 +901,43 @@ def test_area_flows_rows_and_derives_fldcol():
     assert (s.items[3].row, s.items[3].col, s.items[3].name) == (6, 16, "pw")
 
 
+def test_dtacol_aligns_entries_at_a_fixed_prompt_column():
+    # <dtacol pmtwidth=20>: each field's entry starts at col + pmtwidth,
+    # regardless of caption length (the DTL data-column layout).
+    s = load_dtl(
+        '<panel name="books1">Book Title Search'
+        '<area><dtacol pmtwidth="20">'
+        '<dtafld entwidth="40" datavar="author">Author</dtafld>'
+        '<dtafld entwidth="10" datavar="catnum">Catalog number</dtafld>'
+        '</dtacol></area></panel>'
+    )
+    fields = [i for i in s.items if isinstance(i, Field)]
+    assert [(f.col, f.length, f.name) for f in fields] == [(21, 40, "author"),
+                                                           (21, 10, "catnum")]
+
+
+def test_dtacol_supplies_default_entry_width():
+    s = load_dtl(
+        '<panel><area><dtacol pmtwidth="12" entwidth="25">'
+        '<dtafld datavar="name">Name</dtafld>'          # no entwidth → inherits 25
+        '</dtacol></area></panel>'
+    )
+    field = next(i for i in s.items if isinstance(i, Field))
+    assert field.length == 25 and field.col == 13
+
+
+def test_divider_draws_a_rule_across_the_flow():
+    s = load_dtl(
+        '<panel><area row="4" col="1"><info>above</info><divider>'
+        '<info>below</info></area></panel>'
+    )
+    texts = [i for i in s.items if isinstance(i, Text)]
+    assert texts[0] == Text(4, 1, "above", DisplayIntensity.NORMAL)
+    rule = texts[1]
+    assert rule.row == 5 and rule.col == 1 and set(rule.text) == {"-"}
+    assert texts[2] == Text(6, 1, "below", DisplayIntensity.NORMAL)  # flow resumed
+
+
 def test_area_explicit_position_wins_and_continues_flow():
     s = load_dtl(
         '<panel><area row="5" col="1">'
@@ -1132,9 +1169,12 @@ def test_explicit_numeric_attr_overrides_varclass():
     assert s.items[1].numeric is True   # field attribute wins over the class
 
 
-def test_vardcl_outside_varlist_raises():
-    with pytest.raises(DTLError):
-        load_dtl('<panel><vardcl name="x" varclass="C"/></panel>')
+def test_vardcl_outside_varlist_is_tolerated():
+    # A stray <vardcl> (some guide examples begin mid-declaration) is ignored
+    # rather than aborting the panel: the panel still renders its body.
+    s = load_dtl('<panel><vardcl name="x" varclass="C"/>'
+                 '<info row="1" col="1">HELLO</info></panel>')
+    assert any(getattr(i, "text", None) == "HELLO" for i in s.items)
 
 
 def test_varclass_missing_name_raises():
