@@ -175,7 +175,9 @@ DTL's other colour mechanism, the **data area** (`<da>` with nested `<attr>`), i
 
 ### Query / Query Reply (structured fields)
 
-The TERMINAL-TYPE string is only a hint. In **basic TN3270** the authoritative way to learn a terminal's real geometry and capabilities is the 3270 **Query**: the host sends a Write Structured Field carrying a Read Partition (Query) request (`F3 00 05 01 FF 02`), and the terminal answers with an inbound **AID `0x88`** followed by Query Reply structured fields describing its usable area, colour, highlighting, and more. The server sends this query to extended (`-E`) basic-TN3270 terminals, waits only briefly for the reply (so a terminal that ignores it can't stall the session), then parses it (`parse_query_reply`) and reconciles it into the negotiated `TerminalModel`. Under **TN3270E** the Query is skipped — the `DEVICE-TYPE` sub-negotiation has already identified the terminal, and real TN3270E emulators (ws3270) don't answer a Read Partition Query, so sending one would only delay the first screen.
+The TERMINAL-TYPE string is only a hint. In **basic TN3270** the authoritative way to learn a terminal's real geometry and capabilities is the 3270 **Query**: the host sends a Write Structured Field carrying a Read Partition request, and the terminal answers with an inbound **AID `0x88`** followed by Query Reply structured fields describing its usable area, colour, highlighting, and more. The server sends a **Query List (All)** (`F3 00 06 01 FF 03 80`), asking the terminal to enumerate its whole capability set; the reply's **Summary** (QCODE `0x80`) lists every QCODE it supports — so capabilities a terminal advertises only there (e.g. highlighting) are discovered even when no standalone reply is returned. `parse_query_reply` records the full QCODE set (`TerminalModel.query_caps`), the usable area, and — authoritatively — colour support, so a terminal that answers but does *not* report colour overrides the type-string guess. The query is sent to extended (`-E`) basic-TN3270 terminals only, waiting briefly for the reply so a terminal that ignores it can't stall the session.
+
+The WSF stream is **IAC-escaped** before sending: its partition byte is `0xFF`, which the Telnet layer would otherwise read as an IAC command — an unescaped query is silently rejected by the terminal (`WriteStructuredField error`) and never answered, which is why the query never actually worked against a real terminal before. The reply is likewise un-escaped on receive (`read_record` collapses `IAC IAC` → `0xFF`), since Query Replies are full of `0xFF` colour values. Under **TN3270E** the Query is skipped — the `DEVICE-TYPE` sub-negotiation has already identified the terminal, and real TN3270E emulators (ws3270) don't answer a Read Partition Query, so sending one would only delay the first screen.
 
 ### Field parsing
 
@@ -222,7 +224,7 @@ Key functions:
 |----------|-------------|
 | `tn3270_negotiate` | Performs the Telnet option handshake and returns the negotiated `TerminalModel` |
 | `parse_terminal_type` | Classifies a TERMINAL-TYPE string (e.g. `IBM-3279-4-E`) into a `TerminalModel` (model 2–5, size, colour) |
-| `query_terminal` | Sends a Read Partition (Query) to an extended terminal and folds its Query Reply (real size, colour) into the `TerminalModel` |
+| `query_terminal` | Sends a Read Partition Query List (IAC-escaped) to an extended terminal and folds its Query Reply (real size, colour, advertised QCODEs) into the `TerminalModel` |
 | `parse_query_reply` | Parses an inbound Query Reply record (AID `0x88`) into a capabilities dict |
 | `dtl.load_panel` | Parses a `panels/*.dtl` source into a `Screen` |
 | `screen.Screen.render` | Renders a `Screen` to a 3270 data stream |

@@ -80,10 +80,12 @@ def _serve_one_client(tls_context=None):
     return port
 
 
-def _host_arg(port, tls=False):
-    """The emulator's host argument: plain ``host:port`` or, for implicit TLS,
-    the ``L:`` prefix that tells x3270 to wrap the connection in TLS."""
-    return f"L:127.0.0.1:{port}" if tls else f"127.0.0.1:{port}"
+def _host_arg(port, tls=False, basic=False):
+    """The emulator's host argument. ``tls`` prepends the ``L:`` prefix (implicit
+    TLS); ``basic`` prepends ``N:`` (no TN3270E) to force the basic-TN3270 path,
+    which is the only mode in which x3270 answers a Read Partition Query."""
+    prefix = ("L:" if tls else "") + ("N:" if basic else "")
+    return f"{prefix}127.0.0.1:{port}"
 
 
 def _drive(port, actions, model="2", tls=False):
@@ -108,11 +110,12 @@ def _drive(port, actions, model="2", tls=False):
     return proc.stdout + proc.stderr
 
 
-def _drive_traced(port, actions, model="2"):
+def _drive_traced(port, actions, model="2", basic=False):
     """Like :func:`_drive`, but also captures the emulator's protocol trace and
     returns ``(output, trace_text)``. The trace records exactly what the emulator
     SENT and RCVD on the wire, so assertions on it are deterministic — unlike
-    ``Ascii()`` screen dumps, which race the emulator's own screen rendering."""
+    ``Ascii()`` screen dumps, which race the emulator's own screen rendering.
+    ``basic`` forces the basic-TN3270 (``N:``) path."""
     with tempfile.NamedTemporaryFile(
             prefix="ws3270-", suffix=".trace", delete=False) as tf:
         trace_path = tf.name
@@ -121,7 +124,7 @@ def _drive_traced(port, actions, model="2"):
         try:
             proc = subprocess.run(
                 [EMULATOR, "-model", model, "-trace", "-tracefile", trace_path,
-                 f"127.0.0.1:{port}"],
+                 _host_arg(port, basic=basic)],
                 input=script, capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=60,
             )
@@ -319,3 +322,26 @@ def test_ws3270_contention_resolution_negotiated_and_send_data_granted():
     assert "Dialog Test" in out, out[-1500:]
     # ...and the client never had to send a BID (we granted the send turn).
     assert "BID" not in trace, trace[-2000:]
+
+
+def test_ws3270_basic_mode_answers_read_partition_query():
+    """In basic TN3270 mode (the ``N:`` prefix) a real emulator answers the Read
+    Partition Query List, so the server discovers the terminal's capabilities.
+    This exercises the IAC-escaping fix: the query's 0xFF partition byte must be
+    doubled or the emulator rejects the structured field (a "WriteStructuredField
+    error") and never replies. Asserted on the emulator trace plus a full login."""
+    _require_emulator()
+    port = _serve_one_client()
+    out, trace = _drive_traced(port, [
+        "Wait(20,InputField)",
+        "String(IBMUSER)", "Tab()", "String(SYS1)", "Enter()",
+        "Wait(20,Unlock)",       # the ISPF menu (query didn't derail the session)
+        "Ascii()",
+        "Quit()",
+    ], basic=True)
+
+    # The emulator received and processed our (correctly IAC-escaped) query...
+    assert "ReadPartition" in trace, trace[-2000:]
+    assert "WriteStructuredField error" not in trace, trace[-2000:]
+    # ...and the session still reached the ISPF menu over the basic-TN3270 path.
+    assert "ISPF Primary Option Menu" in out, out[-1500:]
