@@ -1635,6 +1635,7 @@ def make_tls_context(certfile, keyfile=None):
     prefix (e.g. ``L:host:992``). ``keyfile`` may be ``None`` if the key is in
     ``certfile``."""
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2   # refuse the obsolete TLS 1.0/1.1
     ctx.load_cert_chain(certfile, keyfile)
     return ctx
 

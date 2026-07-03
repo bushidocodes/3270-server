@@ -24,8 +24,9 @@ def _client_tls_context():
     """A client context that accepts the self-signed test cert (like an emulator
     run with -noverifycert)."""
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2   # refuse the obsolete TLS 1.0/1.1
     ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    ctx.verify_mode = ssl.CERT_NONE                # self-signed test cert (like -noverifycert)
     return ctx
 
 
