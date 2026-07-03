@@ -36,6 +36,26 @@ def test_ra_stop_address_is_after_the_run():
     assert out[ra + 1:ra + 3] == server.encode_pack_addr(1, 21)
 
 
+def test_ra_stop_wraps_at_the_buffer_end():
+    # A full-width rule on the bottom row fills through the very last cell. The
+    # 3270 buffer is circular, so the RA stop must wrap to address 0 rather than
+    # encode cols*rows (1920 on a 24x80 screen), which real terminals reject as
+    # "RA address 1920 > maximum 1919".
+    buf = bytearray()
+    Text(23, 0, "-" * 79).render(buf, cols=80, rows=24)   # ends at cell 1919
+    ra = buf.index(RA)
+    assert buf[ra + 1:ra + 3] == server.encode_pack_addr(0, 0)   # stop = address 0
+
+
+def test_ra_stop_wraps_on_the_alternate_screen():
+    # Same boundary on a model-3 (32x80) alternate screen: the last cell is 2559,
+    # so a bottom-row rule wraps its stop to 0 against the 2560-cell buffer.
+    buf = bytearray()
+    Text(31, 0, "-" * 79).render(buf, cols=80, rows=32)
+    ra = buf.index(RA)
+    assert buf[ra + 1:ra + 3] == server.encode_pack_addr(0, 0)
+
+
 def test_short_run_stays_literal():
     # A run shorter than the break-even threshold is cheaper as literal bytes.
     out = _render(Text(1, 0, "-" * (_RA_MIN_RUN - 1)))

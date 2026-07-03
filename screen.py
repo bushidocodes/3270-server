@@ -192,9 +192,17 @@ def _emit_sba(buf: bytearray, row: int, col: int, cols: int = 80) -> None:
     buf.extend(encode_pack_addr(row, col, cols))
 
 
-def _emit_ra(buf: bytearray, stop: int, char_byte: int, cols: int = 80) -> None:
+def _emit_ra(buf: bytearray, stop: int, char_byte: int,
+             cols: int = 80, rows: int = 24) -> None:
     """Repeat ``char_byte`` from the current buffer position up to (not
-    including) the linear ``stop`` address."""
+    including) the linear ``stop`` address.
+
+    The 3270 buffer is circular, so a run that fills through the very last cell
+    stops at address 0, not one past the end: ``stop`` is taken modulo the buffer
+    size. Without this a full-width rule on the bottom row would encode a stop
+    address of ``cols*rows`` (e.g. 1920 on a 24x80 screen), which real terminals
+    reject as "RA address 1920 > maximum 1919"."""
+    stop %= cols * rows
     buf.append(RA)
     buf.extend(encode_pack_addr(stop // cols, stop % cols, cols))
     buf.append(char_byte)
@@ -236,7 +244,8 @@ class Text:
         return cls(row, col, "".join(t for t, _, _ in norm), intensity=intensity,
                    role=role, color=color, highlight=highlight, runs=norm)
 
-    def render(self, buf: bytearray, color: bool = False, cols: int = 80) -> None:
+    def render(self, buf: bytearray, color: bool = False, cols: int = 80,
+               rows: int = 24) -> None:
         _emit_sba(buf, self.row, self.col, cols)
         fa = field_attribute(display=self.intensity, protected=True)
         base_color = _role_colour(self.color, self.role) if color else None
@@ -249,7 +258,8 @@ class Text:
             # single RA order instead of one byte per character. The field start
             # occupies self.col, so the run begins at self.col + 1.
             start = self.row * cols + self.col + 1
-            _emit_ra(buf, start + len(self.text), to_ebcdic(self.text[0])[0], cols)
+            _emit_ra(buf, start + len(self.text), to_ebcdic(self.text[0])[0],
+                     cols, rows)
         else:
             buf.extend(to_ebcdic(self.text))
 
@@ -285,7 +295,8 @@ class Field:
         """Linear buffer address (row*80 + col) where this field's data starts."""
         return self.row * 80 + (self.col + 1)
 
-    def render(self, buf: bytearray, color: bool = False, cols: int = 80) -> None:
+    def render(self, buf: bytearray, color: bool = False, cols: int = 80,
+               rows: int = 24) -> None:
         display = DisplayIntensity.NON_DISPLAY if self.hidden else self.intensity
         ftype = FieldType.NUMERIC if self.numeric else FieldType.ALPHANUMERIC
         _emit_sba(buf, self.row, self.col, cols)
@@ -474,7 +485,7 @@ class Screen:
             )
         )
         for item in self.items:
-            item.render(buf, color=color, cols=self.width)
+            item.render(buf, color=color, cols=self.width, rows=self.depth)
         if self.cursor_at is not None:
             _emit_sba(buf, self.cursor_at[0], self.cursor_at[1], self.width)
             buf.append(IC)
@@ -501,7 +512,7 @@ class Screen:
             )
         )
         for item in items:
-            item.render(buf, color=color, cols=self.width)
+            item.render(buf, color=color, cols=self.width, rows=self.depth)
         if cursor_at is not None:
             _emit_sba(buf, cursor_at[0], cursor_at[1], self.width)
             buf.append(IC)
