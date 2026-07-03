@@ -112,28 +112,130 @@ E_REJECT = 6
 E_REQUEST = 7
 E_SEND = 8
 
-# TN3270E DATA-TYPE header byte values.
+# TN3270E DATA-TYPE header byte values (header byte 0).
 E_DT_3270_DATA = 0x00
+E_DT_RESPONSE = 0x02
 
-# The 5-byte outbound header for a normal 3270 data message: 3270-DATA,
-# REQUEST-FLAG 0, RESPONSE-FLAG 0 (no response needed), SEQ-NUMBER 0.
-TN3270E_DATA_HEADER = bytes([E_DT_3270_DATA, 0x00, 0x00, 0x00, 0x00])
+# RESPONSE-FLAG (header byte 2). Outbound it asks whether the client should
+# acknowledge; inbound (on a RESPONSE message) it says whether the ack is good.
+E_RSF_NO_RESPONSE = 0x00
+E_RSF_ERROR_RESPONSE = 0x01
+E_RSF_ALWAYS_RESPONSE = 0x02
+E_RSF_POSITIVE = 0x00     # inbound: positive response (record processed)
+E_RSF_NEGATIVE = 0x01     # inbound: negative response (error; body = sense code)
+
+# TN3270E FUNCTIONS (negotiable capabilities). We support RESPONSES only.
+E_FUNC_BIND_IMAGE = 0
+E_FUNC_DATA_STREAM_CTL = 1
+E_FUNC_RESPONSES = 2
+E_FUNC_SCS_CTL_CODES = 3
+E_FUNC_SYSREQ = 4
+E_SUPPORTED_FUNCTIONS = frozenset({E_FUNC_RESPONSES})
+
+
+def _strip_leading_telnet(rec: bytes) -> bytes:
+    """Drop any leading Telnet command sequences from a framed record.
+
+    A client's option replies can still be arriving as negotiation ends and land
+    ahead of the first data record (they carry no ``IAC EOR``, so they frame
+    together with the record that follows). They are already-agreed replies to our
+    own offer, so we simply skip them: a triplet (``IAC WILL/WONT/DO/DONT opt``)
+    is 3 bytes, an ``IAC SB … IAC SE`` runs to its ``SE``. A real 3270 record
+    begins with a header byte (not ``IAC``), so this is a no-op for normal data.
+    """
+    WILL, WONT, DO, DONT = 251, 252, 253, 254
+    i = 0
+    while i < len(rec) and rec[i] == IAC:
+        if i + 1 >= len(rec):
+            break
+        c = rec[i + 1]
+        if c in (WILL, WONT, DO, DONT):
+            i += 3
+        elif c == SB:
+            se = rec.find(bytes([IAC, SE]), i + 2)
+            i = se + 2 if se != -1 else len(rec)
+        else:
+            i += 2
+    return rec[i:]
 
 
 class TN3270EStream:
     """A socket wrapper that frames outbound records with the TN3270E 5-byte
     data header, so screen-sending code needn't know TN3270E is in effect.
 
-    Only outbound framing lives here; inbound header stripping happens in
-    :func:`read_record`, which knows where a record ends (at IAC EOR). The
-    wrapper is otherwise a transparent pass-through to the underlying socket.
+    When the RESPONSES function was negotiated, each outbound record asks the
+    client to acknowledge it (RESPONSE-FLAG = ALWAYS) under an incrementing
+    sequence number, and the client's RESPONSE messages are consumed and logged
+    here (see :meth:`on_response`, driven from :func:`read_record`) rather than
+    being mistaken for screen input. Inbound header stripping happens in
+    ``read_record``, which knows where a record ends (at IAC EOR).
     """
 
-    def __init__(self, sock):
+    def __init__(self, sock, responses=False):
         self._sock = sock
+        self.responses = responses   # RESPONSES function negotiated?
+        self._seq = 0                # outbound sequence number (mod 2^16)
+        self.last_response = None    # (seq, positive_bool, code) of the last ack
+        self._rxbuf = bytearray()    # inbound bytes not yet framed into records
 
     def sendall(self, data):
-        self._sock.sendall(TN3270E_DATA_HEADER + data)
+        if self.responses:
+            # Ask the client to acknowledge this record under a fresh sequence.
+            self._seq = (self._seq + 1) & 0xFFFF
+            header = bytes([E_DT_3270_DATA, 0x00, E_RSF_ALWAYS_RESPONSE,
+                            (self._seq >> 8) & 0xFF, self._seq & 0xFF])
+        else:
+            # No RESPONSES function: no response wanted, sequence number 0.
+            header = bytes([E_DT_3270_DATA, 0x00, E_RSF_NO_RESPONSE, 0x00, 0x00])
+        self._sock.sendall(header + data)
+
+    def on_response(self, payload: bytes):
+        """Record a client RESPONSE message (already includes its 5-byte header).
+        Byte 2 is positive/negative; bytes 3-4 the acked sequence number; any
+        body byte is the sense/response code."""
+        positive = len(payload) > 2 and payload[2] == E_RSF_POSITIVE
+        seq = (payload[3] << 8 | payload[4]) if len(payload) >= 5 else None
+        code = payload[5] if len(payload) >= 6 else None
+        self.last_response = (seq, positive, code)
+        kind = "positive" if positive else "negative"
+        print(f"TN3270E {kind} response for seq {seq}"
+              + (f", code {hex(code)}" if code is not None else ""))
+
+    def next_data_record(self):
+        """Return the next inbound 3270-DATA record's payload (header stripped),
+        or ``None`` on disconnect. RESPONSE messages are consumed (and logged) in
+        passing, so they are never returned as input. Records are framed one at a
+        time from ``_rxbuf``, so a RESPONSE and an AID reply arriving in the same
+        TCP segment are handled correctly (the reply is kept for the next call)."""
+        while True:
+            rec = self._next_raw_record()
+            if rec is None:
+                return None
+            rec = _strip_leading_telnet(rec)   # drop any late negotiation bytes
+            if not rec:
+                continue
+            if rec[:1] == bytes([E_DT_RESPONSE]):
+                self.on_response(rec)
+                continue
+            return rec[5:]   # strip the 5-byte TN3270E header off the 3270 data
+
+    def _next_raw_record(self):
+        """One raw record (bytes before its IAC EOR) from ``_rxbuf``, reading
+        from the socket as needed. Leftover bytes past the first IAC EOR stay in
+        ``_rxbuf`` for the next call."""
+        while True:
+            idx = self._rxbuf.find(bytes([IAC, EOR]))
+            if idx != -1:
+                rec = bytes(self._rxbuf[:idx])
+                del self._rxbuf[:idx + 2]
+                return rec
+            if len(self._rxbuf) > MAX_BUFFER_SIZE:
+                print(f"WARNING: client buffer exceeded {MAX_BUFFER_SIZE} bytes; closing connection")
+                return None
+            chunk = self._sock.recv(1024)
+            if not chunk:
+                return None
+            self._rxbuf.extend(chunk)
 
     def recv(self, n):
         return self._sock.recv(n)
@@ -191,7 +293,8 @@ class TerminalModel:
     color: bool = False     # 3279-family device: colour-capable
     default_rows: int = 24
     default_cols: int = 80
-    tn3270e: bool = False   # TN3270E (RFC 2355) negotiated for this session
+    tn3270e: bool = False            # TN3270E (RFC 2355) negotiated for this session
+    tn3270e_responses: bool = False  # TN3270E RESPONSES function agreed
 
 
 def parse_terminal_type(term_type: str) -> TerminalModel:
@@ -842,6 +945,11 @@ def read_record(client_socket):
     Shared by :func:`read_client_input` (AID replies) and :func:`query_terminal`
     (structured-field Query replies), which decode the payload differently.
     """
+    # In TN3270E the wrapper frames records (one at a time, handling headers and
+    # RESPONSE acknowledgements) since records can pipeline.
+    if isinstance(client_socket, TN3270EStream):
+        return client_socket.next_data_record()
+
     buffer = bytearray()
     while True:
         data = client_socket.recv(1024)
@@ -852,10 +960,7 @@ def read_record(client_socket):
             print(f"WARNING: client buffer exceeded {MAX_BUFFER_SIZE} bytes; closing connection")
             return None
         if len(buffer) >= 2 and buffer[-2:] == bytes([IAC, EOR]):
-            payload = bytes(buffer[:-2])
-            if isinstance(client_socket, TN3270EStream):
-                payload = payload[5:]  # strip the inbound TN3270E 5-byte header
-            return payload
+            return bytes(buffer[:-2])
 
 
 def read_client_input(client_socket):
@@ -918,7 +1023,7 @@ def tn3270_negotiate(client_socket):
 
     got_binary = got_eor = got_term = False
     e_state = "unknown"          # "unknown" until the client accepts/refuses
-    got_device = got_functions = False
+    got_device = got_functions = responses = False
     term_type = None
 
     negot = bytearray()
@@ -932,6 +1037,11 @@ def tn3270_negotiate(client_socket):
 
     client_socket.settimeout(60.0)
     buffer = bytearray()
+    # Options we have already offered/agreed, so we don't re-acknowledge the
+    # client's reply to our own offer — re-acking would ping-pong forever and
+    # leave stray bytes ahead of the data stream.
+    offered_will = {BINARY, EOR_OPT, TERMINAL_TYPE}
+    offered_do = {BINARY, EOR_OPT, TERMINAL_TYPE, TN3270E}
 
     def done():
         if e_state == "active":
@@ -961,27 +1071,33 @@ def tn3270_negotiate(client_socket):
                     break  # incomplete triplet
                 opt = buffer[i + 2]
                 if opt == TN3270E:
-                    if cmd == WILL:
+                    if cmd == WILL and e_state != "active":
                         e_state = "active"
                         _send_e_sb(client_socket, bytes([E_SEND, E_DEVICE_TYPE]))
                     elif cmd == WONT and e_state != "active":
                         e_state = "off"
-                    elif cmd == DO:
-                        client_socket.sendall(bytes([IAC, WILL, TN3270E]))
-                elif cmd == DO:
-                    client_socket.sendall(bytes([IAC, WILL, opt]))
-                    if opt in (BINARY, EOR_OPT):
-                        got_binary = got_binary or opt == BINARY
-                        got_eor = got_eor or opt == EOR_OPT
                 elif cmd == WILL:
-                    client_socket.sendall(bytes([IAC, DO, opt]))
-                    if opt in (BINARY, EOR_OPT):
-                        got_binary = got_binary or opt == BINARY
-                        got_eor = got_eor or opt == EOR_OPT
+                    # Client agrees to (or offers) opt. Ack with DO only if we did
+                    # not already offer/agree it (else we loop).
+                    if opt not in offered_do:
+                        client_socket.sendall(bytes([IAC, DO, opt]))
+                        offered_do.add(opt)
+                    got_binary = got_binary or opt == BINARY
+                    got_eor = got_eor or opt == EOR_OPT
+                elif cmd == DO:
+                    if opt not in offered_will:
+                        client_socket.sendall(bytes([IAC, WILL, opt]))
+                        offered_will.add(opt)
+                    got_binary = got_binary or opt == BINARY
+                    got_eor = got_eor or opt == EOR_OPT
                 elif cmd == DONT:
-                    client_socket.sendall(bytes([IAC, WONT, opt]))
+                    if opt in offered_will:
+                        client_socket.sendall(bytes([IAC, WONT, opt]))
+                        offered_will.discard(opt)
                 elif cmd == WONT:
-                    client_socket.sendall(bytes([IAC, DONT, opt]))
+                    if opt in offered_do:
+                        client_socket.sendall(bytes([IAC, DONT, opt]))
+                        offered_do.discard(opt)
                 i += 3
                 continue
 
@@ -1001,10 +1117,12 @@ def tn3270_negotiate(client_socket):
                         print("Client terminal type:", term_type)
                         got_term = True
                 elif opt == TN3270E and len(sub) >= 2:
-                    got_device, got_functions, dtype = _handle_tn3270e_sb(
+                    got_device, got_functions, dtype, resp = _handle_tn3270e_sb(
                         client_socket, sub, got_device, got_functions)
                     if dtype is not None:
                         term_type = dtype
+                    if resp is not None:
+                        responses = resp
                 i = se_pos + 2
                 continue
 
@@ -1014,26 +1132,28 @@ def tn3270_negotiate(client_socket):
     e_active = e_state == "active"
     model = parse_terminal_type(term_type)
     if e_active:
-        model = replace(model, tn3270e=True)
+        model = replace(model, tn3270e=True, tn3270e_responses=responses)
     print("Negotiation complete: binary={}, eor={}, tn3270e={}, device={}".format(
         got_binary, got_eor, e_active, model.term_type))
     print(f"Terminal model: {model.term_type} "
           f"(model {model.model}, alt {model.alt_rows}x{model.alt_cols}, "
           f"{'colour' if model.color else 'mono'}"
           f"{', extended' if model.extended else ''}"
-          f"{', TN3270E' if e_active else ''})")
+          f"{', TN3270E' if e_active else ''}"
+          f"{', RESPONSES' if e_active and responses else ''})")
     return model
 
 
 def _handle_tn3270e_sb(sock, sub: bytes, got_device: bool, got_functions: bool):
     """Handle one inbound TN3270E sub-negotiation message (``sub`` is the bytes
     after ``IAC SB TN3270E``). Returns ``(got_device, got_functions, device_type
-    or None)``.
+    or None, responses or None)`` — ``responses`` is the agreed RESPONSES state
+    when this message settles FUNCTIONS, else ``None``.
 
     DEVICE-TYPE REQUEST → we answer DEVICE-TYPE IS (echoing the type, assigning a
-    device name) and kick off FUNCTIONS by proposing an empty set. FUNCTIONS
-    REQUEST → we answer FUNCTIONS IS (empty: we support no optional functions).
-    FUNCTIONS IS → the client agreed to our proposed set.
+    device name) and propose the FUNCTIONS we support (RESPONSES). FUNCTIONS
+    REQUEST → we answer FUNCTIONS IS with the intersection of the client's list
+    and what we support. FUNCTIONS IS → the client's agreed set.
     """
     category, action = sub[0], sub[1]
     if category == E_DEVICE_TYPE and action == E_REQUEST:
@@ -1042,14 +1162,16 @@ def _handle_tn3270e_sb(sock, sub: bytes, got_device: bool, got_functions: bool):
         device_type = devtype.decode(errors="ignore").strip()
         _send_e_sb(sock, bytes([E_DEVICE_TYPE, E_IS]) + devtype
                    + bytes([E_CONNECT]) + b"IBMTCP01")
-        _send_e_sb(sock, bytes([E_FUNCTIONS, E_REQUEST]))   # propose no functions
-        return True, got_functions, device_type
+        _send_e_sb(sock, bytes([E_FUNCTIONS, E_REQUEST]) + bytes(sorted(E_SUPPORTED_FUNCTIONS)))
+        return True, got_functions, device_type, None
     if category == E_FUNCTIONS and action == E_IS:
-        return got_device, True, None
+        responses = E_FUNC_RESPONSES in sub[2:]
+        return got_device, True, None, responses
     if category == E_FUNCTIONS and action == E_REQUEST:
-        _send_e_sb(sock, bytes([E_FUNCTIONS, E_IS]))        # agree: no functions
-        return got_device, True, None
-    return got_device, got_functions, None
+        agreed = sorted(set(sub[2:]) & E_SUPPORTED_FUNCTIONS)
+        _send_e_sb(sock, bytes([E_FUNCTIONS, E_IS]) + bytes(agreed))
+        return got_device, True, None, E_FUNC_RESPONSES in agreed
+    return got_device, got_functions, None, None
 
 
 # ISPF commands that leave the current panel. A panel's <keyl> binds function
@@ -1088,7 +1210,7 @@ def handle_client(client_socket, addr):
     # framed with the 5-byte data header (and inbound headers are stripped in
     # read_record) — transparently to all the screen-sending code below.
     if model.tn3270e:
-        client_socket = TN3270EStream(client_socket)
+        client_socket = TN3270EStream(client_socket, responses=model.tn3270e_responses)
     # Ask an extended terminal to describe itself (real size, colour); a base
     # terminal is left untouched. Uses the 60s negotiation timeout still in
     # effect, so a silent client can't wedge the session before the 600s below.
