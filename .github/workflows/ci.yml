@@ -21,5 +21,15 @@ jobs:
       - name: Install dependencies
         run: pip install pytest
 
+      - name: Install s3270 (3270 emulator for the real-terminal smoke test)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y s3270
+          which s3270   # fail the job if the emulator did not install
+
       - name: Run pytest
         run: pytest -v
+        env:
+          # Turn a missing emulator into a failure (not a silent skip), so a
+          # broken install is caught rather than passing quietly.
+          REQUIRE_EMULATOR: "1"

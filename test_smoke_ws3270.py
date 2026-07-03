@@ -39,8 +39,17 @@ def _find_emulator():
 
 
 EMULATOR = _find_emulator()
-pytestmark = pytest.mark.skipif(
-    EMULATOR is None, reason="no ws3270/s3270 emulator installed")
+
+
+def _require_emulator():
+    """The emulator path, or skip/fail. Normally a missing emulator skips the
+    test; setting ``REQUIRE_EMULATOR=1`` (CI does) turns it into a failure
+    instead, so a broken install is caught loudly rather than passing silently."""
+    if EMULATOR:
+        return EMULATOR
+    if os.environ.get("REQUIRE_EMULATOR") == "1":
+        pytest.fail("REQUIRE_EMULATOR=1 but no ws3270/s3270 emulator was found on PATH")
+    pytest.skip("no ws3270/s3270 emulator installed")
 
 
 def _serve_one_client():
@@ -85,6 +94,7 @@ def _drive(port, actions):
 
 def test_ws3270_logs_in_and_navigates():
     """A real emulator negotiates, logs in, and drives the ISPF panels."""
+    _require_emulator()
     port = _serve_one_client()
     out = _drive(port, [
         "Wait(20,InputField)",
