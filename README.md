@@ -282,6 +282,15 @@ down from the top), the parser honours DTL's **omitted end tags**, and text/list
 87** of 145. The rest still need more tags (list fields, action processing) tracked in the repo's
 issues, and the test ratchets a non-regressing renderable count as features land.
 
+### Real-emulator smoke test
+
+Most tests drive the server with a synthetic in-process client — fast, but a synthetic client can
+pass while the server is broken against a real terminal (the Read Partition Query hang was exactly
+that). `test_smoke_ws3270.py` boots the real server and connects an actual `ws3270`/`s3270`
+emulator to it, logging in and navigating the ISPF panels, so the full TN3270E negotiation, header
+framing, and session loop are exercised end-to-end. It skips automatically when no emulator is
+installed, so it never blocks a machine that doesn't have one.
+
 ## Extending
 
 To change a screen, **edit its `.dtl` file** — no Python changes needed. To add a new screen,
