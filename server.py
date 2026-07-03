@@ -393,26 +393,35 @@ def parse_query_reply(record: bytes) -> dict:
     return caps
 
 
+# How long to wait for a Query Reply before giving up. A terminal that answers
+# does so at once; one that ignores the Query must not stall the session — the
+# negotiation's 60s timeout would.
+QUERY_REPLY_TIMEOUT = 2.0
+
+
 def query_terminal(client_socket, model: "TerminalModel") -> "TerminalModel":
     """Ask an extended-data-stream terminal to describe itself and fold the
     reply into ``model``.
 
-    Only extended (``-E``) terminals are queried — a base terminal may not
-    answer, and we must not block the session waiting for a reply it will never
-    send. The reply's usable area becomes the model's authoritative alternate
-    size (resolving IBM-DYNAMIC), and a Color Query Reply confirms colour
-    support. On any error, silence, or non-reply, ``model`` is returned
-    unchanged.
+    Sent only for **basic-TN3270** extended (``-E``) terminals. Under TN3270E the
+    DEVICE-TYPE sub-negotiation has already identified the terminal, and real
+    TN3270E emulators (e.g. ws3270) do not answer a Read Partition Query — sending
+    one there only stalls the session — so it is skipped. We also wait only
+    briefly for the reply (:data:`QUERY_REPLY_TIMEOUT`) so a base terminal that
+    ignores the Query can't block. The reply's usable area becomes the model's
+    authoritative alternate size, and a Color Query Reply confirms colour support.
+    On any error, silence, or non-reply, ``model`` is returned unchanged.
     """
-    if not model.extended:
+    if not model.extended or model.tn3270e:
         return model
     # Frame the WSF stream as a 3270 record: terminate it with IAC EOR the way
     # every outbound screen is (see screen.Screen.render), or the client will
     # keep waiting for the end of the record and never reply.
-    record_out = read_partition_query() + bytes([IAC, EOR])
+    query = read_partition_query() + bytes([IAC, EOR])
     try:
-        print("TX:", binascii.hexlify(record_out))
-        client_socket.sendall(record_out)
+        print("TX:", binascii.hexlify(query))
+        client_socket.settimeout(QUERY_REPLY_TIMEOUT)
+        client_socket.sendall(query)
         record = read_record(client_socket)
     except OSError:
         return model

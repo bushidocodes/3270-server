@@ -102,6 +102,27 @@ def test_query_terminal_skips_base_terminal():
         cli.close()
 
 
+def test_query_terminal_skips_tn3270e_terminal():
+    """A TN3270E terminal is never queried: the DEVICE-TYPE sub-negotiation
+    already identified it, and real TN3270E emulators (ws3270) don't answer a
+    Read Partition Query — so sending one would only stall the session. No bytes
+    are sent and the model is returned unchanged."""
+    srv, cli = socket.socketpair()
+    try:
+        base = server.parse_terminal_type("IBM-3278-2-E")   # extended
+        model = server.replace(base, tn3270e=True)          # ...but over TN3270E
+        out = server.query_terminal(srv, model)
+        assert out is model
+        cli.settimeout(0.2)
+        try:
+            assert cli.recv(16) == b""     # nothing was sent
+        except socket.timeout:
+            pass
+    finally:
+        srv.close()
+        cli.close()
+
+
 def test_query_terminal_folds_in_reply():
     """An extended terminal is queried; its reported usable area and colour
     replace the type-string guess in the returned model."""
