@@ -736,22 +736,32 @@ def _show_view(client_socket, entry_panel: str = "viewentry", verb: str = "BROWS
             msg = f"MEMBER {member.upper()} NOT FOUND"
 
 
-def _show_member_list(client_socket):
+def _show_member_list(client_socket, model=None):
     """Utilities -> Library (3.1): the panel-library member list, with ISPF
     point-and-shoot — put the cursor on a member row and press Enter to browse
-    that member's source. PF7/PF8 page the list; PF3/PF15 returns."""
+    that member's source. PF7/PF8 page the list; PF3/PF15 returns. On a larger
+    terminal (model 3/4/5) the list is drawn on the alternate screen, so more
+    members are shown per page."""
     from dtl import load_panel
-    from screen import Text
+    from screen import Text, DisplayIntensity
 
+    rows, cols = _screen_size(model)
+    alternate = rows > 24 or cols > 80
+    # The <lstfld> data rows start at row 6; leave the last two rows for the
+    # footer and its rule. That's 16 rows on a model 2, more on a larger screen.
+    page = rows - 8
     members = _library_members()
-    page = 16  # data rows 6..21; row 22 is the footer, row 23 the rule
     top = 0
     while True:
         top = max(0, min(top, max(0, len(members) - 1)))
         window = members[top:top + page]
         foot = (f"Member {top + 1}-{top + len(window)} of {len(members)}"
-                "     PF7=Up  PF8=Down  PF3=Exit")[:79]
-        screen = load_panel("memlist", rows=window, MEMFOOT=foot)
+                "     PF7=Up  PF8=Down  PF3=Exit")[:cols - 1]
+        screen = load_panel("memlist", rows=window,
+                            screen_rows=rows, screen_cols=cols)
+        screen.alternate = alternate
+        screen.add(Text(rows - 2, 0, foot, DisplayIntensity.HIGH))
+        screen.add(Text(rows - 1, 0, "-" * (cols - 1), DisplayIntensity.HIGH))
         # Map each rendered data row to its member (the member name renders as a
         # Text in the Name column); the cursor's row then selects the member.
         member_by_row = {}
@@ -769,11 +779,11 @@ def _show_member_list(client_socket):
         elif aid_str in ("PF7", "PF19"):
             top -= page
         elif aid_str == "Enter" and cursor is not None:
-            member = member_by_row.get(cursor // 80)
+            member = member_by_row.get(cursor // cols)   # width-aware row decode
             if member:
                 path = _member_path(member)
                 if path:
-                    _show_browse(client_socket, member, path)
+                    _show_browse(client_socket, member, path, model=model)
         # otherwise just redisplay the current page
 
 
@@ -1340,7 +1350,7 @@ def handle_client(client_socket, addr):
                 # dotted path (e.g. "3.1") jumps straight to the sub-option,
                 # ISPF-style, without stopping at the utility menu first.
                 _show_submenu(client_socket, "utility",
-                              leaves={"1": _show_member_list},
+                              leaves={"1": lambda cs: _show_member_list(cs, model=model)},
                               initial=tail)
                 short_msg = None
             elif option == "6":

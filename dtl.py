@@ -284,6 +284,11 @@ class _DTLParser(HTMLParser):
         self._rows = None         # data rows for the list field (datavar→value)
         self._subs = {}           # &NAME/%NAME substitution values (for COLOR=%var)
         self._da = None           # active <da> data area {row, col, attrs, body}
+        # Presentation-size overrides (rows/cols): when set, they win over the
+        # panel's declared/default size, so a panel can be laid out on a larger
+        # alternate screen (e.g. a member list showing more rows on a model 3/4).
+        self._override_rows = None
+        self._override_cols = None
 
     # ── colour / highlight attributes ────────────────────────────────────────
 
@@ -323,9 +328,13 @@ class _DTLParser(HTMLParser):
             # A top-level <help> is itself a (help) panel — same flow root.
             self.screen.title = a.get("title")
             self.screen.help = a.get("help")
-            if "width" in a:
+            if self._override_cols is not None:
+                self.screen.width = self._override_cols
+            elif "width" in a:
                 self.screen.width = int(a["width"])
-            if "depth" in a:
+            if self._override_rows is not None:
+                self.screen.depth = self._override_rows
+            elif "depth" in a:
                 self.screen.depth = int(a["depth"])
             # The panel itself is an implicit flow box: elements that omit
             # row/col flow down from the top. Explicit positions still win, so
@@ -1244,37 +1253,45 @@ class _DTLParser(HTMLParser):
         self._keylist[key.upper()] = cmd.upper()
 
 
-def load_dtl(source: str, rows=None, **subs) -> Screen:
+def load_dtl(source: str, rows=None, screen_rows=None, screen_cols=None,
+             **subs) -> Screen:
     """Parse DTL markup into a :class:`screen.Screen`.
 
     ``subs`` provides values for ``&NAME`` dialog-variable references in the
     source (e.g. ``ZUSER``, ``ZTIME``) before parsing. ``rows`` populates a
     ``<lstfld>`` list/table: a sequence of ``{datavar: value}`` mappings, one
     per model row (when omitted, a single empty model row is laid out).
+    ``screen_rows``/``screen_cols`` override the panel's presentation size (so a
+    list panel can lay out more rows on a larger alternate screen).
     """
     source = _resolve_entities(source)
     source = _substitute(source, subs)
     parser = _DTLParser()
     parser._rows = rows
     parser._subs = {k.upper(): v for k, v in (subs or {}).items()}
+    parser._override_rows = screen_rows
+    parser._override_cols = screen_cols
     parser.feed(source)
     parser.close()
     return parser.screen
 
 
-def load_panel(name: str, directory: str = None, rows=None, **subs) -> Screen:
+def load_panel(name: str, directory: str = None, rows=None,
+               screen_rows=None, screen_cols=None, **subs) -> Screen:
     """Load and parse ``<directory>/<name>.dtl``.
 
     ``directory`` defaults to the ``panels`` folder next to this module, so the
     panels resolve regardless of the process's current working directory.
-    ``rows`` populates a ``<lstfld>`` list/table (see :func:`load_dtl`).
+    ``rows`` populates a ``<lstfld>`` list/table (see :func:`load_dtl`);
+    ``screen_rows``/``screen_cols`` override the presentation size.
     """
     import os
     if directory is None:
         directory = os.path.join(os.path.dirname(os.path.abspath(__file__)), "panels")
     path = os.path.join(directory, f"{name}.dtl")
     with open(path, "r", encoding="utf-8") as fh:
-        return load_dtl(fh.read(), rows=rows, **subs)
+        return load_dtl(fh.read(), rows=rows, screen_rows=screen_rows,
+                        screen_cols=screen_cols, **subs)
 
 
 class MessageCatalog:

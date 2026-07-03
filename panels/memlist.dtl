@@ -17,9 +17,9 @@
       </lstgrp>
     </lstfld>
   </area>
-
-  <info row="22" col="0" intensity="high">&MEMFOOT</info>
-  <info row="23" col="0" intensity="high" fill="-" width="79"/>
+  <!-- The footer line (&MEMFOOT) and the rule below it are placed by the server
+       (server._show_member_list) on the last two rows of whatever screen we
+       render on, so a taller alternate screen lists more members per page. -->
 
   <keyl name="MEMKEYS">
     <keyi key="PF1" cmd="HELP">Help</keyi>
