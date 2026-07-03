@@ -17,6 +17,7 @@ import os
 import shutil
 import socket
 import subprocess
+import tempfile
 import threading
 
 import pytest
@@ -92,6 +93,33 @@ def _drive(port, actions, model="2"):
     return proc.stdout + proc.stderr
 
 
+def _drive_traced(port, actions, model="2"):
+    """Like :func:`_drive`, but also captures the emulator's protocol trace and
+    returns ``(output, trace_text)``. The trace records exactly what the emulator
+    SENT and RCVD on the wire, so assertions on it are deterministic — unlike
+    ``Ascii()`` screen dumps, which race the emulator's own screen rendering."""
+    with tempfile.NamedTemporaryFile(
+            prefix="ws3270-", suffix=".trace", delete=False) as tf:
+        trace_path = tf.name
+    try:
+        script = "\n".join(actions) + "\n"
+        try:
+            proc = subprocess.run(
+                [EMULATOR, "-model", model, "-trace", "-tracefile", trace_path,
+                 f"127.0.0.1:{port}"],
+                input=script, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=60,
+            )
+        except subprocess.TimeoutExpired as exc:
+            pytest.fail(f"emulator did not finish in time (possible session hang): "
+                        f"{(exc.output or '')[:500]}")
+        with open(trace_path, encoding="utf-8", errors="replace") as fh:
+            trace = fh.read()
+        return proc.stdout + proc.stderr, trace
+    finally:
+        os.unlink(trace_path)
+
+
 def test_ws3270_logs_in_and_navigates():
     """A real emulator negotiates, logs in, and drives the ISPF panels."""
     _require_emulator()
@@ -145,3 +173,59 @@ def test_ws3270_model_3_browse_uses_the_alternate_screen():
     # 32-row screen → 30 lines per page (row 0 header, last row footer). A model-2
     # (24-row) screen would show "Lines 1-22 of".
     assert "Lines 1-30 of" in out, out[-1200:]
+
+
+def test_ws3270_sysreq_enters_the_host_session():
+    """A real emulator's SysReq() sends Telnet AO; the server drops into the
+    SSCP-LU host session and sends our unformatted prompt, which the emulator
+    receives as SSCP-LU-DATA (it switches to SSCP mode).
+
+    Asserted on the emulator's protocol trace, which is deterministic. We only
+    assert the emulator-agnostic half of the round trip here — that SysReq maps
+    to AO and the server enters the SSCP session. The rest of the SSCP behaviour
+    (resume on a second SYSREQ, LOGOFF→UNBIND, COMMAND UNRECOGNIZED) is driven by
+    what the *server* does and is covered deterministically by the in-process
+    unit tests in test_tn3270e.py; scripting those steps through a real emulator
+    depends on its SSCP-mode input timing, which differs across ws3270/s3270."""
+    _require_emulator()
+    port = _serve_one_client()
+    _, trace = _drive_traced(port, [
+        "Wait(20,InputField)",
+        "String(IBMUSER)", "Tab()", "String(SYS1)", "Enter()",
+        "Wait(20,Unlock)",       # login fully processed, ISPF menu drawn
+        "SysReq()",              # press SYSREQ → Telnet AO → SSCP-LU session
+        # A guaranteed settle (Wait(Output) can return early on a stale flag): the
+        # emulator keeps pumping the socket during a timed wait, so it receives
+        # and processes our SSCP-LU-DATA before Quit().
+        "Wait(2,Seconds)",
+        "Quit()",
+    ])
+
+    # The real emulator sent SYSREQ as Telnet AO...
+    assert "SENT AO" in trace, trace[-2000:]
+    # ...and received our SSCP-LU-DATA prompt (the server entered the host session).
+    assert "RCVD TN3270E(SSCP-LU-DATA" in trace, trace[-2000:]
+
+
+def test_ws3270_bind_image_binds_and_enables_attn():
+    """With BIND-IMAGE negotiated the server sends an SNA BIND, which the real
+    emulator accepts (`RCVD TN3270E(BIND-IMAGE…)`, parsed without error). Being
+    bound is what lets the emulator's ATTN key reach us: `Attn()` then sends
+    Telnet IP, where before binding ws3270 would only lock its keyboard. Both are
+    asserted on the deterministic protocol trace."""
+    _require_emulator()
+    port = _serve_one_client()
+    _, trace = _drive_traced(port, [
+        "Wait(20,InputField)",
+        "String(IBMUSER)", "Tab()", "String(SYS1)", "Enter()",
+        "Wait(20,Unlock)",       # login fully processed, ISPF menu drawn
+        "Attn()",                # only sends IP once the session is bound
+        "Wait(5,Output)",        # the server redisplays in response
+        "Quit()",
+    ])
+
+    # The emulator received and accepted our BIND (no "invalid" in the parse)...
+    assert "RCVD TN3270E(BIND-IMAGE" in trace, trace[-2000:]
+    assert "< BIND " in trace and "invalid" not in trace.split("< BIND", 1)[1][:120]
+    # ...and, now bound, sent ATTN as Telnet IP.
+    assert "SENT IP" in trace, trace[-2000:]
