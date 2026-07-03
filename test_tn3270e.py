@@ -19,6 +19,8 @@ DO, DONT, WILL, WONT = 0xFD, 0xFE, 0xFB, 0xFC
 BINARY, TERMINAL_TYPE, EOR_OPT, TN3270E = 0, 24, 25, 40
 # TN3270E sub-commands
 E_CONNECT, E_DEVICE_TYPE, E_FUNCTIONS, E_IS, E_REQUEST, E_SEND = 1, 2, 3, 4, 7, 8
+E_DT_RESPONSE = 0x02       # RESPONSE data-type (inbound acknowledgement)
+E_FUNC_RESPONSES = 2       # the RESPONSES function code
 ENTER = 0x7D
 ERASE_WRITE = 0xF5
 HEADER = bytes([0x00, 0x00, 0x00, 0x00, 0x00])   # expected outbound data header
@@ -32,10 +34,11 @@ def _e_sb(sock, payload):
     sock.sendall(bytes([IAC, SB, TN3270E]) + bytes(payload) + bytes([IAC, SE]))
 
 
-def _negotiate_e(sock, devtype=b"IBM-3278-2"):
+def _negotiate_e(sock, devtype=b"IBM-3278-2", responses=False):
     """Drive the server's negotiation as a TN3270E client. Accepts TN3270E,
-    answers SEND DEVICE-TYPE with a DEVICE-TYPE REQUEST, and agrees an empty
-    FUNCTIONS set. Returns (leftover_bytes, device_is_seen)."""
+    answers SEND DEVICE-TYPE with a DEVICE-TYPE REQUEST, and settles FUNCTIONS —
+    agreeing the RESPONSES function when ``responses`` is set, else an empty set.
+    Returns (leftover_bytes, device_is_seen)."""
     buf = bytearray()
     seen_device_is = False
     deadline = time.time() + 10
@@ -68,7 +71,8 @@ def _negotiate_e(sock, devtype=b"IBM-3278-2"):
                 elif opt == TN3270E and sub[:2] == bytes([E_DEVICE_TYPE, E_IS]):
                     seen_device_is = True
                 elif opt == TN3270E and sub[:2] == bytes([E_FUNCTIONS, E_REQUEST]):
-                    _e_sb(sock, bytes([E_FUNCTIONS, E_IS]))               # agree: no functions
+                    funcs = bytes([E_FUNC_RESPONSES]) if responses else b""
+                    _e_sb(sock, bytes([E_FUNCTIONS, E_IS]) + funcs)       # agree the set
                 del buf[:se + 2]
             else:
                 del buf[:2]
@@ -102,6 +106,14 @@ def _reply_e(fields=None, aid=ENTER, cursor=0):
     for addr, text in (fields or {}).items():
         body += bytes([0x11]) + _pack(addr) + text.encode("cp037")
     return HEADER + bytes(body) + bytes([IAC, EOR])
+
+
+def _response_msg(seq, positive=True, code=0x00):
+    """A client RESPONSE message acknowledging record ``seq``: DATA-TYPE RESPONSE,
+    a positive/negative flag, the acked sequence, and a response/sense code."""
+    flag = 0x00 if positive else 0x01
+    header = bytes([E_DT_RESPONSE, 0x00, flag, (seq >> 8) & 0xFF, seq & 0xFF])
+    return header + bytes([code]) + bytes([IAC, EOR])
 
 
 @pytest.fixture
@@ -159,3 +171,49 @@ def test_tn3270e_dynamic_device_type(e_session):
     leftover, device_is = _negotiate_e(e_session, devtype=b"IBM-DYNAMIC")
     logon = _read_record(e_session, leftover)
     assert device_is and logon[:5] == HEADER and logon[5] == ERASE_WRITE
+
+
+# ── the RESPONSES function ───────────────────────────────────────────────────
+
+def test_responses_negotiated_sets_response_flag_and_sequence(e_session):
+    # With RESPONSES agreed, each outbound record asks for an acknowledgement
+    # (RESPONSE-FLAG = ALWAYS = 0x02) under an incrementing sequence number.
+    leftover, _ = _negotiate_e(e_session, responses=True)
+    logon = _read_record(e_session, leftover)
+    assert logon[0] == 0x00               # DATA-TYPE 3270-DATA
+    assert logon[2] == 0x02               # RESPONSE-FLAG ALWAYS-RESPONSE
+    seq = (logon[3] << 8) | logon[4]
+    assert seq == 1                       # first record
+    assert logon[5] == ERASE_WRITE
+
+
+def test_positive_response_is_consumed_then_input_processed(e_session):
+    leftover, _ = _negotiate_e(e_session, responses=True)
+    logon = _read_record(e_session, leftover)
+    seq = (logon[3] << 8) | logon[4]
+    # Acknowledge the logon panel, then log in. The server must swallow the
+    # RESPONSE (not treat it as an AID) and still process the login.
+    e_session.sendall(_response_msg(seq, positive=True))
+    e_session.sendall(_reply_e({USERID_ADDR: "IBMUSER", PASSWORD_ADDR: "SYS1"}))
+    menu = _read_record(e_session)
+    assert "ISPF Primary Option Menu" in menu.decode("cp037", errors="replace")
+    assert menu[2] == 0x02 and (menu[3] << 8 | menu[4]) == 2   # next sequence
+
+
+def test_negative_response_is_handled_not_fatal(e_session):
+    leftover, _ = _negotiate_e(e_session, responses=True)
+    logon = _read_record(e_session, leftover)
+    seq = (logon[3] << 8) | logon[4]
+    # A negative response (with a sense code) is logged and consumed; the session
+    # continues and still processes the following input.
+    e_session.sendall(_response_msg(seq, positive=False, code=0x08))
+    e_session.sendall(_reply_e({USERID_ADDR: "IBMUSER", PASSWORD_ADDR: "SYS1"}))
+    menu = _read_record(e_session)
+    assert "ISPF Primary Option Menu" in menu.decode("cp037", errors="replace")
+
+
+def test_client_declining_responses_gets_no_response_flag(e_session):
+    # A client that agrees an empty FUNCTIONS set gets plain no-response headers.
+    leftover, _ = _negotiate_e(e_session, responses=False)
+    logon = _read_record(e_session, leftover)
+    assert logon[:5] == HEADER            # 00 00 00 00 00 (no response, seq 0)
