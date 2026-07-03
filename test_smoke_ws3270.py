@@ -480,3 +480,36 @@ def test_ws3270_eua_clears_input_but_keeps_protected_text():
     assert "HELLO" not in rows[-1]                 # …cleared after EUA
     assert "NAME:" in rows[-1]                      # …protected label kept
     assert "EraseUnprotected" in trace, trace[-2000:]
+
+
+def test_ws3270_renders_graphic_escape_line_drawing():
+    """A real emulator draws a Graphic-Escape line-drawing border.
+
+    We send a box drawn from the 3270 line-drawing glyphs (GraphicText, which
+    emits GE orders / a GE'd RA for the horizontal runs). The emulator's protocol
+    trace records the `GraphicEscape` order for those glyphs — deterministic proof
+    it parsed and accepted the GE data stream — and its rendered screen shows the
+    box-drawing characters the GE code points map to (─ U+2500, │-corners …).
+    """
+    _require_emulator()
+    from screen import Screen, Text, GraphicText
+
+    scr = (Screen()
+           .add(GraphicText.box_top(0, 0, 40))
+           .add(Text(1, 1, "GRAPHIC ESCAPE BORDER"))
+           .add(GraphicText.box_bottom(2, 0, 40)))
+    port = _serve_one_screen(scr.render())
+    out, trace = _drive_traced(port, [
+        "Wait(3,Output)",
+        "Ascii()",
+        "Wait(1,Seconds)",
+        "Quit()",
+    ], basic=True)
+
+    # Deterministic: the emulator parsed the GE order(s) off the wire.
+    assert "GraphicEscape" in trace, trace[-2000:]
+    # And it rendered the horizontal run into a border. Depending on font mode the
+    # line-drawing glyph shows as Unicode U+2500 '─' or ws3270's ASCII fallback
+    # '-' (apla2uc[]); a 20-long run of either is unmistakably our border, not the
+    # "GRAPHIC ESCAPE BORDER" label between the edges.
+    assert ("─" * 20 in out) or ("-" * 20 in out), out[-1500:]
