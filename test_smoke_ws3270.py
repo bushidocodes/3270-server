@@ -53,9 +53,11 @@ def _require_emulator():
     pytest.skip("no ws3270/s3270 emulator installed")
 
 
-def _serve_one_client():
+def _serve_one_client(tls_context=None):
     """Listen on an ephemeral port and serve exactly one client through the real
-    :func:`server.handle_client` in a background thread. Returns the port."""
+    :func:`server.handle_client` in a background thread. Returns the port. When
+    ``tls_context`` is given, the connection is served through
+    :func:`server._client_thread`, which does the server-side TLS handshake."""
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("127.0.0.1", 0))
@@ -65,7 +67,10 @@ def _serve_one_client():
     def serve():
         try:
             conn, addr = srv.accept()
-            server.handle_client(conn, addr)
+            if tls_context is not None:
+                server._client_thread(conn, addr, tls_context=tls_context)
+            else:
+                server.handle_client(conn, addr)
         except Exception:
             pass
         finally:
@@ -75,16 +80,26 @@ def _serve_one_client():
     return port
 
 
-def _drive(port, actions, model="2"):
+def _host_arg(port, tls=False):
+    """The emulator's host argument: plain ``host:port`` or, for implicit TLS,
+    the ``L:`` prefix that tells x3270 to wrap the connection in TLS."""
+    return f"L:127.0.0.1:{port}" if tls else f"127.0.0.1:{port}"
+
+
+def _drive(port, actions, model="2", tls=False):
     """Run the emulator (as the given ``model``) against 127.0.0.1:port with a
     list of action commands, returning its combined output. A 60s hang (the #87
     bug) can't wedge the run: the per-action Wait() timeouts bound it, and
-    subprocess timeout is the backstop."""
+    subprocess timeout is the backstop. ``tls`` connects via ``L:`` and accepts
+    the self-signed test cert (``-noverifycert``)."""
     script = "\n".join(actions) + "\n"
+    cmd = [EMULATOR, "-model", model]
+    if tls:
+        cmd.append("-noverifycert")
+    cmd.append(_host_arg(port, tls))
     try:
         proc = subprocess.run(
-            [EMULATOR, "-model", model, f"127.0.0.1:{port}"],
-            input=script, capture_output=True, text=True,
+            cmd, input=script, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=60,
         )
     except subprocess.TimeoutExpired as exc:
@@ -229,3 +244,24 @@ def test_ws3270_bind_image_binds_and_enables_attn():
     assert "< BIND " in trace and "invalid" not in trace.split("< BIND", 1)[1][:120]
     # ...and, now bound, sent ATTN as Telnet IP.
     assert "SENT IP" in trace, trace[-2000:]
+
+
+def test_ws3270_logs_in_over_tls(tls_cert):
+    """A real emulator connects with the ``L:`` (implicit TLS) prefix to a
+    TLS-wrapped server, accepts the self-signed cert (-noverifycert), and runs
+    the whole negotiate/login/navigate flow over the encrypted socket — proving
+    TLS end-to-end against a real terminal, not just an in-process client."""
+    _require_emulator()
+    certfile, keyfile = tls_cert
+    port = _serve_one_client(tls_context=server.make_tls_context(certfile, keyfile))
+    out = _drive(port, [
+        "Wait(20,InputField)",
+        "Ascii()",              # the TSO/E logon panel (over TLS)
+        "String(IBMUSER)", "Tab()", "String(SYS1)", "Enter()",
+        "Wait(20,Output)",
+        "Ascii()",              # the ISPF Primary Option Menu (over TLS)
+        "Quit()",
+    ], tls=True)
+
+    assert "z/OS V2R5.0 TSO/E LOGON" in out, out[:800]
+    assert "ISPF Primary Option Menu" in out, out[:800]
