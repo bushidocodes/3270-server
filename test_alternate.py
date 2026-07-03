@@ -107,3 +107,34 @@ def test_browse_footer_on_the_last_row():
     # SBA to (row 42, col 0) — the last row of a 43-row screen — precedes the footer.
     assert bytes([0x11]) + encode_pack_addr(42, 0, 80) in data
     assert "Lines 1-41 of" in data.decode("cp037", errors="replace")  # 43 - 2
+
+
+# ── the member list (Utilities → Library) on the alternate screen ────────────
+
+def test_member_list_default_screen_pages_on_model_2():
+    fake = _FakeSock([_PF3])
+    server._show_member_list(fake, model=server.parse_terminal_type("IBM-3278-2"))
+    screen = fake.sent[0]
+    assert screen[0] == ERASE_WRITE                       # the default 24x80 space
+    assert "Member 1-16 of" in screen.decode("cp037", errors="replace")  # 24 - 8/page
+
+
+def test_member_list_alternate_shows_all_on_model_4():
+    fake = _FakeSock([_PF3])
+    server._show_member_list(fake, model=server.parse_terminal_type("IBM-3278-4"))
+    screen = fake.sent[0]
+    assert screen[0] == ERASE_WRITE_ALTERNATE            # the 43-row alternate screen
+    n = len(server._library_members())
+    # A model 4 has room for 35 members/page, so all of them show at once.
+    assert f"Member 1-{n} of {n}" in screen.decode("cp037", errors="replace")
+
+
+def test_member_list_model_5_uses_132_column_addressing():
+    fake = _FakeSock([_PF3])
+    server._show_member_list(fake, model=server.parse_terminal_type("IBM-3278-5"))
+    data = fake.sent[0]
+    assert data[0] == ERASE_WRITE_ALTERNATE
+    # The footer sits on row 25 (27 - 2) and is addressed against the 132 width —
+    # the same width the point-and-shoot cursor decode divides by.
+    assert bytes([0x11]) + encode_pack_addr(25, 0, 132) in data
+    assert bytes([0x11]) + encode_pack_addr(25, 0, 80) not in data
