@@ -17,6 +17,7 @@ import os
 import shutil
 import socket
 import subprocess
+import tempfile
 import threading
 
 import pytest
@@ -92,6 +93,33 @@ def _drive(port, actions, model="2"):
     return proc.stdout + proc.stderr
 
 
+def _drive_traced(port, actions, model="2"):
+    """Like :func:`_drive`, but also captures the emulator's protocol trace and
+    returns ``(output, trace_text)``. The trace records exactly what the emulator
+    SENT and RCVD on the wire, so assertions on it are deterministic — unlike
+    ``Ascii()`` screen dumps, which race the emulator's own screen rendering."""
+    with tempfile.NamedTemporaryFile(
+            prefix="ws3270-", suffix=".trace", delete=False) as tf:
+        trace_path = tf.name
+    try:
+        script = "\n".join(actions) + "\n"
+        try:
+            proc = subprocess.run(
+                [EMULATOR, "-model", model, "-trace", "-tracefile", trace_path,
+                 f"127.0.0.1:{port}"],
+                input=script, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=60,
+            )
+        except subprocess.TimeoutExpired as exc:
+            pytest.fail(f"emulator did not finish in time (possible session hang): "
+                        f"{(exc.output or '')[:500]}")
+        with open(trace_path, encoding="utf-8", errors="replace") as fh:
+            trace = fh.read()
+        return proc.stdout + proc.stderr, trace
+    finally:
+        os.unlink(trace_path)
+
+
 def test_ws3270_logs_in_and_navigates():
     """A real emulator negotiates, logs in, and drives the ISPF panels."""
     _require_emulator()
@@ -145,3 +173,52 @@ def test_ws3270_model_3_browse_uses_the_alternate_screen():
     # 32-row screen → 30 lines per page (row 0 header, last row footer). A model-2
     # (24-row) screen would show "Lines 1-22 of".
     assert "Lines 1-30 of" in out, out[-1200:]
+
+
+def test_ws3270_sysreq_enters_and_leaves_the_host_session():
+    """A real emulator's SysReq() sends Telnet AO; the server drops into the
+    SSCP-LU host session and sends our unformatted prompt, which the emulator
+    receives as SSCP-LU-DATA. A second SysReq() resumes, redisplaying the panel.
+
+    Asserted on the emulator's protocol trace rather than its screen dumps: the
+    trace is deterministic, whereas Ascii() races the emulator's own rendering of
+    the SSCP-mode switch."""
+    _require_emulator()
+    port = _serve_one_client()
+    _, trace = _drive_traced(port, [
+        "Wait(20,InputField)",
+        "String(IBMUSER)", "Tab()", "String(SYS1)", "Enter()",
+        "Wait(20,Unlock)",       # login fully processed, ISPF menu drawn
+        "SysReq()",              # press SYSREQ → Telnet AO → SSCP-LU session
+        "Wait(5,Output)",        # the SSCP-LU-DATA prompt arrives (mode change)
+        "SysReq()",              # press SYSREQ again → resume the application
+        "Wait(5,Output)",
+        "Quit()",
+    ])
+
+    # The real emulator sent SYSREQ as Telnet AO (twice: enter then resume)...
+    assert trace.count("SENT AO") >= 2, trace[-2000:]
+    # ...and received our SSCP-LU-DATA prompt while suspended.
+    assert "RCVD TN3270E(SSCP-LU-DATA" in trace, trace[-2000:]
+
+
+def test_ws3270_sysreq_logoff_ends_the_session():
+    """Typing LOGOFF in the SYSREQ host session ends the whole session: the host
+    sends UNBIND, which the real emulator receives. Asserted on the trace so it
+    doesn't depend on screen-render timing."""
+    _require_emulator()
+    port = _serve_one_client()
+    _, trace = _drive_traced(port, [
+        "Wait(20,InputField)",
+        "String(IBMUSER)", "Tab()", "String(SYS1)", "Enter()",
+        "Wait(20,Unlock)",       # login fully processed, ISPF menu drawn
+        "SysReq()",              # into the SSCP-LU session
+        "Wait(5,Output)",
+        "String(LOGOFF)",        # typed on the SSCP-LU session
+        "Enter()",
+        "Wait(5,Output)",
+        "Quit()",
+    ])
+
+    # The emulator received our UNBIND, ending the session from the host side.
+    assert "RCVD TN3270E(UNBIND" in trace, trace[-2000:]

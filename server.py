@@ -89,9 +89,10 @@ SBA = 0x11
 SF = 0x1D
 IC = 0x13
 
-# Telnet sub-negotiation delimiters (used by the TN3270E messages below).
-SB = 250
+# Telnet commands (used by the TN3270E negotiation and the framing layer below).
 SE = 240
+SB = 250
+WILL, WONT, DO, DONT = 251, 252, 253, 254
 
 # ── TN3270E (RFC 2355) ───────────────────────────────────────────────────────
 # TN3270E is basic TN3270 plus a negotiated Telnet option (40) that adds a
@@ -112,9 +113,16 @@ E_REJECT = 6
 E_REQUEST = 7
 E_SEND = 8
 
+# Telnet commands used for the 3270 SYSREQ and ATTN keys (RFC 2355 §10.5, §11):
+# a client maps SYSREQ to Abort Output and ATTN to Interrupt Process.
+AO = 245   # Abort Output  → the SYSREQ key
+IP = 244   # Interrupt Process → the ATTN key
+
 # TN3270E DATA-TYPE header byte values (header byte 0).
 E_DT_3270_DATA = 0x00
 E_DT_RESPONSE = 0x02
+E_DT_UNBIND = 0x04
+E_DT_SSCP_LU_DATA = 0x07   # the SSCP-LU session (used in SYSREQ "suspended" mode)
 
 # RESPONSE-FLAG (header byte 2). Outbound it asks whether the client should
 # acknowledge; inbound (on a RESPONSE message) it says whether the ack is good.
@@ -130,7 +138,7 @@ E_FUNC_DATA_STREAM_CTL = 1
 E_FUNC_RESPONSES = 2
 E_FUNC_SCS_CTL_CODES = 3
 E_FUNC_SYSREQ = 4
-E_SUPPORTED_FUNCTIONS = frozenset({E_FUNC_RESPONSES})
+E_SUPPORTED_FUNCTIONS = frozenset({E_FUNC_RESPONSES, E_FUNC_SYSREQ})
 
 
 def _strip_leading_telnet(rec: bytes) -> bytes:
@@ -171,12 +179,14 @@ class TN3270EStream:
     ``read_record``, which knows where a record ends (at IAC EOR).
     """
 
-    def __init__(self, sock, responses=False):
+    def __init__(self, sock, responses=False, sysreq=False):
         self._sock = sock
         self.responses = responses   # RESPONSES function negotiated?
+        self.sysreq = sysreq         # SYSREQ function negotiated?
         self._seq = 0                # outbound sequence number (mod 2^16)
         self.last_response = None    # (seq, positive_bool, code) of the last ack
         self._rxbuf = bytearray()    # inbound bytes not yet framed into records
+        self.last_screen = None      # last 3270-DATA record sent (for redisplay)
 
     def sendall(self, data):
         if self.responses:
@@ -187,7 +197,26 @@ class TN3270EStream:
         else:
             # No RESPONSES function: no response wanted, sequence number 0.
             header = bytes([E_DT_3270_DATA, 0x00, E_RSF_NO_RESPONSE, 0x00, 0x00])
+        self.last_screen = data      # remember it so SYSREQ resume can redisplay
         self._sock.sendall(header + data)
+
+    def send_sscp(self, text):
+        """Send an SSCP-LU-DATA message (unformatted EBCDIC text) — used while the
+        SYSREQ key has put the session in the SSCP-LU (suspended) mode."""
+        header = bytes([E_DT_SSCP_LU_DATA, 0x00, E_RSF_NO_RESPONSE, 0x00, 0x00])
+        self._sock.sendall(header + to_ebcdic(text) + bytes([IAC, EOR]))
+
+    def send_unbind(self, reason=0x01):
+        """Tell the client the session has ended (DATA-TYPE UNBIND). 0x01 is
+        'normal end of session' (RFC 2355 §10.3)."""
+        self._sock.sendall(bytes([E_DT_UNBIND, 0x00, E_RSF_NO_RESPONSE, 0x00, 0x00,
+                                  reason, IAC, EOR]))
+
+    def redisplay(self):
+        """Re-send the last 3270 screen (used to restore the panel after the
+        SYSREQ SSCP-LU session is left)."""
+        if self.last_screen is not None:
+            self.sendall(self.last_screen)
 
     def on_response(self, payload: bytes):
         """Record a client RESPONSE message (already includes its 5-byte header).
@@ -201,41 +230,84 @@ class TN3270EStream:
         print(f"TN3270E {kind} response for seq {seq}"
               + (f", code {hex(code)}" if code is not None else ""))
 
-    def next_data_record(self):
-        """Return the next inbound 3270-DATA record's payload (header stripped),
-        or ``None`` on disconnect. RESPONSE messages are consumed (and logged) in
-        passing, so they are never returned as input. Records are framed one at a
-        time from ``_rxbuf``, so a RESPONSE and an AID reply arriving in the same
-        TCP segment are handled correctly (the reply is kept for the next call)."""
+    def next_event(self):
+        """Return the next inbound event, or ``None`` on disconnect:
+
+        - ``("record", data_type, payload)`` — one framed 3270 record (its 5-byte
+          header parsed off), with RESPONSE acknowledgements consumed/logged here
+          so they are never mistaken for input;
+        - ``("sysreq",)`` — the client pressed SYSREQ (Telnet AO);
+        - ``("attn",)`` — the client pressed ATTN (Telnet IP).
+        """
         while True:
-            rec = self._next_raw_record()
-            if rec is None:
+            unit = self._next_unit()
+            if unit is None:
                 return None
-            rec = _strip_leading_telnet(rec)   # drop any late negotiation bytes
+            kind, data = unit
+            if kind == "cmd":
+                if data == AO:
+                    return ("sysreq",)
+                if data == IP:
+                    return ("attn",)
+                continue                      # other standalone command: ignore
+            rec = _strip_leading_telnet(data)  # drop any late negotiation bytes
             if not rec:
                 continue
             if rec[:1] == bytes([E_DT_RESPONSE]):
                 self.on_response(rec)
                 continue
-            return rec[5:]   # strip the 5-byte TN3270E header off the 3270 data
+            return ("record", rec[0], rec[5:])  # data-type, header stripped
 
-    def _next_raw_record(self):
-        """One raw record (bytes before its IAC EOR) from ``_rxbuf``, reading
-        from the socket as needed. Leftover bytes past the first IAC EOR stay in
-        ``_rxbuf`` for the next call."""
+    def next_data_record(self):
+        """The payload of the next inbound 3270 record (SYSREQ/ATTN skipped), or
+        ``None`` — used by :func:`read_record` (e.g. the Query reply)."""
         while True:
-            idx = self._rxbuf.find(bytes([IAC, EOR]))
-            if idx != -1:
-                rec = bytes(self._rxbuf[:idx])
-                del self._rxbuf[:idx + 2]
-                return rec
-            if len(self._rxbuf) > MAX_BUFFER_SIZE:
+            ev = self.next_event()
+            if ev is None:
+                return None
+            if ev[0] == "record":
+                return ev[2]
+
+    def _next_unit(self):
+        """One framing unit from ``_rxbuf``: ``("record", bytes-before-IAC-EOR)``
+        or ``("cmd", command-byte)`` for a standalone Telnet command (AO/IP/…).
+        Processes the Telnet layer — IAC IAC is data, IAC EOR ends a record,
+        option triplets and SB…SE are spliced out — reading as needed."""
+        while True:
+            buf = self._rxbuf
+            i = 0
+            while i < len(buf):
+                if buf[i] != IAC:
+                    i += 1
+                    continue
+                if i + 1 >= len(buf):
+                    break                        # need the command byte
+                c = buf[i + 1]
+                if c == EOR:
+                    rec = bytes(buf[:i])
+                    del buf[:i + 2]
+                    return ("record", rec)
+                if c == IAC:                     # escaped 0xFF → data
+                    i += 2
+                    continue
+                if c in (WILL, WONT, DO, DONT):  # a mid-session option: splice out
+                    del buf[i:i + 3]
+                    continue
+                if c == SB:
+                    se = buf.find(bytes([IAC, SE]), i + 2)
+                    if se == -1:
+                        break                    # incomplete SB; wait for more
+                    del buf[i:se + 2]
+                    continue
+                del buf[:i + 2]                  # a standalone command (AO/IP/…)
+                return ("cmd", c)
+            if len(buf) > MAX_BUFFER_SIZE:
                 print(f"WARNING: client buffer exceeded {MAX_BUFFER_SIZE} bytes; closing connection")
                 return None
             chunk = self._sock.recv(1024)
             if not chunk:
                 return None
-            self._rxbuf.extend(chunk)
+            buf.extend(chunk)
 
     def recv(self, n):
         return self._sock.recv(n)
@@ -295,6 +367,7 @@ class TerminalModel:
     default_cols: int = 80
     tn3270e: bool = False            # TN3270E (RFC 2355) negotiated for this session
     tn3270e_responses: bool = False  # TN3270E RESPONSES function agreed
+    tn3270e_sysreq: bool = False     # TN3270E SYSREQ function agreed
 
 
 def parse_terminal_type(term_type: str) -> TerminalModel:
@@ -1015,20 +1088,31 @@ def read_record(client_socket):
             return bytes(buffer[:-2])
 
 
-def read_client_input(client_socket):
-    buffer = read_record(client_socket)
-    if not buffer:
-        return None
+# Signals that the SYSREQ SSCP-LU session ended with LOGOFF. The handlers below
+# return this sentinel; :func:`read_client_input` turns it into a
+# :class:`_SessionLogoff`, which unwinds any nested sub-panel read loops back to
+# :func:`_client_thread` — a host-session-initiated end of the whole session,
+# unlike a normal ISPF exit which only pops one panel.
+_LOGOFF = object()
+
+
+class _SessionLogoff(Exception):
+    """Raised to tear the session down after a SYSREQ-session LOGOFF."""
+
+
+def _parse_3270_reply(buffer):
+    """Decode one inbound 3270 AID reply into ``(aid, {addr: text}, cursor)``.
+
+    Byte 0 is the AID. A normal (non short-read) reply then carries the 12-bit
+    cursor address, followed by SBA-addressed modified fields; short reads
+    (CLEAR/PA) and synthetic test payloads start straight into an SBA/SF order.
+    """
     aid = buffer[0]
     # Log only the AID (not the raw bytes) to avoid leaking password data in logs
     print(f"RX: {len(buffer)} bytes, AID: {aid_to_string(aid)}")
 
     SBA_ORD = 0x11
     SF_ORD = 0x1D
-    # After the AID a normal (non short-read) reply carries the 12-bit cursor
-    # address in the next two bytes, before the first SBA. Decode it for
-    # point-and-shoot; it is absent for short reads (CLEAR/PA) and synthetic
-    # test payloads, where byte 1 is an SBA/SF order instead.
     cursor = None
     if len(buffer) >= 3 and buffer[1] not in (SBA_ORD, SF_ORD):
         cursor = ((buffer[1] & 0x3F) << 6) | (buffer[2] & 0x3F)
@@ -1053,6 +1137,97 @@ def read_client_input(client_socket):
     return aid, results, cursor
 
 
+def read_client_input(client_socket):
+    """Read the next AID reply from the client, transparently handling the
+    TN3270E SYSREQ and ATTN keys along the way.
+
+    On a TN3270E stream that negotiated SYSREQ, the SYSREQ key arrives as a
+    Telnet AO between records; it drops into the SSCP-LU (host-session) mode
+    (:func:`_handle_sysreq`) and, unless that ends in LOGOFF, we loop back for
+    the real next reply. ATTN (Telnet IP) is a mid-record interrupt that just
+    redisplays the panel. Plain TN3270 sockets have no such signalling, so they
+    read a record and parse it directly.
+
+    Returns ``(aid, fields, cursor)`` or ``None`` on disconnect. A SYSREQ session
+    that logs off raises :class:`_SessionLogoff`, unwinding to
+    :func:`_client_thread`.
+    """
+    if isinstance(client_socket, TN3270EStream):
+        while True:
+            ev = client_socket.next_event()
+            if ev is None:
+                return None
+            if ev[0] == "sysreq":
+                if _handle_sysreq(client_socket) is _LOGOFF:
+                    raise _SessionLogoff
+                continue                      # resumed: read the real next reply
+            if ev[0] == "attn":
+                _handle_attn(client_socket)
+                continue
+            return _parse_3270_reply(ev[2])   # ("record", data_type, payload)
+
+    buffer = read_record(client_socket)
+    if not buffer:
+        return None
+    return _parse_3270_reply(buffer)
+
+
+def _sscp_text(payload: bytes) -> str:
+    """Decode the text a terminal typed in the SSCP-LU session. The payload is
+    unformatted EBCDIC (SCS); an AID/cursor prefix, if the emulator sends the
+    line as a 3270 reply, is harmless once the control bytes are stripped."""
+    text = payload.decode("cp037", errors="replace")
+    return "".join(ch for ch in text if ch >= " ").strip()
+
+
+def _handle_attn(client_socket):
+    """Handle the ATTN key, which arrives as a Telnet IP (Interrupt Process).
+    ATTN signals the application to interrupt the current transaction; with no
+    long-running transaction to cancel here, we acknowledge it by redisplaying
+    the current panel so the terminal is never left with a locked keyboard.
+
+    Note: x3270-family emulators only send ATTN once the TN3270E session is
+    *bound* (the BIND-IMAGE function, which we don't implement); until then their
+    Attn action just locks the keyboard locally and nothing reaches us. This
+    handler therefore fires for a plain-TN3270 client (or a bound TN3270E one),
+    which is what the unit test exercises with a raw IAC IP."""
+    print("ATTN: redisplaying current screen")
+    client_socket.redisplay()
+
+
+def _handle_sysreq(client_socket):
+    """Handle the SYSREQ key (TN3270E, Telnet AO). SYSREQ suspends the LU-LU
+    (ISPF application) session and switches the terminal to the SSCP-LU session —
+    the host's session manager. There the only command we honour is LOGOFF, which
+    ends the session; anything else draws 'COMMAND UNRECOGNIZED'. A second SYSREQ
+    resumes the application session, restoring the panel.
+
+    Returns :data:`_LOGOFF` if the user logged off (caller should disconnect), or
+    ``None`` to resume the suspended application session.
+    """
+    print("SYSREQ: entering SSCP-LU (host session) mode")
+    client_socket.send_sscp(
+        "\r\n IKJ56700A ENTER LOGOFF, OR PRESS SYSREQ TO RETURN\r\n")
+    while True:
+        ev = client_socket.next_event()
+        if ev is None:
+            return _LOGOFF                    # disconnect: end the session
+        if ev[0] == "sysreq":
+            print("SYSREQ: resuming application session")
+            client_socket.redisplay()
+            return None
+        if ev[0] == "attn":
+            continue                          # ATTN is a no-op in host session
+        command = _sscp_text(ev[2])           # ("record", data_type, payload)
+        print(f"SSCP-LU input: {command!r}")
+        if command.upper() == "LOGOFF":
+            client_socket.send_sscp("\r\n IKJ56470I LOGOFF COMPLETE\r\n")
+            client_socket.send_unbind()
+            return _LOGOFF
+        client_socket.send_sscp(
+            f"\r\n {command or '(empty)'} COMMAND UNRECOGNIZED\r\n")
+
+
 def _send_e_sb(sock, payload: bytes):
     """Send a TN3270E sub-negotiation message: IAC SB TN3270E <payload> IAC SE."""
     msg = bytes([IAC, SB, TN3270E]) + bytes(payload) + bytes([IAC, SE])
@@ -1075,7 +1250,7 @@ def tn3270_negotiate(client_socket):
 
     got_binary = got_eor = got_term = False
     e_state = "unknown"          # "unknown" until the client accepts/refuses
-    got_device = got_functions = responses = False
+    got_device = got_functions = responses = sysreq = False
     term_type = None
 
     negot = bytearray()
@@ -1169,12 +1344,13 @@ def tn3270_negotiate(client_socket):
                         print("Client terminal type:", term_type)
                         got_term = True
                 elif opt == TN3270E and len(sub) >= 2:
-                    got_device, got_functions, dtype, resp = _handle_tn3270e_sb(
+                    got_device, got_functions, dtype, funcs = _handle_tn3270e_sb(
                         client_socket, sub, got_device, got_functions)
                     if dtype is not None:
                         term_type = dtype
-                    if resp is not None:
-                        responses = resp
+                    if funcs is not None:
+                        responses = E_FUNC_RESPONSES in funcs
+                        sysreq = E_FUNC_SYSREQ in funcs
                 i = se_pos + 2
                 continue
 
@@ -1184,7 +1360,8 @@ def tn3270_negotiate(client_socket):
     e_active = e_state == "active"
     model = parse_terminal_type(term_type)
     if e_active:
-        model = replace(model, tn3270e=True, tn3270e_responses=responses)
+        model = replace(model, tn3270e=True, tn3270e_responses=responses,
+                        tn3270e_sysreq=sysreq)
     print("Negotiation complete: binary={}, eor={}, tn3270e={}, device={}".format(
         got_binary, got_eor, e_active, model.term_type))
     print(f"Terminal model: {model.term_type} "
@@ -1192,20 +1369,22 @@ def tn3270_negotiate(client_socket):
           f"{'colour' if model.color else 'mono'}"
           f"{', extended' if model.extended else ''}"
           f"{', TN3270E' if e_active else ''}"
-          f"{', RESPONSES' if e_active and responses else ''})")
+          f"{', RESPONSES' if e_active and responses else ''}"
+          f"{', SYSREQ' if e_active and sysreq else ''})")
     return model
 
 
 def _handle_tn3270e_sb(sock, sub: bytes, got_device: bool, got_functions: bool):
     """Handle one inbound TN3270E sub-negotiation message (``sub`` is the bytes
     after ``IAC SB TN3270E``). Returns ``(got_device, got_functions, device_type
-    or None, responses or None)`` — ``responses`` is the agreed RESPONSES state
-    when this message settles FUNCTIONS, else ``None``.
+    or None, agreed_functions or None)`` — ``agreed_functions`` is the frozenset
+    of TN3270E functions in effect once this message settles FUNCTIONS, else
+    ``None``.
 
     DEVICE-TYPE REQUEST → we answer DEVICE-TYPE IS (echoing the type, assigning a
-    device name) and propose the FUNCTIONS we support (RESPONSES). FUNCTIONS
-    REQUEST → we answer FUNCTIONS IS with the intersection of the client's list
-    and what we support. FUNCTIONS IS → the client's agreed set.
+    device name) and propose the FUNCTIONS we support (RESPONSES, SYSREQ).
+    FUNCTIONS REQUEST → we answer FUNCTIONS IS with the intersection of the
+    client's list and what we support. FUNCTIONS IS → the client's agreed set.
     """
     category, action = sub[0], sub[1]
     if category == E_DEVICE_TYPE and action == E_REQUEST:
@@ -1217,12 +1396,11 @@ def _handle_tn3270e_sb(sock, sub: bytes, got_device: bool, got_functions: bool):
         _send_e_sb(sock, bytes([E_FUNCTIONS, E_REQUEST]) + bytes(sorted(E_SUPPORTED_FUNCTIONS)))
         return True, got_functions, device_type, None
     if category == E_FUNCTIONS and action == E_IS:
-        responses = E_FUNC_RESPONSES in sub[2:]
-        return got_device, True, None, responses
+        return got_device, True, None, frozenset(sub[2:]) & E_SUPPORTED_FUNCTIONS
     if category == E_FUNCTIONS and action == E_REQUEST:
-        agreed = sorted(set(sub[2:]) & E_SUPPORTED_FUNCTIONS)
-        _send_e_sb(sock, bytes([E_FUNCTIONS, E_IS]) + bytes(agreed))
-        return got_device, True, None, E_FUNC_RESPONSES in agreed
+        agreed = frozenset(sub[2:]) & E_SUPPORTED_FUNCTIONS
+        _send_e_sb(sock, bytes([E_FUNCTIONS, E_IS]) + bytes(sorted(agreed)))
+        return got_device, True, None, agreed
     return got_device, got_functions, None, None
 
 
@@ -1262,7 +1440,8 @@ def handle_client(client_socket, addr):
     # framed with the 5-byte data header (and inbound headers are stripped in
     # read_record) — transparently to all the screen-sending code below.
     if model.tn3270e:
-        client_socket = TN3270EStream(client_socket, responses=model.tn3270e_responses)
+        client_socket = TN3270EStream(client_socket, responses=model.tn3270e_responses,
+                                      sysreq=model.tn3270e_sysreq)
     # Ask an extended terminal to describe itself (real size, colour); a base
     # terminal is left untouched. Uses the 60s negotiation timeout still in
     # effect, so a silent client can't wedge the session before the 600s below.
@@ -1406,6 +1585,8 @@ def handle_client(client_socket, addr):
 def _client_thread(client_socket, addr):
     try:
         handle_client(client_socket, addr)
+    except _SessionLogoff:
+        print(f"Client {addr} logged off via SYSREQ")
     except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
         print(f"Client {addr} disconnected unexpectedly")
     except Exception as e:

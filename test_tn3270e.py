@@ -20,7 +20,12 @@ BINARY, TERMINAL_TYPE, EOR_OPT, TN3270E = 0, 24, 25, 40
 # TN3270E sub-commands
 E_CONNECT, E_DEVICE_TYPE, E_FUNCTIONS, E_IS, E_REQUEST, E_SEND = 1, 2, 3, 4, 7, 8
 E_DT_RESPONSE = 0x02       # RESPONSE data-type (inbound acknowledgement)
+E_DT_UNBIND = 0x04         # UNBIND data-type (session ended)
+E_DT_SSCP_LU_DATA = 0x07   # SSCP-LU data-type (the SYSREQ host session)
 E_FUNC_RESPONSES = 2       # the RESPONSES function code
+E_FUNC_SYSREQ = 4          # the SYSREQ function code
+AO = 0xF5                  # Telnet Abort Output → the SYSREQ key
+IP = 0xF4                  # Telnet Interrupt Process → the ATTN key
 ENTER = 0x7D
 ERASE_WRITE = 0xF5
 HEADER = bytes([0x00, 0x00, 0x00, 0x00, 0x00])   # expected outbound data header
@@ -34,11 +39,11 @@ def _e_sb(sock, payload):
     sock.sendall(bytes([IAC, SB, TN3270E]) + bytes(payload) + bytes([IAC, SE]))
 
 
-def _negotiate_e(sock, devtype=b"IBM-3278-2", responses=False):
+def _negotiate_e(sock, devtype=b"IBM-3278-2", responses=False, sysreq=False):
     """Drive the server's negotiation as a TN3270E client. Accepts TN3270E,
     answers SEND DEVICE-TYPE with a DEVICE-TYPE REQUEST, and settles FUNCTIONS —
-    agreeing the RESPONSES function when ``responses`` is set, else an empty set.
-    Returns (leftover_bytes, device_is_seen)."""
+    agreeing the RESPONSES and/or SYSREQ functions when requested, else an empty
+    set. Returns (leftover_bytes, device_is_seen)."""
     buf = bytearray()
     seen_device_is = False
     deadline = time.time() + 10
@@ -71,7 +76,8 @@ def _negotiate_e(sock, devtype=b"IBM-3278-2", responses=False):
                 elif opt == TN3270E and sub[:2] == bytes([E_DEVICE_TYPE, E_IS]):
                     seen_device_is = True
                 elif opt == TN3270E and sub[:2] == bytes([E_FUNCTIONS, E_REQUEST]):
-                    funcs = bytes([E_FUNC_RESPONSES]) if responses else b""
+                    funcs = bytes(([E_FUNC_RESPONSES] if responses else [])
+                                  + ([E_FUNC_SYSREQ] if sysreq else []))
                     _e_sb(sock, bytes([E_FUNCTIONS, E_IS]) + funcs)       # agree the set
                 del buf[:se + 2]
             else:
@@ -125,10 +131,13 @@ def e_session():
     port = srv.getsockname()[1]
 
     def serve():
+        conn, addr = srv.accept()
         try:
-            server.handle_client(*srv.accept())
+            server.handle_client(conn, addr)
         except Exception:
             pass
+        finally:
+            conn.close()      # graceful close, matching _client_thread's finally
 
     threading.Thread(target=serve, daemon=True).start()
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -217,3 +226,68 @@ def test_client_declining_responses_gets_no_response_flag(e_session):
     leftover, _ = _negotiate_e(e_session, responses=False)
     logon = _read_record(e_session, leftover)
     assert logon[:5] == HEADER            # 00 00 00 00 00 (no response, seq 0)
+
+
+# ── the SYSREQ / ATTN keys ───────────────────────────────────────────────────
+
+def _sscp_input(text):
+    """A client SSCP-LU-DATA message (the SYSREQ host session): 5-byte header
+    with data-type SSCP-LU-DATA, then EBCDIC text, IAC EOR."""
+    header = bytes([E_DT_SSCP_LU_DATA, 0x00, 0x00, 0x00, 0x00])
+    return header + text.encode("cp037") + bytes([IAC, EOR])
+
+
+def test_sysreq_enters_host_session_then_resumes(e_session):
+    # SYSREQ (Telnet AO) suspends the application and drops into the SSCP-LU host
+    # session, which sends an unformatted SSCP-LU-DATA prompt. A second SYSREQ
+    # resumes, redisplaying the panel (a fresh 3270-DATA record).
+    leftover, _ = _negotiate_e(e_session, sysreq=True)
+    _read_record(e_session, leftover)                       # logon panel
+
+    e_session.sendall(bytes([IAC, AO]))                     # press SYSREQ
+    prompt = _read_record(e_session)
+    assert prompt[0] == E_DT_SSCP_LU_DATA
+    assert "LOGOFF" in prompt[5:].decode("cp037", errors="replace")
+
+    e_session.sendall(bytes([IAC, AO]))                     # SYSREQ again → resume
+    redisplay = _read_record(e_session)
+    assert redisplay[0] == 0x00 and redisplay[5] == ERASE_WRITE
+    assert "TSO/E LOGON" in redisplay.decode("cp037", errors="replace")
+
+
+def test_sysreq_unrecognised_command_stays_in_host_session(e_session):
+    leftover, _ = _negotiate_e(e_session, sysreq=True)
+    _read_record(e_session, leftover)                       # logon panel
+
+    e_session.sendall(bytes([IAC, AO]))                     # press SYSREQ
+    _read_record(e_session)                                 # the prompt
+    e_session.sendall(_sscp_input("HELP"))                  # not LOGOFF
+    reply = _read_record(e_session)
+    assert reply[0] == E_DT_SSCP_LU_DATA
+    assert "UNRECOGNIZED" in reply[5:].decode("cp037", errors="replace")
+
+
+def test_sysreq_logoff_ends_the_session(e_session):
+    leftover, _ = _negotiate_e(e_session, sysreq=True)
+    _read_record(e_session, leftover)                       # logon panel
+
+    e_session.sendall(bytes([IAC, AO]))                     # press SYSREQ
+    _read_record(e_session)                                 # the prompt
+    e_session.sendall(_sscp_input("LOGOFF"))
+    done = _read_record(e_session)
+    assert done[0] == E_DT_SSCP_LU_DATA
+    assert "LOGOFF" in done[5:].decode("cp037", errors="replace")
+    unbind = _read_record(e_session)                        # then an UNBIND
+    assert unbind[0] == E_DT_UNBIND
+
+
+def test_attn_redisplays_the_current_panel(e_session):
+    # ATTN (Telnet IP) is a mid-session interrupt; with nothing to cancel we
+    # simply redisplay the current panel so the keyboard is never left blank.
+    leftover, _ = _negotiate_e(e_session, sysreq=True)
+    _read_record(e_session, leftover)                       # logon panel
+
+    e_session.sendall(bytes([IAC, IP]))                     # press ATTN
+    again = _read_record(e_session)
+    assert again[0] == 0x00 and again[5] == ERASE_WRITE     # redisplayed panel
+    assert "TSO/E LOGON" in again.decode("cp037", errors="replace")
