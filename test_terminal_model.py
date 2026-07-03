@@ -93,6 +93,8 @@ def _drive_client(sock, term_type: bytes):
                     break
                 opt = buf[i + 2]
                 reply = {DO: WILL, DONT: WONT, WILL: DO, WONT: DONT}[cmd]
+                if opt == 40:  # refuse TN3270E → exercise the basic TN3270 path
+                    reply = {DO: WONT, WILL: DONT}.get(cmd, reply)
                 sock.sendall(bytes([IAC, reply, opt]))
                 if opt == BINARY and cmd in (DO, WILL):
                     got_binary = True

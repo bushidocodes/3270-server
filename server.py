@@ -89,6 +89,61 @@ SBA = 0x11
 SF = 0x1D
 IC = 0x13
 
+# Telnet sub-negotiation delimiters (used by the TN3270E messages below).
+SB = 250
+SE = 240
+
+# ── TN3270E (RFC 2355) ───────────────────────────────────────────────────────
+# TN3270E is basic TN3270 plus a negotiated Telnet option (40) that adds a
+# DEVICE-TYPE / FUNCTIONS sub-negotiation and a 5-byte header on every 3270 data
+# message. When it is negotiated the session socket is wrapped in TN3270EStream,
+# which adds that header outbound (read_record strips it inbound), so the rest of
+# the server sends and reads plain 3270 records unchanged.
+TN3270E = 40  # Telnet option number
+
+# TN3270E message sub-commands (RFC 2355 §3).
+E_ASSOCIATE = 0
+E_CONNECT = 1
+E_DEVICE_TYPE = 2
+E_FUNCTIONS = 3
+E_IS = 4
+E_REASON = 5
+E_REJECT = 6
+E_REQUEST = 7
+E_SEND = 8
+
+# TN3270E DATA-TYPE header byte values.
+E_DT_3270_DATA = 0x00
+
+# The 5-byte outbound header for a normal 3270 data message: 3270-DATA,
+# REQUEST-FLAG 0, RESPONSE-FLAG 0 (no response needed), SEQ-NUMBER 0.
+TN3270E_DATA_HEADER = bytes([E_DT_3270_DATA, 0x00, 0x00, 0x00, 0x00])
+
+
+class TN3270EStream:
+    """A socket wrapper that frames outbound records with the TN3270E 5-byte
+    data header, so screen-sending code needn't know TN3270E is in effect.
+
+    Only outbound framing lives here; inbound header stripping happens in
+    :func:`read_record`, which knows where a record ends (at IAC EOR). The
+    wrapper is otherwise a transparent pass-through to the underlying socket.
+    """
+
+    def __init__(self, sock):
+        self._sock = sock
+
+    def sendall(self, data):
+        self._sock.sendall(TN3270E_DATA_HEADER + data)
+
+    def recv(self, n):
+        return self._sock.recv(n)
+
+    def settimeout(self, t):
+        self._sock.settimeout(t)
+
+    def close(self):
+        self._sock.close()
+
 
 # The low-level building blocks above (encode_pack_addr, field_attribute,
 # write_control_character, the order constants) are consumed by screen.py, which
@@ -136,6 +191,7 @@ class TerminalModel:
     color: bool = False     # 3279-family device: colour-capable
     default_rows: int = 24
     default_cols: int = 80
+    tn3270e: bool = False   # TN3270E (RFC 2355) negotiated for this session
 
 
 def parse_terminal_type(term_type: str) -> TerminalModel:
@@ -796,7 +852,10 @@ def read_record(client_socket):
             print(f"WARNING: client buffer exceeded {MAX_BUFFER_SIZE} bytes; closing connection")
             return None
         if len(buffer) >= 2 and buffer[-2:] == bytes([IAC, EOR]):
-            return bytes(buffer[:-2])
+            payload = bytes(buffer[:-2])
+            if isinstance(client_socket, TN3270EStream):
+                payload = payload[5:]  # strip the inbound TN3270E 5-byte header
+            return payload
 
 
 def read_client_input(client_socket):
@@ -837,40 +896,51 @@ def read_client_input(client_socket):
     return aid, results, cursor
 
 
+def _send_e_sb(sock, payload: bytes):
+    """Send a TN3270E sub-negotiation message: IAC SB TN3270E <payload> IAC SE."""
+    msg = bytes([IAC, SB, TN3270E]) + bytes(payload) + bytes([IAC, SE])
+    print("TX:", binascii.hexlify(msg))
+    sock.sendall(msg)
+
+
 def tn3270_negotiate(client_socket):
-    DONT = 254
-    DO = 253
-    WONT = 252
-    WILL = 251
-    SB = 250
-    SE = 240
+    """Negotiate the Telnet options and identify the terminal.
 
-    BINARY = 0
-    TERMINAL_TYPE = 24
-    EOR_OPT = 25
+    Offers TN3270E (RFC 2355) alongside basic TN3270. If the client accepts
+    (WILL TN3270E), its device type comes from the TN3270E DEVICE-TYPE exchange
+    and a (empty) FUNCTIONS set is agreed, and the returned model has
+    ``tn3270e=True`` so the session frames data with the 5-byte header. If the
+    client refuses (WONT TN3270E), it falls back to the basic TERMINAL-TYPE
+    exchange exactly as before.
+    """
+    DONT, DO, WONT, WILL, SB, SE = 254, 253, 252, 251, 250, 240
+    BINARY, TERMINAL_TYPE, EOR_OPT = 0, 24, 25
 
-    got_binary = False
-    got_eor = False
-    got_term = False
-    # The client's device type, captured from its TERMINAL-TYPE IS reply below.
+    got_binary = got_eor = got_term = False
+    e_state = "unknown"          # "unknown" until the client accepts/refuses
+    got_device = got_functions = False
     term_type = None
 
     negot = bytearray()
-    negot.extend([IAC, WILL, BINARY])
-    negot.extend([IAC, DO, BINARY])
-    negot.extend([IAC, WILL, EOR_OPT])
-    negot.extend([IAC, DO, EOR_OPT])
-    negot.extend([IAC, WILL, TERMINAL_TYPE])
-    negot.extend([IAC, DO, TERMINAL_TYPE])
-    negot.extend([IAC, SB, TERMINAL_TYPE, 1, IAC, SE])
-
+    negot += bytes([IAC, WILL, BINARY, IAC, DO, BINARY])
+    negot += bytes([IAC, WILL, EOR_OPT, IAC, DO, EOR_OPT])
+    negot += bytes([IAC, DO, TN3270E])       # offer TN3270E
+    negot += bytes([IAC, WILL, TERMINAL_TYPE, IAC, DO, TERMINAL_TYPE])
+    negot += bytes([IAC, SB, TERMINAL_TYPE, 1, IAC, SE])
     print("TX:", binascii.hexlify(negot))
     client_socket.sendall(negot)
 
-    buffer = bytearray()
     client_socket.settimeout(60.0)
+    buffer = bytearray()
 
-    while not (got_binary and got_eor and got_term):
+    def done():
+        if e_state == "active":
+            return got_binary and got_eor and got_device and got_functions
+        if e_state == "off":
+            return got_binary and got_eor and got_term
+        return False  # still waiting for the client's TN3270E WILL/WONT
+
+    while not done():
         data = client_socket.recv(1024)
         if not data:
             break
@@ -882,67 +952,104 @@ def tn3270_negotiate(client_socket):
             if buffer[i] != IAC:
                 i += 1
                 continue
-
             if i + 1 >= len(buffer):
-                break  # IAC at recv boundary; wait for next recv
+                break  # IAC at recv boundary; wait for more data
             cmd = buffer[i + 1]
 
             if cmd in (DO, DONT, WILL, WONT):
                 if i + 2 >= len(buffer):
-                    break  # incomplete 3-byte command; wait for more data
+                    break  # incomplete triplet
                 opt = buffer[i + 2]
-                if cmd == DO:
+                if opt == TN3270E:
+                    if cmd == WILL:
+                        e_state = "active"
+                        _send_e_sb(client_socket, bytes([E_SEND, E_DEVICE_TYPE]))
+                    elif cmd == WONT and e_state != "active":
+                        e_state = "off"
+                    elif cmd == DO:
+                        client_socket.sendall(bytes([IAC, WILL, TN3270E]))
+                elif cmd == DO:
                     client_socket.sendall(bytes([IAC, WILL, opt]))
-                elif cmd == DONT:
-                    client_socket.sendall(bytes([IAC, WONT, opt]))
+                    if opt in (BINARY, EOR_OPT):
+                        got_binary = got_binary or opt == BINARY
+                        got_eor = got_eor or opt == EOR_OPT
                 elif cmd == WILL:
                     client_socket.sendall(bytes([IAC, DO, opt]))
+                    if opt in (BINARY, EOR_OPT):
+                        got_binary = got_binary or opt == BINARY
+                        got_eor = got_eor or opt == EOR_OPT
+                elif cmd == DONT:
+                    client_socket.sendall(bytes([IAC, WONT, opt]))
                 elif cmd == WONT:
                     client_socket.sendall(bytes([IAC, DONT, opt]))
-
-                if opt == BINARY and cmd in (DO, WILL):
-                    got_binary = True
-                if opt == EOR_OPT and cmd in (DO, WILL):
-                    got_eor = True
-
                 i += 3
                 continue
 
             if cmd == SB:
-                if i + 3 >= len(buffer):
-                    break  # incomplete SB sequence; wait for more data
+                se_pos = buffer.find(bytes([IAC, SE]), i + 2)
+                if se_pos == -1:
+                    break  # incomplete SB; wait for more data
                 opt = buffer[i + 2]
-                if opt == TERMINAL_TYPE:
-                    subopt = buffer[i + 3]
-                    if subopt == 1:  # SEND
-                        term = b"IBM-3278-2"
-                        reply = bytes([IAC, SB, TERMINAL_TYPE, 0]) + term + bytes([IAC, SE])
-                        print("TX:", binascii.hexlify(reply))
-                        client_socket.sendall(reply)
-                    elif subopt == 0:  # IS
-                        term_type = buffer[i + 4 : buffer.index(IAC, i + 4)].decode(errors="ignore")
+                sub = bytes(buffer[i + 3:se_pos])   # payload after the option byte
+                if opt == TERMINAL_TYPE and sub:
+                    if sub[0] == 1:      # SEND → reply with our terminal type
+                        client_socket.sendall(
+                            bytes([IAC, SB, TERMINAL_TYPE, 0]) + b"IBM-3278-2"
+                            + bytes([IAC, SE]))
+                    elif sub[0] == 0:    # IS → the client's terminal type
+                        term_type = sub[1:].decode(errors="ignore")
                         print("Client terminal type:", term_type)
                         got_term = True
-
-                se_pos = buffer.find(bytes([IAC, SE]), i + 3)
-                if se_pos != -1:
-                    i = se_pos + 2
-                else:
-                    break
+                elif opt == TN3270E and len(sub) >= 2:
+                    got_device, got_functions, dtype = _handle_tn3270e_sb(
+                        client_socket, sub, got_device, got_functions)
+                    if dtype is not None:
+                        term_type = dtype
+                i = se_pos + 2
                 continue
-            else:
-                print("Unknown IAC command:", cmd)
 
+            print("Unknown IAC command:", cmd)
             i += 2
 
-    print("Negotiation complete: binary={}, eor={}, term={}".format(got_binary, got_eor, got_term))
-
+    e_active = e_state == "active"
     model = parse_terminal_type(term_type)
+    if e_active:
+        model = replace(model, tn3270e=True)
+    print("Negotiation complete: binary={}, eor={}, tn3270e={}, device={}".format(
+        got_binary, got_eor, e_active, model.term_type))
     print(f"Terminal model: {model.term_type} "
           f"(model {model.model}, alt {model.alt_rows}x{model.alt_cols}, "
           f"{'colour' if model.color else 'mono'}"
-          f"{', extended' if model.extended else ''})")
+          f"{', extended' if model.extended else ''}"
+          f"{', TN3270E' if e_active else ''})")
     return model
+
+
+def _handle_tn3270e_sb(sock, sub: bytes, got_device: bool, got_functions: bool):
+    """Handle one inbound TN3270E sub-negotiation message (``sub`` is the bytes
+    after ``IAC SB TN3270E``). Returns ``(got_device, got_functions, device_type
+    or None)``.
+
+    DEVICE-TYPE REQUEST → we answer DEVICE-TYPE IS (echoing the type, assigning a
+    device name) and kick off FUNCTIONS by proposing an empty set. FUNCTIONS
+    REQUEST → we answer FUNCTIONS IS (empty: we support no optional functions).
+    FUNCTIONS IS → the client agreed to our proposed set.
+    """
+    category, action = sub[0], sub[1]
+    if category == E_DEVICE_TYPE and action == E_REQUEST:
+        rest = sub[2:]
+        devtype = rest[:rest.index(E_CONNECT)] if E_CONNECT in rest else rest
+        device_type = devtype.decode(errors="ignore").strip()
+        _send_e_sb(sock, bytes([E_DEVICE_TYPE, E_IS]) + devtype
+                   + bytes([E_CONNECT]) + b"IBMTCP01")
+        _send_e_sb(sock, bytes([E_FUNCTIONS, E_REQUEST]))   # propose no functions
+        return True, got_functions, device_type
+    if category == E_FUNCTIONS and action == E_IS:
+        return got_device, True, None
+    if category == E_FUNCTIONS and action == E_REQUEST:
+        _send_e_sb(sock, bytes([E_FUNCTIONS, E_IS]))        # agree: no functions
+        return got_device, True, None
+    return got_device, got_functions, None
 
 
 # ISPF commands that leave the current panel. A panel's <keyl> binds function
@@ -977,6 +1084,11 @@ def _messages():
 def handle_client(client_socket, addr):
     print(f"Connection from {addr}")
     model = tn3270_negotiate(client_socket)
+    # When TN3270E was negotiated, wrap the socket so every subsequent record is
+    # framed with the 5-byte data header (and inbound headers are stripped in
+    # read_record) — transparently to all the screen-sending code below.
+    if model.tn3270e:
+        client_socket = TN3270EStream(client_socket)
     # Ask an extended terminal to describe itself (real size, colour); a base
     # terminal is left untouched. Uses the 60s negotiation timeout still in
     # effect, so a silent client can't wedge the session before the 600s below.
