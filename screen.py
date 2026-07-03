@@ -32,6 +32,11 @@ from server import (
 )
 
 ERASE_WRITE = 0xF5
+# ERASE/WRITE ALTERNATE selects the terminal's *alternate* (model-specific)
+# presentation space instead of the 24x80 default — 32x80 (model 3), 43x80
+# (model 4), or 27x132 (model 5). A Screen renders with this when ``alternate``
+# is set (see Screen.render); buffer addresses then use the screen's real width.
+ERASE_WRITE_ALTERNATE = 0x7E
 
 # Start Field Extended: like SF (0x1D), but the attribute is expressed as a
 # count followed by that many (type, value) pairs, so a field can carry colour
@@ -113,9 +118,9 @@ def _check_failure(check: dict, value: str):
     return None  # unknown check type: treat as passing
 
 
-def _emit_sba(buf: bytearray, row: int, col: int) -> None:
+def _emit_sba(buf: bytearray, row: int, col: int, cols: int = 80) -> None:
     buf.append(SBA)
-    buf.extend(encode_pack_addr(row, col))
+    buf.extend(encode_pack_addr(row, col, cols))
 
 
 @dataclass
@@ -133,8 +138,8 @@ class Text:
     color: Optional[Color] = None
     highlight: Optional[Highlight] = None
 
-    def render(self, buf: bytearray, color: bool = False) -> None:
-        _emit_sba(buf, self.row, self.col)
+    def render(self, buf: bytearray, color: bool = False, cols: int = 80) -> None:
+        _emit_sba(buf, self.row, self.col, cols)
         fa = field_attribute(display=self.intensity, protected=True)
         _emit_field_start(buf, fa,
                           self.color if color else None,
@@ -172,10 +177,10 @@ class Field:
         """Linear buffer address (row*80 + col) where this field's data starts."""
         return self.row * 80 + (self.col + 1)
 
-    def render(self, buf: bytearray, color: bool = False) -> None:
+    def render(self, buf: bytearray, color: bool = False, cols: int = 80) -> None:
         display = DisplayIntensity.NON_DISPLAY if self.hidden else self.intensity
         ftype = FieldType.NUMERIC if self.numeric else FieldType.ALPHANUMERIC
-        _emit_sba(buf, self.row, self.col)
+        _emit_sba(buf, self.row, self.col, cols)
         fa = field_attribute(
             display=display,
             protected=False,
@@ -191,11 +196,11 @@ class Field:
         )
         buf.extend(to_ebcdic(self.default.ljust(self.length)[: self.length]))
         if self.terminator:
-            _emit_sba(buf, self.row, self.col + 1 + self.length)
+            _emit_sba(buf, self.row, self.col + 1 + self.length, cols)
             buf.append(SF)
             buf.append(field_attribute(protected=True))
         if self.cursor:
-            _emit_sba(buf, self.row, self.col + 1)
+            _emit_sba(buf, self.row, self.col + 1, cols)
             buf.append(IC)
 
 
@@ -211,6 +216,10 @@ class Screen:
     # screen by default. Used to bounds-check element positions at load time.
     width: int = 80
     depth: int = 24
+    # Render on the terminal's *alternate* (model-specific) presentation space
+    # via ERASE/WRITE ALTERNATE, sizing buffer addresses by ``width``. Left False
+    # for the default 24x80 space, where the panels are byte-for-byte unchanged.
+    alternate: bool = False
     erase: bool = True
     reset_mdts: bool = True
     keyboard_restore: bool = True
@@ -348,7 +357,7 @@ class Screen:
         """
         buf = bytearray()
         if self.erase:
-            buf.append(ERASE_WRITE)
+            buf.append(ERASE_WRITE_ALTERNATE if self.alternate else ERASE_WRITE)
         buf.extend(
             write_control_character(
                 reset_mdts=self.reset_mdts,
@@ -357,9 +366,9 @@ class Screen:
             )
         )
         for item in self.items:
-            item.render(buf, color=color)
+            item.render(buf, color=color, cols=self.width)
         if self.cursor_at is not None:
-            _emit_sba(buf, self.cursor_at[0], self.cursor_at[1])
+            _emit_sba(buf, self.cursor_at[0], self.cursor_at[1], self.width)
             buf.append(IC)
         buf.extend([IAC, EOR])
         return bytes(buf)
