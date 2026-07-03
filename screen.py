@@ -67,6 +67,11 @@ RA = 0x3C
 # current position to a stop address, leaving protected text intact — the native
 # "clear the input fields" order (see Screen.render_erase_input).
 EUA = 0x12
+# Graphic Escape: the next single byte is taken from the terminal's alternate
+# graphic character set (the 3270 line-drawing / APL glyphs) instead of the base
+# EBCDIC code page. Used to draw box/rule glyphs (see GraphicText and the Line
+# set). Also valid as the repeat character of an RA order (see _emit_ra ``ge``).
+GE = 0x08
 # A run of the same character at least this long is worth compacting into an RA
 # order (RA is 4 bytes, so it wins for runs of 5+).
 _RA_MIN_RUN = 5
@@ -90,6 +95,28 @@ class Highlight(Enum):
     BLINK = 0xF1
     REVERSE = 0xF2
     UNDERSCORE = 0xF4
+
+
+class Line(Enum):
+    """3270 line-drawing glyphs from the Graphic Escape (GE) character set.
+
+    Each value is a code point in the terminal's alternate graphic set; emitted as
+    ``GE`` (0x08) + code (see :class:`GraphicText`), the terminal draws the box
+    glyph. The code points — and the Unicode box-drawing characters an emulator
+    renders/reads them back as — are from x3270's ``apl2uc[]`` table
+    (``Common/unicode.c``); e.g. code 0xA2 reads back as U+2500 '─'.
+    """
+    HORIZONTAL   = 0xA2   # ─ U+2500  light horizontal
+    VERTICAL     = 0x85   # │ U+2502  light vertical
+    TOP_LEFT     = 0xC5   # ┌ U+250C  down and right
+    TOP_RIGHT    = 0xD5   # ┐ U+2510  down and left
+    BOTTOM_LEFT  = 0xC4   # └ U+2514  up and right
+    BOTTOM_RIGHT = 0xD4   # ┘ U+2518  up and left
+    TEE_RIGHT    = 0xC6   # ├ U+251C  vertical and right
+    TEE_LEFT     = 0xD6   # ┤ U+2524  vertical and left
+    TEE_DOWN     = 0xD7   # ┬ U+252C  down and horizontal
+    TEE_UP       = 0xC7   # ┴ U+2534  up and horizontal
+    CROSS        = 0xD3   # ┼ U+253C  vertical and horizontal
 
 
 # CUA element role → default z/OS ISPF colour. An item carries a role (from the
@@ -193,7 +220,7 @@ def _emit_sba(buf: bytearray, row: int, col: int, cols: int = 80) -> None:
 
 
 def _emit_ra(buf: bytearray, stop: int, char_byte: int,
-             cols: int = 80, rows: int = 24) -> None:
+             cols: int = 80, rows: int = 24, ge: bool = False) -> None:
     """Repeat ``char_byte`` from the current buffer position up to (not
     including) the linear ``stop`` address.
 
@@ -201,10 +228,17 @@ def _emit_ra(buf: bytearray, stop: int, char_byte: int,
     stops at address 0, not one past the end: ``stop`` is taken modulo the buffer
     size. Without this a full-width rule on the bottom row would encode a stop
     address of ``cols*rows`` (e.g. 1920 on a 24x80 screen), which real terminals
-    reject as "RA address 1920 > maximum 1919"."""
+    reject as "RA address 1920 > maximum 1919".
+
+    When ``ge`` is set the repeat character is drawn from the graphic (line-drawing)
+    set: a ``GE`` byte is inserted before it, exactly where the RA order expects it
+    (``RA`` addr ``GE`` char), so a full-width line-drawing rule is one 6-byte order.
+    """
     stop %= cols * rows
     buf.append(RA)
     buf.extend(encode_pack_addr(stop // cols, stop % cols, cols))
+    if ge:
+        buf.append(GE)
     buf.append(char_byte)
 
 
@@ -262,6 +296,87 @@ class Text:
                      cols, rows)
         else:
             buf.extend(to_ebcdic(self.text))
+
+
+def _emit_graphic(buf: bytearray, row: int, col: int, codes: bytes,
+                  cols: int = 80, rows: int = 24) -> None:
+    """Emit a sequence of Graphic-Escape code points as a field's data.
+
+    Each code is written as ``GE`` (0x08) + code so it is taken from the graphic
+    (line-drawing) set rather than the EBCDIC code page. A run of one repeated code
+    long enough to be worth it is compacted into a single GE'd ``RA`` order — the
+    same rule-line compaction :class:`Text` applies — so a full-width border costs
+    one order, not two bytes per cell. The field-attribute byte occupies
+    ``(row, col)``, so the data begins at ``col + 1``.
+    """
+    pos = row * cols + col + 1
+    i, n = 0, len(codes)
+    while i < n:
+        j = i
+        while j < n and codes[j] == codes[i]:
+            j += 1
+        run = j - i
+        if run >= _RA_MIN_RUN:
+            _emit_ra(buf, pos + run, codes[i], cols, rows, ge=True)
+        else:
+            for _ in range(run):
+                buf.append(GE)
+                buf.append(codes[i])
+        pos += run
+        i = j
+
+
+@dataclass
+class GraphicText:
+    """Protected line-drawing text from the Graphic Escape (GE) character set.
+
+    ``codes`` is a ``bytes`` of GE code points (see :class:`Line`) — e.g.
+    ``bytes([Line.HORIZONTAL.value]) * 78`` for a rule, or corner+run+corner for a
+    box edge. Renders as a protected, non-editable field like :class:`Text`, but
+    every glyph comes from the terminal's graphic set via a ``GE`` order (identical
+    runs compact to a GE'd ``RA``). A colour/role emits ``SFE`` on a colour terminal
+    and plain ``SF`` on mono, exactly like :class:`Text`.
+    """
+
+    row: int
+    col: int
+    codes: bytes
+    intensity: DisplayIntensity = DisplayIntensity.NORMAL
+    color: Optional[Color] = None
+    highlight: Optional[Highlight] = None
+    role: Optional[str] = _dc_field(default=None, compare=False)
+
+    @classmethod
+    def rule(cls, row, col, width, line: Line = Line.HORIZONTAL, **kw) -> "GraphicText":
+        """A rule ``width`` cells wide drawn from ``line`` (default light
+        horizontal). The attribute byte occupies ``col``; the rule spans columns
+        ``col+1 .. col+width``."""
+        return cls(row, col, bytes([line.value]) * width, **kw)
+
+    @classmethod
+    def box_top(cls, row, col, width, **kw) -> "GraphicText":
+        """The top edge of a box ``width`` cells wide: ┌ + horizontals + ┐."""
+        inner = max(0, width - 2)
+        return cls(row, col, bytes([Line.TOP_LEFT.value])
+                   + bytes([Line.HORIZONTAL.value]) * inner
+                   + bytes([Line.TOP_RIGHT.value]), **kw)
+
+    @classmethod
+    def box_bottom(cls, row, col, width, **kw) -> "GraphicText":
+        """The bottom edge of a box ``width`` cells wide: └ + horizontals + ┘."""
+        inner = max(0, width - 2)
+        return cls(row, col, bytes([Line.BOTTOM_LEFT.value])
+                   + bytes([Line.HORIZONTAL.value]) * inner
+                   + bytes([Line.BOTTOM_RIGHT.value]), **kw)
+
+    def render(self, buf: bytearray, color: bool = False, cols: int = 80,
+               rows: int = 24) -> None:
+        _emit_sba(buf, self.row, self.col, cols)
+        fa = field_attribute(display=self.intensity, protected=True)
+        base_color = _role_colour(self.color, self.role) if color else None
+        base_highlight = self.highlight if color else None
+        _emit_field_start(buf, fa, base_color, base_highlight)
+        _emit_graphic(buf, self.row, self.col, self.codes, cols, rows)
 
 
 @dataclass
