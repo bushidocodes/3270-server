@@ -157,9 +157,12 @@ Screens are built with authentic 3270 orders:
 | SBA | `0x11` | Set Buffer Address — position the write cursor |
 | SF | `0x1D` | Start Field — define a protected or unprotected input field |
 | SFE | `0x29` | Start Field Extended — a field carrying colour / highlighting (colour terminals only) |
+| SA | `0x28` | Set Attribute — change colour/highlight for the following characters *within* a field (colour terminals only) |
 | IC | `0x13` | Insert Cursor — place the cursor in an input field |
 
 The Write Control Character (WCC) sent after ERASE_WRITE uses `0x43` — the correct x3270/wc3270 bit layout (`WCC_RESET_BIT | WCC_KEYBOARD_RESTORE_BIT | WCC_RESET_MDT_BIT`) — so the keyboard unlocks immediately after every screen update.
+
+**Character-level colour.** A field's colour normally comes from its field start (SF/SFE) and applies to the whole field. `Text.rich(...)` builds a single field whose text is coloured in segments — an emphasised keyword inside a line of normal text — by emitting **Set Attribute** (`SA`, `0x28`) orders between the runs, so it needn't be split into separate fields. Like SFE, SA is emitted only on a colour render; a mono terminal just gets the concatenated text, byte-for-byte unchanged. (Verified against ws3270, which renders the runs in their individual colours.)
 
 **Partial updates.** A full screen is an ERASE/WRITE that repaints everything and resets the modified-data tags. When only a message line changes, the server instead sends a plain **WRITE** (`0xF1`, via `Screen.render_partial`) that patches just the addressed positions with a WCC of `0x42` (keyboard-restore but **not** reset-MDT). Nothing else is repainted and the modified tags are left alone, so what the user has typed stays on screen and modified — the way real ISPF redisplays an "INVALID OPTION" message without clearing the command line. The ISPF Primary Option Menu uses this for its message line.
 

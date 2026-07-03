@@ -345,3 +345,55 @@ def test_ws3270_basic_mode_answers_read_partition_query():
     assert "WriteStructuredField error" not in trace, trace[-2000:]
     # ...and the session still reached the ISPF menu over the basic-TN3270 path.
     assert "ISPF Primary Option Menu" in out, out[-1500:]
+
+
+def _serve_one_screen(record_bytes):
+    """Serve a single hand-built 3270 record to one basic-TN3270 client, then
+    half-close: the emulator renders the buffered screen and sees EOF. (Holding
+    the socket open instead makes ws3270 reset and hang.) Used to exercise a
+    specific data-stream feature (here: SA) without the full session loop."""
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+
+    def serve():
+        try:
+            conn, _ = srv.accept()
+            server.tn3270_negotiate(conn)          # client uses N: → basic mode
+            conn.sendall(record_bytes)
+            conn.shutdown(socket.SHUT_WR)          # FIN after the screen (data first)
+        except OSError:
+            pass
+        finally:
+            srv.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    return port
+
+
+def test_ws3270_renders_character_level_set_attribute():
+    """A field with mixed colour (an emphasised keyword in a line of text, via SA
+    orders) renders on a real emulator: it processes our Set Attribute orders and
+    shows the text. Proves the SA bytes are a valid data stream a real terminal
+    accepts, not just an in-process assumption."""
+    _require_emulator()
+    from screen import Screen, Text, Color
+
+    scr = Screen().add(Text.rich(
+        1, 1,
+        [("Press ", None), ("ENTER", Color.RED), (" to continue, ", None),
+         ("PF3", Color.RED), (" to exit", None)],
+        role="text"))                              # base role "text" → green
+    port = _serve_one_screen(scr.render(color=True))
+    out, trace = _drive_traced(port, [
+        "Wait(3,Output)",
+        "Ascii()",
+        "Wait(1,Seconds)",
+        "Quit()",
+    ], basic=True)
+
+    # The emulator processed our SA orders and rendered the line.
+    assert "SetAttribute" in trace, trace[-2000:]
+    assert "Press ENTER to continue, PF3 to exit" in out, out[-1500:]

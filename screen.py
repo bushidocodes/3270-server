@@ -49,6 +49,12 @@ WRITE = 0xF1
 # terminals that negotiated the extended data stream; a mono terminal always
 # gets plain SF, so its data stream is byte-for-byte unchanged.
 SFE = 0x29
+# Set Attribute: sets one character attribute (a type/value pair) that applies to
+# the characters that follow it, *within* the current field — so a single field
+# can carry mixed colour/highlight (e.g. an emphasised keyword in a line of text)
+# without being split into separate fields. Only emitted on a colour render; a
+# mono render just concatenates the text, so it stays byte-for-byte unchanged.
+SA = 0x28
 XA_BASIC = 0xC0        # pair type: the all-character / basic field attribute
 XA_HIGHLIGHT = 0x41    # pair type: extended highlighting
 XA_FOREGROUND = 0x42   # pair type: foreground colour
@@ -128,6 +134,25 @@ def _emit_field_start(buf: bytearray, fa: int,
         buf.append(xa_value)
 
 
+def _emit_attr_runs(buf: bytearray, runs, base_color: Optional[Color],
+                    base_highlight: Optional[Highlight]) -> None:
+    """Emit a field's text as a sequence of attribute runs, each preceded by
+    ``SA`` orders setting the foreground colour and highlight for the characters
+    that follow. A run whose colour/highlight is ``None`` falls back to the
+    field's base attribute, so a plain run re-asserts the base — that is how the
+    text returns to normal after an emphasised phrase."""
+    for text, run_color, run_highlight in runs:
+        color = run_color if run_color is not None else base_color
+        highlight = run_highlight if run_highlight is not None else base_highlight
+        buf.append(SA)
+        buf.append(XA_FOREGROUND)
+        buf.append(color.value if color not in (None, Color.DEFAULT) else 0x00)
+        buf.append(SA)
+        buf.append(XA_HIGHLIGHT)
+        buf.append(highlight.value if highlight not in (None, Highlight.DEFAULT) else 0x00)
+        buf.extend(to_ebcdic(text))
+
+
 def _check_failure(check: dict, value: str):
     """Return message substitutions if ``value`` fails ``check``, else ``None``.
 
@@ -172,14 +197,35 @@ class Text:
     # CUA element role (e.g. "title", "num") → a default colour on colour
     # terminals. Not part of identity: two items that render alike are equal.
     role: Optional[str] = _dc_field(default=None, compare=False)
+    # Optional character-level attribute runs: a list of
+    # ``(text, color_or_None, highlight_or_None)`` that colour parts of this one
+    # field independently via SA orders (see :meth:`rich`). ``None`` means a plain
+    # field whose whole text uses the base attribute.
+    runs: Optional[list] = None
+
+    @classmethod
+    def rich(cls, row, col, runs, *, intensity=DisplayIntensity.NORMAL,
+             role=None, color=None, highlight=None) -> "Text":
+        """Build a single protected field whose text is coloured in segments.
+
+        ``runs`` is a list of ``(text, color)`` or ``(text, color, highlight)``;
+        a ``None`` colour/highlight uses the field's base attribute. The field's
+        ``text`` is the concatenation, so on a mono terminal it renders exactly
+        like a plain :class:`Text` of that string."""
+        norm = [(r[0], r[1], r[2] if len(r) > 2 else None) for r in runs]
+        return cls(row, col, "".join(t for t, _, _ in norm), intensity=intensity,
+                   role=role, color=color, highlight=highlight, runs=norm)
 
     def render(self, buf: bytearray, color: bool = False, cols: int = 80) -> None:
         _emit_sba(buf, self.row, self.col, cols)
         fa = field_attribute(display=self.intensity, protected=True)
-        _emit_field_start(buf, fa,
-                          _role_colour(self.color, self.role) if color else None,
-                          self.highlight if color else None)
-        buf.extend(to_ebcdic(self.text))
+        base_color = _role_colour(self.color, self.role) if color else None
+        base_highlight = self.highlight if color else None
+        _emit_field_start(buf, fa, base_color, base_highlight)
+        if self.runs is not None and color:
+            _emit_attr_runs(buf, self.runs, base_color, base_highlight)
+        else:
+            buf.extend(to_ebcdic(self.text))
 
 
 @dataclass
