@@ -37,6 +37,11 @@ ERASE_WRITE = 0xF5
 # (model 4), or 27x132 (model 5). A Screen renders with this when ``alternate``
 # is set (see Screen.render); buffer addresses then use the screen's real width.
 ERASE_WRITE_ALTERNATE = 0x7E
+# Plain Write: unlike ERASE/WRITE it does *not* clear the presentation space, so
+# only the addressed positions are changed and everything else — including what
+# the user has typed — stays put. Used by Screen.render_partial to patch a
+# message line without repainting the panel (see the ISPF menu redisplay).
+WRITE = 0xF1
 
 # Start Field Extended: like SF (0x1D), but the attribute is expressed as a
 # count followed by that many (type, value) pairs, so a field can carry colour
@@ -400,6 +405,33 @@ class Screen:
             item.render(buf, color=color, cols=self.width)
         if self.cursor_at is not None:
             _emit_sba(buf, self.cursor_at[0], self.cursor_at[1], self.width)
+            buf.append(IC)
+        buf.extend([IAC, EOR])
+        return bytes(buf)
+
+    def render_partial(self, items, color: bool = False,
+                       cursor_at: Optional[Tuple[int, int]] = None) -> bytes:
+        """Render a plain **Write** (0xF1) that updates only ``items``, leaving
+        the rest of the presentation space — and the modified-data tags — alone.
+
+        Unlike :meth:`render` this emits no ERASE, so the panel is *not*
+        repainted and whatever the user has typed stays on screen and modified.
+        Used to patch a message line or status field in place (e.g. the ISPF
+        menu redisplaying "INVALID OPTION" without clobbering the typed option).
+        ``cursor_at`` optionally repositions the cursor with an ``IC`` order.
+        """
+        buf = bytearray([WRITE])
+        buf.extend(
+            write_control_character(
+                reset_mdts=False,           # keep the user's modified input
+                keyboard_restore=True,      # unlock the keyboard for the next entry
+                sound_alarm=self.sound_alarm,
+            )
+        )
+        for item in items:
+            item.render(buf, color=color, cols=self.width)
+        if cursor_at is not None:
+            _emit_sba(buf, cursor_at[0], cursor_at[1], self.width)
             buf.append(IC)
         buf.extend([IAC, EOR])
         return bytes(buf)

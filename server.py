@@ -654,6 +654,34 @@ def send_ispf_menu(client_socket, userid: str, short_msg: str = None):
     return screen
 
 
+# The ISPF menu message occupies row 2 from column 25 to the right edge (the
+# start-field byte sits at column 25, its 54 characters of text at 26..79).
+_MENU_MSG_ROW, _MENU_MSG_COL, _MENU_MSG_WIDTH = 2, 25, 54
+
+
+def _update_menu_message(client_socket, screen, short_msg):
+    """Redisplay the ISPF menu's message line *in place* with a plain Write,
+    the way real ISPF does — so the option the user typed (and the rest of the
+    panel) stays put instead of being repainted and cleared.
+
+    The message text is blank-filled to a fixed width so a shorter message fully
+    overwrites a longer previous one, and the cursor is returned to the command
+    field. ``screen`` is the Screen from the last full render (unchanged layout),
+    reused to locate the command field."""
+    from screen import Text
+
+    color = getattr(_session, "color", False)
+    text = (short_msg or "")[:_MENU_MSG_WIDTH].ljust(_MENU_MSG_WIDTH)
+    msg_item = Text(_MENU_MSG_ROW, _MENU_MSG_COL, text, DisplayIntensity.HIGH)
+    cursor_at = None
+    if screen.command_field is not None:
+        cf = screen.command_field
+        cursor_at = (cf.row, cf.col + 1)   # the command field's data start
+    data = screen.render_partial([msg_item], color=color, cursor_at=cursor_at)
+    print("TX:", binascii.hexlify(data))
+    client_socket.sendall(data)
+
+
 def _dialog_vars(userid: str, model: "TerminalModel" = None):
     """The live ISPF dialog variables shown by Dialog Test (option 7), as
     ``{vname, vvalue}`` rows for the panel's ``<lstfld>`` table. These are real
@@ -1541,13 +1569,26 @@ def handle_client(client_socket, addr):
 
         # ISPF menu loop
         short_msg = None
+        screen = None
+        # Only repaint the whole panel when it actually changed — the first time
+        # in, and after any sub-panel that overwrote the screen. A stay-on-the-
+        # menu message (INVALID OPTION, …) is instead patched in place with a
+        # plain Write, so the option the user typed survives the redisplay.
+        needs_full_redraw = True
         while True:
-            screen = send_ispf_menu(client_socket, userid, short_msg)
+            if needs_full_redraw:
+                screen = send_ispf_menu(client_socket, userid, short_msg)
+            else:
+                _update_menu_message(client_socket, screen, short_msg)
             result = read_client_input(client_socket)
             if result is None:
                 return
             aid, fields, cursor = result
             print(f"AID={hex(aid)}, fields={redact_fields(fields)}")
+            # Assume the next outcome repaints the panel (a sub-panel, or exit).
+            # The stay-on-the-menu message branches below flip this off so the
+            # message is patched in place with a plain Write instead.
+            needs_full_redraw = True
 
             aid_str = aid_to_string(aid)
             # Read the option from the panel's <cmdarea> (its ZCMD command
@@ -1614,6 +1655,7 @@ def handle_client(client_socket, addr):
                 short_msg = None
             elif option in screen.selections:
                 short_msg = f"OPTION {option} NOT YET IMPLEMENTED"
+                needs_full_redraw = False   # patch the message, keep the input
             elif option:
                 action = screen.lookup_command(option)
                 if action and action.lower().startswith("alias ") \
@@ -1621,10 +1663,13 @@ def handle_client(client_socket, addr):
                     break  # e.g. BYE -> "alias exit" leaves ISPF
                 elif action:
                     short_msg = f"COMMAND {option} NOT YET IMPLEMENTED"
+                    needs_full_redraw = False
                 else:
                     short_msg = f"INVALID OPTION: {option}"
+                    needs_full_redraw = False
             else:
                 short_msg = None
+                needs_full_redraw = False    # bare Enter: keep whatever was typed
 
 
 def make_tls_context(certfile, keyfile=None):
