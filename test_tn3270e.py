@@ -96,14 +96,28 @@ def _negotiate_e(sock, devtype=b"IBM-3278-2", responses=False, sysreq=False,
         buf.extend(chunk)
 
 
+_pending_records = {}   # sock -> bytes buffered past the first IAC EOR
+
+
 def _read_record(sock, initial=b""):
-    buf = bytearray(initial)
-    while not (len(buf) >= 2 and buf[-2:] == bytes([IAC, EOR])):
+    """Read exactly one IAC-EOR-terminated record, buffering any bytes that
+    arrived past its terminator for the next call.
+
+    Splitting at the *first* terminator (not the last) is what keeps two records
+    the server sends back-to-back — e.g. the BIND then the logon screen, or
+    LOGOFF-COMPLETE then UNBIND — from being merged when TCP coalesces them into
+    a single ``recv`` (which happens on Linux but not always on Windows)."""
+    buf = bytearray(_pending_records.pop(sock, b""))
+    buf.extend(initial)
+    while True:
+        idx = buf.find(bytes([IAC, EOR]))
+        if idx != -1:
+            _pending_records[sock] = bytes(buf[idx + 2:])
+            return bytes(buf[:idx])
         chunk = sock.recv(4096)
         if not chunk:
             raise ConnectionError("closed")
         buf.extend(chunk)
-    return bytes(buf[:-2])
 
 
 def _pack(addr):
@@ -150,6 +164,7 @@ def e_session():
     try:
         yield sock
     finally:
+        _pending_records.pop(sock, None)
         sock.close()
         srv.close()
 
