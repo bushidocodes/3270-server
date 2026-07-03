@@ -289,3 +289,33 @@ def test_ws3270_invalid_option_keeps_typed_input():
     assert "ZZ" in out and "INVALID OPTION: ZZ" in out, out[-1500:]
     # The redisplay reached the emulator as a plain Write, not an EraseWrite.
     assert "< Write(" in trace, trace[-2000:]
+
+
+def test_ws3270_contention_resolution_negotiated_and_send_data_granted():
+    """CONTENTION-RESOLUTION is always offered now, so a real emulator negotiates
+    it on every session. The server grants the keyboard send turn (the SEND-DATA
+    request flag) on every screen, so the client never has to BID and input flows
+    normally: login plus a second exchange reaches Dialog Test with the keyboard
+    never left locked, and no BID is ever sent.
+
+    (The byte-level SEND-DATA flag is asserted deterministically in
+    test_tn3270e.py. The emulator's *trace wording* for that flag varies by
+    version — s3270 v4.4 prints "3270-DATA SEND-DATA", v4.1 does not — so here we
+    assert on version-robust facts: the session flows and nobody bids.)"""
+    _require_emulator()
+    port = _serve_one_client()
+    out, trace = _drive_traced(port, [
+        "Wait(20,InputField)",
+        "String(IBMUSER)", "Tab()", "String(SYS1)", "Enter()",
+        "Wait(20,Unlock)",           # ISPF menu (first exchange in)
+        "String(7)", "Enter()",      # option 7 → Dialog Test (second exchange)
+        "Wait(20,Unlock)",
+        "Ascii()",
+        "Quit()",
+    ])
+
+    # The second exchange reached Dialog Test — input flowed with the function
+    # active, so the keyboard was never left locked...
+    assert "Dialog Test" in out, out[-1500:]
+    # ...and the client never had to send a BID (we granted the send turn).
+    assert "BID" not in trace, trace[-2000:]
