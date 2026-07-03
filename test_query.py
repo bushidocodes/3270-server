@@ -47,6 +47,31 @@ def _reply_record(cols=80, rows=32, color=True, highlight=True):
     return bytes(rec)
 
 
+# The base + APL descriptors a US ws3270 actually reports (CP037 base, CP310 APL).
+_WS3270_SETS = ((0x00, 0x10, 0x00, 0x02B90025), (0x01, 0x00, 0xF1, 0x03C30136))
+
+
+def _charsets(ge=True, cgcsgid=True, dbcs=False, sets=_WS3270_SETS):
+    """Build a Character Sets (0x85) Query Reply structured field.
+
+    ``sets`` is a list of ``(SET, FLAGS, LCID, CGCSGID)`` descriptors. DBCS
+    descriptors carry an extra SW/SH/SUBSN/SUBSN block (DL=11) before the CGCSGID.
+    """
+    flags = (server.CS_FLAG_GE if ge else 0)
+    flags |= (server.CS_FLAG_CGCSGID if cgcsgid else 0)
+    flags |= (server.CS_FLAG_DBCS if dbcs else 0)
+    dl = 11 if dbcs else 7
+    body = bytearray([flags, 0x00, 0x09, 0x0C, 0x00, 0x00, 0x00, 0x00, dl])
+    for st, fl, lcid, cg in sets:
+        body += bytes([st, fl, lcid])
+        if dbcs:
+            body += bytes([0x00, 0x00, 0x00, 0x00])   # SW SH SUBSN SUBSN
+        body += cg.to_bytes(4, "big")
+    sf_body = bytes([server.SF_QUERY_REPLY, server.QR_CHARSETS]) + bytes(body)
+    length = 2 + len(sf_body)
+    return bytes([(length >> 8) & 0xFF, length & 0xFF]) + sf_body
+
+
 # ── the outbound query ───────────────────────────────────────────────────────
 
 def test_read_partition_query_bytes():
@@ -92,6 +117,77 @@ def test_parse_summary_enumerates_capabilities():
     assert caps["color"] and caps["highlight"]
     assert caps["charsets"] and caps["reply_modes"]
     assert server.QR_REPLY_MODES in caps["qcodes"]
+
+
+# ── the Character Sets (0x85) reply payload ──────────────────────────────────
+
+# A real Character Sets reply captured from ws3270 v4.4 (basic-TN3270, IBM-3279-2-E).
+# Ground truth so the parser is tested against a genuine terminal, not just our own
+# builder. Decodes to: GE supported; base set CP037 (CGCSGID 0x02B90025, CPGID 37);
+# graphic set LCID 0xF1 = CP310 APL/line-drawing (CGCSGID 0x03C30136, CPGID 310).
+_REAL_WS3270_CHARSETS = bytes.fromhex(
+    "001b81858200090c000000000700100002b900250100f103c30136")
+
+
+def test_charsets_builder_matches_the_real_ws3270_reply():
+    # Our synthetic builder reproduces a real terminal's bytes exactly — so tests
+    # built on it are testing the true wire format.
+    assert _charsets() == _REAL_WS3270_CHARSETS
+
+
+def test_parse_charsets_real_ws3270_reply():
+    caps = parse_query_reply(bytes([server.AID_SF]) + _REAL_WS3270_CHARSETS)
+    assert caps["ge"] is True                       # advertises Graphic Escape
+    assert caps["dbcs"] is False
+    assert caps["base_cgcsgid"] == 0x02B90025        # base set…
+    assert (caps["base_cgcsgid"] & 0xFFFF) == 37     # …CPGID 37 = CP037 (US EBCDIC)
+    # The APL/line-drawing graphic set (CP310) that Graphic Escape draws from.
+    assert any((cs["cgcsgid"] & 0xFFFF) == 310 and cs["lcid"] == 0xF1
+               for cs in caps["char_sets"])
+
+
+def test_parse_charsets_descriptors():
+    caps = parse_query_reply(bytes([server.AID_SF]) + _charsets())
+    assert [cs["set"] for cs in caps["char_sets"]] == [0x00, 0x01]
+    assert [cs["lcid"] for cs in caps["char_sets"]] == [0x00, 0xF1]
+    assert [cs["cgcsgid"] for cs in caps["char_sets"]] == [0x02B90025, 0x03C30136]
+
+
+def test_parse_charsets_no_graphic_escape():
+    # A terminal that does not set the GE flag is reported as not GE-capable.
+    caps = parse_query_reply(bytes([server.AID_SF]) + _charsets(ge=False))
+    assert caps["ge"] is False
+
+
+def test_parse_charsets_dbcs_reply():
+    # A DBCS reply (DL=11 descriptors, a set with the DBCS flag) is detected.
+    dbcs_sets = ((0x00, 0x10, 0x00, 0x02B90025),
+                 (0x80, server.CS_DBCS_SET, 0xF8, 0x02B90025))
+    caps = parse_query_reply(
+        bytes([server.AID_SF]) + _charsets(dbcs=True, sets=dbcs_sets))
+    assert caps["dbcs"] is True
+    assert [cs["set"] for cs in caps["char_sets"]] == [0x00, 0x80]
+
+
+def test_parse_charsets_is_defensive_against_a_partial_descriptor():
+    # A self-consistent SF whose descriptor region ends with a partial (3-byte)
+    # entry must not raise: the loop stops at the last whole descriptor.
+    prefix = bytes([0x82, 0x00, 0x09, 0x0C, 0x00, 0x00, 0x00, 0x00, 0x07])  # flags…DL=7
+    desc1 = bytes([0x00, 0x10, 0x00]) + (0x02B90025).to_bytes(4, "big")     # whole
+    partial = bytes([0x01, 0x00, 0xF1])                                     # no CGCSGID
+    sf_body = bytes([server.SF_QUERY_REPLY, server.QR_CHARSETS]) + prefix + desc1 + partial
+    length = 2 + len(sf_body)
+    rec = bytes([server.AID_SF, (length >> 8) & 0xFF, length & 0xFF]) + sf_body
+    caps = parse_query_reply(rec)
+    assert caps["char_sets"] == [
+        {"set": 0x00, "flags": 0x10, "lcid": 0x00, "cgcsgid": 0x02B90025}]
+
+
+def test_parse_charsets_absent_leaves_defaults():
+    # A reply with no 0x85 payload leaves the char-set fields at their defaults.
+    caps = parse_query_reply(_reply_record(color=True))
+    assert caps["char_sets"] == [] and caps["ge"] is False
+    assert caps["base_cgcsgid"] is None
 
 
 class _ChunkSocket:
@@ -203,6 +299,37 @@ def test_query_terminal_folds_in_reply():
     m = result["model"]
     assert (m.alt_cols, m.alt_rows) == (80, 32)   # usable area from the reply
     assert m.color                                 # Color Query Reply seen
+
+
+def test_query_terminal_folds_in_charsets():
+    """A terminal's Character Sets reply is decoded onto the model: Graphic Escape
+    support, the base CGCSGID, and the descriptor list — so the send path can gate
+    GE / code-page / DBCS on real capability instead of guessing."""
+    srv, cli = socket.socketpair()
+    result = {}
+
+    def run():
+        model = server.parse_terminal_type("IBM-3279-2-E")
+        result["model"] = server.query_terminal(srv, model)
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    try:
+        cli.settimeout(5)
+        cli.recv(64)                                  # the outbound query
+        rec = bytes([server.AID_SF]) + _usable_area(80, 24) + _charsets()
+        cli.sendall(rec + bytes([IAC, EOR]))
+        t.join(timeout=5)
+    finally:
+        srv.close()
+        cli.close()
+
+    m = result["model"]
+    assert m.graphic_escape is True                    # from the 0x85 GE flag
+    assert m.dbcs_capable is False
+    assert m.base_cgcsgid == 0x02B90025                 # CP037 base set
+    assert (0x01, 0x00, 0xF1, 0x03C30136) in m.char_sets   # the APL graphic set
+    assert server.QR_CHARSETS in m.query_caps
 
 
 # ── full session start through handle_client ─────────────────────────────────
