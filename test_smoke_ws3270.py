@@ -289,3 +289,30 @@ def test_ws3270_invalid_option_keeps_typed_input():
     assert "ZZ" in out and "INVALID OPTION: ZZ" in out, out[-1500:]
     # The redisplay reached the emulator as a plain Write, not an EraseWrite.
     assert "< Write(" in trace, trace[-2000:]
+
+
+def test_ws3270_contention_resolution_negotiated_and_send_data_granted():
+    """A real emulator negotiates CONTENTION-RESOLUTION and the server grants the
+    keyboard send permission (the SEND-DATA request flag) on every screen — so
+    the client never has to BID and input flows normally. Two exchanges (login,
+    then an option) prove the keyboard is never left locked; asserted on the
+    deterministic protocol trace."""
+    _require_emulator()
+    port = _serve_one_client()
+    out, trace = _drive_traced(port, [
+        "Wait(20,InputField)",
+        "String(IBMUSER)", "Tab()", "String(SYS1)", "Enter()",
+        "Wait(20,Unlock)",           # ISPF menu (first exchange in)
+        "String(7)", "Enter()",      # option 7 → Dialog Test (second exchange)
+        "Wait(20,Unlock)",
+        "Ascii()",
+        "Quit()",
+    ])
+
+    # Both sides agreed the function...
+    assert "FUNCTIONS IS" in trace and "CONTENTION-RESOLUTION" in trace, trace[-2000:]
+    # ...the server granted send permission on its 3270-DATA screens...
+    assert "3270-DATA SEND-DATA" in trace, trace[-2000:]
+    # ...the client never had to bid, and the second exchange succeeded.
+    assert "BID" not in trace, trace[-2000:]
+    assert "Dialog Test" in out, out[-1500:]

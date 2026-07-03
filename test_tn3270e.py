@@ -26,6 +26,8 @@ E_DT_SSCP_LU_DATA = 0x07   # SSCP-LU data-type (the SYSREQ host session)
 E_FUNC_BIND_IMAGE = 0      # the BIND-IMAGE function code
 E_FUNC_RESPONSES = 2       # the RESPONSES function code
 E_FUNC_SYSREQ = 4          # the SYSREQ function code
+E_FUNC_CONTENTION_RESOLUTION = 5   # the CONTENTION-RESOLUTION function code
+E_RQF_SEND_DATA = 0x01     # REQUEST-FLAG bit: client may send (SEND-DATA)
 AO = 0xF5                  # Telnet Abort Output → the SYSREQ key
 IP = 0xF4                  # Telnet Interrupt Process → the ATTN key
 ENTER = 0x7D
@@ -42,11 +44,11 @@ def _e_sb(sock, payload):
 
 
 def _negotiate_e(sock, devtype=b"IBM-3278-2", responses=False, sysreq=False,
-                 bind_image=False):
+                 bind_image=False, contention=False):
     """Drive the server's negotiation as a TN3270E client. Accepts TN3270E,
     answers SEND DEVICE-TYPE with a DEVICE-TYPE REQUEST, and settles FUNCTIONS —
-    agreeing the BIND-IMAGE / RESPONSES / SYSREQ functions when requested, else
-    an empty set. Returns (leftover_bytes, device_is_seen)."""
+    agreeing the BIND-IMAGE / RESPONSES / SYSREQ / CONTENTION-RESOLUTION functions
+    when requested, else an empty set. Returns (leftover_bytes, device_is_seen)."""
     buf = bytearray()
     seen_device_is = False
     deadline = time.time() + 10
@@ -81,7 +83,8 @@ def _negotiate_e(sock, devtype=b"IBM-3278-2", responses=False, sysreq=False,
                 elif opt == TN3270E and sub[:2] == bytes([E_FUNCTIONS, E_REQUEST]):
                     funcs = bytes(([E_FUNC_BIND_IMAGE] if bind_image else [])
                                   + ([E_FUNC_RESPONSES] if responses else [])
-                                  + ([E_FUNC_SYSREQ] if sysreq else []))
+                                  + ([E_FUNC_SYSREQ] if sysreq else [])
+                                  + ([E_FUNC_CONTENTION_RESOLUTION] if contention else []))
                     _e_sb(sock, bytes([E_FUNCTIONS, E_IS]) + funcs)       # agree the set
                 del buf[:se + 2]
             else:
@@ -344,4 +347,45 @@ def test_bind_image_then_login_round_trip(e_session):
     _read_record(e_session)                                 # logon panel
     e_session.sendall(_reply_e({USERID_ADDR: "IBMUSER", PASSWORD_ADDR: "SYS1"}))
     menu = _read_record(e_session)
+    assert "ISPF Primary Option Menu" in menu.decode("cp037", errors="replace")
+
+
+# ── the CONTENTION-RESOLUTION function ───────────────────────────────────────
+
+def test_contention_sets_send_data_request_flag(e_session):
+    # With CONTENTION-RESOLUTION agreed, every outbound 3270-DATA record carries
+    # the SEND-DATA bit in the REQUEST-FLAG (header byte 1) — the server granting
+    # the client permission to send, so it never has to bid.
+    leftover, _ = _negotiate_e(e_session, contention=True)
+    logon = _read_record(e_session, leftover)
+    assert logon[0] == 0x00                       # DATA-TYPE 3270-DATA
+    assert logon[1] == E_RQF_SEND_DATA            # REQUEST-FLAG = SEND-DATA
+    assert logon[5] == ERASE_WRITE
+
+
+def test_no_contention_leaves_request_flag_zero(e_session):
+    # Without the function, the REQUEST-FLAG stays 0 — the header is unchanged.
+    leftover, _ = _negotiate_e(e_session, contention=False)
+    logon = _read_record(e_session, leftover)
+    assert logon[1] == 0x00
+
+
+def test_contention_and_responses_combine_in_the_header(e_session):
+    # The two functions live in different header bytes: SEND-DATA in REQUEST-FLAG
+    # (byte 1), ALWAYS-RESPONSE in RESPONSE-FLAG (byte 2) under a live sequence.
+    leftover, _ = _negotiate_e(e_session, contention=True, responses=True)
+    logon = _read_record(e_session, leftover)
+    assert logon[1] == E_RQF_SEND_DATA            # REQUEST-FLAG
+    assert logon[2] == 0x02                        # RESPONSE-FLAG = ALWAYS-RESPONSE
+    assert (logon[3] << 8 | logon[4]) == 1         # first sequence number
+
+
+def test_contention_login_round_trip(e_session):
+    # The send-permission signalling doesn't disturb the session: a normal login
+    # still reaches the ISPF menu (and that record, too, carries SEND-DATA).
+    leftover, _ = _negotiate_e(e_session, contention=True)
+    _read_record(e_session, leftover)                       # logon panel
+    e_session.sendall(_reply_e({USERID_ADDR: "IBMUSER", PASSWORD_ADDR: "SYS1"}))
+    menu = _read_record(e_session)
+    assert menu[1] == E_RQF_SEND_DATA
     assert "ISPF Primary Option Menu" in menu.decode("cp037", errors="replace")

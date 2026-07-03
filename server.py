@@ -126,6 +126,13 @@ E_DT_RESPONSE = 0x02
 E_DT_BIND_IMAGE = 0x03     # the SNA BIND image (binds the LU-LU session)
 E_DT_UNBIND = 0x04
 E_DT_SSCP_LU_DATA = 0x07   # the SSCP-LU session (used in SYSREQ "suspended" mode)
+E_DT_BID = 0x09            # CONTENTION-RESOLUTION: client bids to send (unused, see below)
+
+# REQUEST-FLAG (header byte 1). With the CONTENTION-RESOLUTION function the
+# SEND-DATA bit grants the client permission to send on the 3270 session; a
+# client that receives a 3270-DATA record without it must BID and wait before
+# sending. We always grant it (send-a-screen-then-read), so a BID never occurs.
+E_RQF_SEND_DATA = 0x01
 
 # RESPONSE-FLAG (header byte 2). Outbound it asks whether the client should
 # acknowledge; inbound (on a RESPONSE message) it says whether the ack is good.
@@ -136,13 +143,18 @@ E_RSF_POSITIVE = 0x00     # inbound: positive response (record processed)
 E_RSF_NEGATIVE = 0x01     # inbound: negative response (error; body = sense code)
 
 # TN3270E FUNCTIONS (negotiable capabilities). We support BIND-IMAGE (so the
-# session can be bound, which enables the ATTN key), RESPONSES, and SYSREQ.
+# session can be bound, which enables the ATTN key), RESPONSES, SYSREQ, and
+# CONTENTION-RESOLUTION (the half-duplex send-permission handshake).
 E_FUNC_BIND_IMAGE = 0
 E_FUNC_DATA_STREAM_CTL = 1
 E_FUNC_RESPONSES = 2
 E_FUNC_SCS_CTL_CODES = 3
 E_FUNC_SYSREQ = 4
-E_SUPPORTED_FUNCTIONS = frozenset({E_FUNC_BIND_IMAGE, E_FUNC_RESPONSES, E_FUNC_SYSREQ})
+E_FUNC_CONTENTION_RESOLUTION = 5
+E_SUPPORTED_FUNCTIONS = frozenset({
+    E_FUNC_BIND_IMAGE, E_FUNC_RESPONSES, E_FUNC_SYSREQ,
+    E_FUNC_CONTENTION_RESOLUTION,
+})
 
 
 # A synthetic SNA BIND image for the LU-LU session, sent (DATA-TYPE BIND-IMAGE)
@@ -204,11 +216,13 @@ class TN3270EStream:
     ``read_record``, which knows where a record ends (at IAC EOR).
     """
 
-    def __init__(self, sock, responses=False, sysreq=False, bind_image=False):
+    def __init__(self, sock, responses=False, sysreq=False, bind_image=False,
+                 contention=False):
         self._sock = sock
         self.responses = responses   # RESPONSES function negotiated?
         self.sysreq = sysreq         # SYSREQ function negotiated?
         self.bind_image = bind_image  # BIND-IMAGE function negotiated?
+        self.contention = contention  # CONTENTION-RESOLUTION function negotiated?
         self.bound = False           # has a BIND-IMAGE been sent (session bound)?
         self._seq = 0                # outbound sequence number (mod 2^16)
         self.last_response = None    # (seq, positive_bool, code) of the last ack
@@ -216,14 +230,18 @@ class TN3270EStream:
         self.last_screen = None      # last 3270-DATA record sent (for redisplay)
 
     def sendall(self, data):
+        # REQUEST-FLAG: with CONTENTION-RESOLUTION we grant the client permission
+        # to send on the 3270 session (SEND-DATA) with every screen, so it never
+        # has to bid before returning input.
+        request_flag = E_RQF_SEND_DATA if self.contention else 0x00
         if self.responses:
             # Ask the client to acknowledge this record under a fresh sequence.
             self._seq = (self._seq + 1) & 0xFFFF
-            header = bytes([E_DT_3270_DATA, 0x00, E_RSF_ALWAYS_RESPONSE,
+            header = bytes([E_DT_3270_DATA, request_flag, E_RSF_ALWAYS_RESPONSE,
                             (self._seq >> 8) & 0xFF, self._seq & 0xFF])
         else:
             # No RESPONSES function: no response wanted, sequence number 0.
-            header = bytes([E_DT_3270_DATA, 0x00, E_RSF_NO_RESPONSE, 0x00, 0x00])
+            header = bytes([E_DT_3270_DATA, request_flag, E_RSF_NO_RESPONSE, 0x00, 0x00])
         self.last_screen = data      # remember it so SYSREQ resume can redisplay
         self._sock.sendall(header + data)
 
@@ -406,6 +424,7 @@ class TerminalModel:
     tn3270e_responses: bool = False  # TN3270E RESPONSES function agreed
     tn3270e_sysreq: bool = False     # TN3270E SYSREQ function agreed
     tn3270e_bind_image: bool = False  # TN3270E BIND-IMAGE function agreed
+    tn3270e_contention: bool = False  # TN3270E CONTENTION-RESOLUTION function agreed
 
 
 def parse_terminal_type(term_type: str) -> TerminalModel:
@@ -1316,6 +1335,7 @@ def tn3270_negotiate(client_socket):
     got_binary = got_eor = got_term = False
     e_state = "unknown"          # "unknown" until the client accepts/refuses
     got_device = got_functions = responses = sysreq = bind_image = False
+    contention = False
     term_type = None
 
     negot = bytearray()
@@ -1417,6 +1437,7 @@ def tn3270_negotiate(client_socket):
                         responses = E_FUNC_RESPONSES in funcs
                         sysreq = E_FUNC_SYSREQ in funcs
                         bind_image = E_FUNC_BIND_IMAGE in funcs
+                        contention = E_FUNC_CONTENTION_RESOLUTION in funcs
                 i = se_pos + 2
                 continue
 
@@ -1427,7 +1448,8 @@ def tn3270_negotiate(client_socket):
     model = parse_terminal_type(term_type)
     if e_active:
         model = replace(model, tn3270e=True, tn3270e_responses=responses,
-                        tn3270e_sysreq=sysreq, tn3270e_bind_image=bind_image)
+                        tn3270e_sysreq=sysreq, tn3270e_bind_image=bind_image,
+                        tn3270e_contention=contention)
     print("Negotiation complete: binary={}, eor={}, tn3270e={}, device={}".format(
         got_binary, got_eor, e_active, model.term_type))
     print(f"Terminal model: {model.term_type} "
@@ -1437,7 +1459,8 @@ def tn3270_negotiate(client_socket):
           f"{', TN3270E' if e_active else ''}"
           f"{', RESPONSES' if e_active and responses else ''}"
           f"{', SYSREQ' if e_active and sysreq else ''}"
-          f"{', BIND-IMAGE' if e_active and bind_image else ''})")
+          f"{', BIND-IMAGE' if e_active and bind_image else ''}"
+          f"{', CONTENTION-RESOLUTION' if e_active and contention else ''})")
     return model
 
 
@@ -1509,7 +1532,8 @@ def handle_client(client_socket, addr):
     if model.tn3270e:
         client_socket = TN3270EStream(client_socket, responses=model.tn3270e_responses,
                                       sysreq=model.tn3270e_sysreq,
-                                      bind_image=model.tn3270e_bind_image)
+                                      bind_image=model.tn3270e_bind_image,
+                                      contention=model.tn3270e_contention)
     # Ask an extended terminal to describe itself (real size, colour); a base
     # terminal is left untouched. Uses the 60s negotiation timeout still in
     # effect, so a silent client can't wedge the session before the 600s below.
