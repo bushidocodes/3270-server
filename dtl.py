@@ -201,6 +201,10 @@ _HIGHLIGHTS = {
     "rvideo": Highlight.REVERSE,
 }
 
+# Each DTL element is tagged with a CUA "role" (see screen._CUA_COLORS), so a
+# colour terminal renders it in the standard z/OS colour for that kind of element
+# unless it carries an explicit COLOR.
+
 # Block tags whose text flows as protected lines (like <info>): paragraphs,
 # list items (<li>/<dt>/<dd>/<pt>/<pd>/<lp>), and preformatted <lines>. Their
 # list containers (<ul>/<ol>/<dl>/<parml>/<sl>) are transparent — ignored.
@@ -299,6 +303,7 @@ class _DTLParser(HTMLParser):
     def _hilite(self, a):
         """The Highlight for a tag's HILITE= attribute, or None."""
         return _HIGHLIGHTS.get(str(a.get("hilite", "")).strip().lower())
+
 
     # ── SGML event handling ──────────────────────────────────────────────────
 
@@ -646,7 +651,7 @@ class _DTLParser(HTMLParser):
         elif tag == "lstcol":
             self._add_lstcol(a, content)
         elif tag in _TEXT_TAGS:
-            self._emit_info(a, content)
+            self._emit_info(a, content, tag)
         elif tag == "dtafld":
             self._emit_dtafld(a, content)
         elif tag == "cmdarea":
@@ -785,7 +790,8 @@ class _DTLParser(HTMLParser):
             return self._roman(n) + "."
         return f"{n}."
 
-    def _emit_flow_lines(self, text, row, col, ctx, marker=None, marker_col=None):
+    def _emit_flow_lines(self, text, row, col, ctx, marker=None, marker_col=None,
+                         role=None):
         """Word-wrap ``text`` and emit it as protected lines from ``row`` at
         ``col`` (hanging indent for continuations). Optionally place a ``marker``
         (bullet/number) on the first line. Advances the flow cursor."""
@@ -793,7 +799,7 @@ class _DTLParser(HTMLParser):
         if marker is not None:
             self.screen.add(Text(row, marker_col, marker, DisplayIntensity.NORMAL))
         for i, ln in enumerate(lines):
-            self.screen.add(Text(row + i, col, ln, DisplayIntensity.NORMAL))
+            self.screen.add(Text(row + i, col, ln, DisplayIntensity.NORMAL, role=role))
         if ctx is not None:
             ctx["row"] = row + len(lines)
 
@@ -921,11 +927,12 @@ class _DTLParser(HTMLParser):
                 end = gcols[-1]["x"] + gcols[-1]["width"]
                 text = g["heading"][:max(1, end - start)]
                 gx = start + max(0, (end - start - len(text)) // 2)
-                self.screen.add(Text(row, gx, text, H))
+                self.screen.add(Text(row, gx, text, H, role="heading"))
             row += 1
         for c in cols:
             if c["heading"]:
-                self.screen.add(Text(row, c["x"], c["heading"][:c["width"]], H))
+                self.screen.add(Text(row, c["x"], c["heading"][:c["width"]], H,
+                                     role="heading"))
         row += 1
         row = self._emit_lstfld_rows(cols, row)
         if fld["ctx"] is not None:
@@ -955,13 +962,13 @@ class _DTLParser(HTMLParser):
                 value = self._align(raw, c["width"], c["align"])
                 if c["usage"] == "out":
                     self.screen.add(Text(cy, c["x"], value, DisplayIntensity.NORMAL,
-                                         color=c.get("color")))
+                                         color=c.get("color"), role="cell"))
                 else:
                     self.screen.add(Field(
                         row=cy, col=c["x"], length=c["width"],
                         name=c["datavar"] or None, default=value,
                         terminator=id(c) in last_in_ids,
-                        color=c.get("color"),
+                        color=c.get("color"), role="cell",
                     ))
             row += entry_height
         return row
@@ -975,21 +982,32 @@ class _DTLParser(HTMLParser):
             return text.center(width)
         return text  # start/left: no padding (an input field fills its own width)
 
-    def _emit_info(self, a, content):
+    def _emit_info(self, a, content, tag="info"):
+        # CUA role → default colour: a fill line is a separator rule; a top/panel
+        # instruction is an instruction; a high-intensity heading is the title;
+        # everything else is normal text (labels/values).
+        if "fill" in a:
+            role = "rule"
+        elif tag in ("topinst", "paninst"):
+            role = "inst"
+        elif _intensity(a) is DisplayIntensity.HIGH:
+            role = "title"
+        else:
+            role = "text"
         if "fill" in a:
             content = a["fill"] * int(a.get("width", 0))
             row, col, _ = self._resolve_pos(a, "info")
-            self.screen.add(Text(row, col, content, _intensity(a)))
+            self.screen.add(Text(row, col, content, _intensity(a), role=role))
             return
         if "row" in a:
             # Explicit position: emit content exactly as written (no wrap), so
-            # the bundled panels stay byte-for-byte identical.
+            # the bundled panels stay byte-for-byte identical (mono).
             if "\n" in content:
                 content = re.sub(r"\s*\n\s*", " ", content).strip()
             if not content.strip():
                 return
             row, col, _ = self._resolve_pos(a, "info")
-            self.screen.add(Text(row, col, content, _intensity(a)))
+            self.screen.add(Text(row, col, content, _intensity(a), role=role))
             return
         # Flowed text: normalize whitespace and word-wrap to the panel width.
         text = " ".join(content.split())
@@ -999,7 +1017,7 @@ class _DTLParser(HTMLParser):
         if self._lists:
             # A paragraph inside a list aligns with the list's item text.
             col += len(self._lists) * self._LIST_INDENT
-        self._emit_flow_lines(text, row, col, ctx)
+        self._emit_flow_lines(text, row, col, ctx, role=role)
 
     # ── data area (<da> / <attr>) ────────────────────────────────────────────
 
@@ -1107,9 +1125,10 @@ class _DTLParser(HTMLParser):
                 f"panel width {self.screen.width}"
             )
         if content:
-            # The prompt/caption is a CUA element with its own (default) colour;
-            # DTL's COLOR on a <dtafld> colours the *field*, not the caption.
-            self.screen.add(Text(row, col, content, _intensity(a)))
+            # The prompt/caption is a CUA element with its own role colour (green,
+            # the field-prompt colour); DTL's COLOR on a <dtafld> colours the
+            # *field*, not the caption.
+            self.screen.add(Text(row, col, content, _intensity(a), role="prompt"))
         field = Field(
             row=row,
             col=fldcol,
@@ -1120,7 +1139,9 @@ class _DTLParser(HTMLParser):
             hidden=_bool_attr(a, "hidden"),
             cursor=_bool_attr(a, "cursor"),
             mdt=_bool_attr(a, "mdt", default=True),
-            color=self._color(a),          # DTL COLOR= colours the entry field
+            # DTL COLOR= colours the entry field; else its CUA role (turquoise).
+            color=self._color(a),
+            role="field",
             highlight=self._hilite(a),
         )
         self.screen.add(field)
@@ -1212,12 +1233,16 @@ class _DTLParser(HTMLParser):
         if sf is None:
             raise DTLError("<choice> outside of a <selfld>")
         row = sf["row"]
-        # The choice's colour: its own COLOR overrides the <selfld>'s.
-        color = self._color(a) or sf.get("color")
+        # An explicit COLOR (the choice's, else the <selfld>'s) colours the whole
+        # row; otherwise each part takes its CUA role colour — as on real ISPF the
+        # number, keyword, and description are white, turquoise, and green.
+        explicit = self._color(a) or sf.get("color")
         self.screen.add(Text(row, sf["numcol"], a.get("num", "").ljust(sf["numwidth"]),
-                             sf["numintensity"], color=color))
-        self.screen.add(Text(row, sf["namecol"], a.get("name", ""), color=color))
-        self.screen.add(Text(row, sf["desccol"], content, color=color))
+                             sf["numintensity"], color=explicit, role="num"))
+        self.screen.add(Text(row, sf["namecol"], a.get("name", ""),
+                             color=explicit, role="name"))
+        self.screen.add(Text(row, sf["desccol"], content,
+                             color=explicit, role="desc"))
         sf["row"] = row + 1
         # Record the selection value the user types to pick this choice. It
         # defaults to the displayed number; an explicit ``matchval`` overrides.

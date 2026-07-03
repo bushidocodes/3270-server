@@ -311,7 +311,11 @@ def parse_terminal_type(term_type: str) -> TerminalModel:
     core = t[:-2] if extended else t
     parts = core.split("-")
     device = parts[1] if len(parts) > 1 else ""
-    color = device == "3279"
+    # Colour-capable if a 3279 (colour device) or any extended-data-stream (-E)
+    # terminal: -E means it accepts extended field attributes (colour/highlight),
+    # and modern emulators report 3278-...-E yet display colour and don't answer a
+    # Read Partition Query — so -E is the capability signal we have.
+    color = device == "3279" or extended
     model = 2
     if len(parts) > 2 and parts[2].isdigit() and int(parts[2]) in _MODEL_DIMENSIONS:
         model = int(parts[2])
@@ -482,15 +486,26 @@ def redact_fields(fields):
 
 
 def _wants_color(model) -> bool:
-    """Whether to render colour for this session — only when the terminal
-    negotiated colour support (a 3279-family or query-confirmed terminal)."""
+    """Whether to render colour for this session — a 3279-family or any
+    extended-data-stream (-E) terminal (see parse_terminal_type)."""
     return bool(model is not None and model.color)
 
 
-def _send_screen(client_socket, screen, color: bool = False):
+# Per-connection render context. Each client is served on its own thread
+# (see _client_thread), so the session's colour capability is recorded here once
+# after negotiation and read by _send_screen for every panel — colouring the
+# whole session (menu and sub-panels included) without threading a flag through
+# each helper.
+_session = threading.local()
+
+
+def _send_screen(client_socket, screen, color: bool = None):
     """Render a screen.Screen to the 3270 data stream and send it. ``color``
-    enables extended (colour/highlight) attributes; a mono terminal leaves it
+    enables extended (colour/highlight) attributes; when omitted it defaults to
+    the session's colour capability (:data:`_session`). A mono session leaves it
     false, so the bytes are unchanged."""
+    if color is None:
+        color = getattr(_session, "color", False)
     data = screen.render(color=color)
     print("TX:", binascii.hexlify(data))
     client_socket.sendall(data)
@@ -1253,6 +1268,9 @@ def handle_client(client_socket, addr):
     # effect, so a silent client can't wedge the session before the 600s below.
     model = query_terminal(client_socket, model)
     client_socket.settimeout(600)
+    # Record the session's colour capability so every panel renders in colour on
+    # a colour terminal (see _send_screen / _session).
+    _session.color = _wants_color(model)
 
     while True:
         # Logon loop
