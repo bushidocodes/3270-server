@@ -1683,6 +1683,7 @@ def test_list_field_display_column_and_data_rows():
         Text(1, 1, "8:00", N),  Field(row=1, col=6, length=6, name="who", default="Acme", terminator=True),
         Text(2, 1, "9:00", N),  Field(row=2, col=6, length=6, name="who", default="Globex", terminator=True),
         Text(3, 1, "*" * 31 + " BOTTOM OF DATA " + "*" * 31, H, role="heading"),
+        Text(0, 64, "ROW 1 TO 2 OF 2", H, role="status"),   # scroll status, right of title row
     ]
 
 
@@ -1696,6 +1697,25 @@ def test_list_field_bottom_of_data_only_when_not_clipped():
     assert any("BOTTOM OF DATA" in getattr(t, "text", "") for t in fits.items)
     clipped = load_dtl(src, rows=[{"a": str(i)} for i in range(20)])  # > depth
     assert not any("BOTTOM OF DATA" in getattr(t, "text", "") for t in clipped.items)
+
+
+def test_list_field_row_status_shows_and_is_suppressed_under_a_full_width_title():
+    # #220: a "ROW 1 TO y OF z" scroll status renders on the title line's right for
+    # a table with data. It is suppressed when that region is already occupied (a
+    # full-width title rule) so it doesn't overwrite it — and it must not cause the
+    # panel's content title to be retracted.
+    s = load_dtl('<panel name="p" width="60">Roster<area><lstfld>'
+                 '<lstcol datavar=a colwidth=4>A</lstfld></area></panel>',
+                 rows=[{"a": "1"}, {"a": "2"}, {"a": "3"}])
+    row0 = [t for t in s.items if getattr(t, "row", None) == 0 and hasattr(t, "text")]
+    assert any(t.text == "Roster" for t in row0)              # title kept
+    assert any(t.text == "ROW 1 TO 3 OF 3" for t in row0)     # status present
+    # A full-width element on row 0 (a title rule) suppresses the status.
+    s2 = load_dtl('<panel name="p" width="60"><area>'
+                  '<info row="0" col="0" fill="-" width="59"/><lstfld>'
+                  '<lstcol datavar=a colwidth=4>A</lstfld></area></panel>',
+                  rows=[{"a": "1"}])
+    assert not any("ROW " in getattr(t, "text", "") for t in s2.items)
 
 
 def test_list_field_line_attribute_stacks_columns():
@@ -2042,8 +2062,8 @@ def test_lstfld_reference_figure_snapshot():
 
     Deltas from the IBM figure (documented): the column gutter is 1 (the figure
     reserves 2-3 for CUA attribute bytes, #221); input/BOTH cells show as blank
-    fields here (the snapshot renders fields as underscores); the runtime
-    "ROW x TO y OF z" status + F-keys are ISPF chrome."""
+    fields here (the snapshot renders fields as underscores); the F-key area is
+    ISPF chrome."""
     src = ("<PANEL NAME=lstcola WIDTH=76>Subscriber List\n"
            "<TOPINST>Enter phone number and approved indicator for each person.\n"
            "<AREA>\n  <LSTFLD>\n"
@@ -2062,7 +2082,7 @@ def test_lstfld_reference_figure_snapshot():
             {"xfname": "Sally", "xlname": "Forth", "xmid": "N"},
             {"xfname": "Melba", "xlname": "Toast", "xmid": "T"}]
     assert _ascii_snapshot(load_dtl(src, rows=rows)) == "\n".join([
-        "                              Subscriber List",
+        "                              Subscriber List               ROW 1 TO 3 OF 3",
         " Enter phone number and approved indicator for each person.",
         " -------- Subscriber Name ---------    Phone     Approved",
         " First Name      Last Name       MI Number       (Y or N)",

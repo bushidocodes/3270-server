@@ -1301,12 +1301,15 @@ class _DTLParser(HTMLParser):
         """Drop an auto title (and its action-bar separator rule) that collides
         with an explicit element on the same row. The bundled panels draw their own
         title rule / title, so the auto ones must not duplicate them — this keeps
-        those panels byte-identical to before the content-title form."""
+        those panels byte-identical to before the content-title form. A ``status``
+        element (an <lstfld> "ROW x OF y" on the title line's right) is not a title
+        and doesn't count as a collision."""
         for attr in ("_title_item", "_title_rule"):
             item = getattr(self, attr, None)
             setattr(self, attr, None)
             if item is not None and any(
                 it is not item and getattr(it, "row", None) == item.row
+                and getattr(it, "role", None) != "status"
                 for it in self.screen.items
             ):
                 self.screen.items.remove(item)
@@ -1598,6 +1601,18 @@ class _DTLParser(HTMLParser):
                                      role="heading"))
         row += 1
         row = self._emit_lstfld_rows(cols, row)
+        # ISPF puts a "ROW x TO y OF z" scroll status on the title line's right —
+        # but only if that region is free (a bundled panel's full-width title rule
+        # occupies it and carries its own scroll footer).
+        if self._rows:
+            status = f"ROW 1 TO {fld.get('shown', 0)} OF {len(self._rows)}"
+            sx = max(0, self.screen.width - len(status) - 1)
+            busy = any(getattr(it, "row", None) == 0 and hasattr(it, "text")
+                       and it.col < sx + len(status) and it.col + len(it.text) > sx
+                       for it in self.screen.items)
+            if not busy:
+                self.screen.add(Text(0, sx, status, DisplayIntensity.HIGH,
+                                     role="status"))
         if fld["ctx"] is not None:
             fld["ctx"]["row"] = row
 
@@ -1617,10 +1632,13 @@ class _DTLParser(HTMLParser):
         last_in_ids = {id(c) for c in last_in.values()}
         data = self._rows if self._rows else [None]
         clipped = False
+        shown = 0
         for entry in data:
             if row + entry_height > self.screen.depth - 1:
                 clipped = True
                 break  # leave room; don't overrun the panel
+            if entry is not None:
+                shown += 1
             for c in cols:
                 cy = row + (c["line"] - 1)
                 raw = "" if entry is None else str(entry.get(c["datavar"], ""))
@@ -1648,6 +1666,7 @@ class _DTLParser(HTMLParser):
             self.screen.add(Text(row, col0, line, DisplayIntensity.HIGH,
                                  role="heading"))
             row += 1
+        self._lstfld["shown"] = shown
         return row
 
     @staticmethod
