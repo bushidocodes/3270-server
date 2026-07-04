@@ -1288,21 +1288,31 @@ def _show_pulldown(client_socket, screen, choice):
     from screen import Text
 
     pdc = choice["pdc"]
-    texts = [f"{n}. {p['label']}" for n, p in enumerate(pdc, 1)]
-    inner = max(len(t) for t in texts) + 2
+    # <pdsep> entries are non-selectable divider rows; only the real choices are
+    # numbered (the numbering runs continuously across a separator).
+    items = [p for p in pdc if not p.get("separator")]
+    texts = [f"{n}. {p['label']}" for n, p in enumerate(items, 1)]
+    inner = max((len(t) for t in texts), default=0) + 2
     top = choice["row"] + 1
     col = choice["col"]
     border = "+" + "-" * inner + "+"
+    divider = "|" + "-" * inner + "|"
     screen.add(Text(top, col, border, DisplayIntensity.HIGH))
     action_by_row = {}
     help_by_row = {}
-    for n, item in enumerate(pdc):
-        row = top + 1 + n
-        screen.add(_pdc_item_text(row, col, n + 1, item, inner))
+    number = 0
+    row = top
+    for item in pdc:
+        row += 1
+        if item.get("separator"):
+            screen.add(Text(row, col, divider, DisplayIntensity.HIGH))
+            continue
+        number += 1
+        screen.add(_pdc_item_text(row, col, number, item, inner))
         action_by_row[row] = item["action"]
         if item.get("help"):
             help_by_row[row] = item["help"]
-    screen.add(Text(top + 1 + len(texts), col, border, DisplayIntensity.HIGH))
+    screen.add(Text(row + 1, col, border, DisplayIntensity.HIGH))
     screen.cursor_at = (top + 1, col + 1)  # land on the first item
 
     while True:

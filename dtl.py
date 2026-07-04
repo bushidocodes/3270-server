@@ -81,13 +81,16 @@ renders centered on row 0, with the body flowing beneath it.
 ``<keyi key cmd>desc``           one key binding: function key ``key`` (e.g.
                                  ``PF3``) invokes command ``cmd`` (e.g. ``EXIT``).
 ``<cmdtbl applid>``              an application command table (metadata).
-``<cmd name trunc>desc``         a command; ``trunc`` is the min chars to type.
+``<cmd name trunc>ext<t>ra``     a command; ``trunc`` (or a ``<t>`` truncation
+                                 point within the external name) is the min chars
+                                 to type.
 ``<cmdact action>``              the command's action (e.g. ``alias exit``,
                                  ``passthru``). Recorded in ``Screen.commands``.
 ``<ab row col gap>``             an action bar; its ``<abc>`` choice labels are
 ``<abc>label</abc>``             laid out across ``row``. Each ``<abc>`` holds
 ``<pdc action>label</pdc>``      ``<pdc>`` pull-down choices (kept in
-                                 ``Screen.action_bar`` for future interaction).
+``<pdsep>``                      ``Screen.action_bar`` for future interaction); a
+                                 ``<pdsep>`` is a divider row between them.
 ``<varclass name type msg>``     a variable class: ``type="char N"`` caps input
                                  length, ``type="numeric N"`` makes fields numeric
                                  (capping digits). May contain a ``<checkl>``.
@@ -111,8 +114,11 @@ renders centered on row 0, with the body flowing beneath it.
                                  from it when the field omits ``numeric``.
 ``<msgmbr name>``                a message member: container for ``<msg>`` entries
                                  (parsed by :func:`load_messages`, not a panel).
-``<msg msgid>text``              a message; ``&NAME`` references in ``text`` are
+``<msg msgid>text``              a message; ``&NAME`` references (or a nested
+``<varsub var>``                 ``<varsub var=NAME>`` tag) in ``text`` are
                                  substituted at display time. See `MessageCatalog`.
+Inline in body text: ``<hp>``/``<rp>`` emphasise a phrase within a text element
+(``<rp>`` — a reference phrase / help-panel link — renders underlined by default).
 
 ``<dtafld>`` attributes: ``datavar`` (field name sent back), ``entwidth`` (field
 length), ``display`` (``display=no`` is non-display, e.g. password), ``numeric``, ``default``,
@@ -341,6 +347,8 @@ class _DTLParser(HTMLParser):
         self._areas = []          # stack of <area>/<region> flow contexts
         self._in_cmdtbl = False   # inside a <cmdtbl>?
         self._cur_cmd = None      # current <cmd> dict awaiting its <cmdact>
+        self._cmd_chars = None    # current <cmd>'s captured external-name text, or None
+        self._cmd_tpos = None     # offset of a <t> truncation point within it, or None
         self._ab = None           # active <ab> action bar being built, or None
         self._cur_abc = None      # current <abc> action-bar choice, or None
         self._cur_pdc = None      # current <pdc> pull-down choice, or None
@@ -428,9 +436,22 @@ class _DTLParser(HTMLParser):
             self._finalize_panel_title()
         # An inline <hp> (highlighted phrase) inside a text element does NOT close
         # it — it emphasises a phrase *within* one field. Bank the runs and return
-        # before the implicit-flush below (see _begin_hp / _finalize_runs).
-        if tag == "hp" and self._tag in _TEXT_TAGS:
+        # before the implicit-flush below (see _begin_hp / _finalize_runs). A <rp>
+        # (reference phrase — a hypertext link to another help panel) is the same
+        # kind of inline emphasis; with no explicit emphasis it renders underlined,
+        # the CUA point-and-shoot link style.
+        if tag in ("hp", "rp") and self._tag in _TEXT_TAGS:
             self._begin_hp(a)
+            if tag == "rp" and self._hp == (None, None):
+                self._hp = (None, Highlight.UNDERSCORE)
+            return
+        # <varsub var=NAME> substitutes a dialog variable inside message text: emit
+        # an ISPF ``&NAME.`` reference into the text being captured, resolved at
+        # display time (MessageCatalog.format) exactly like a literal &NAME would be.
+        if tag == "varsub":
+            var = a.get("var")
+            if var:
+                self.handle_data(f"&{var}.")
             return
         # Implicit end tags: a new block element closes the open content element
         # (DTL omits most end tags). <dtafldd> (a field's prompt/description) and
@@ -530,12 +551,21 @@ class _DTLParser(HTMLParser):
             name = a.get("name")
             if not name:
                 raise DTLError("<cmd> missing required attribute 'name'")
+            self._finalize_cmd_trunc()   # close a previous <cmd> whose end tag was omitted
             self._cur_cmd = {"action": "", "trunc": int(a.get("trunc", 0))}
             self.screen.commands[name.upper()] = self._cur_cmd
+            # Capture the command's external-name text so a nested <t> can mark its
+            # truncation point (the text is otherwise only a human description).
+            self._cmd_chars, self._cmd_tpos = [], None
         elif tag == "cmdact":
             # The command action; read on start, since DTL often omits </cmdact>.
             if self._cur_cmd is not None:
                 self._cur_cmd["action"] = a.get("action", "")
+        elif tag == "t":
+            # A truncation point inside a <cmd> external name: the text before it is
+            # the minimum abbreviation the user must type (<cmd>CANC<t>EL → trunc 4).
+            if self._cmd_chars is not None:
+                self._cmd_tpos = len("".join(self._cmd_chars).strip())
         elif tag == "ab":
             self._ab = {"row": int(a.get("row", 0)), "col": int(a.get("col", 1)),
                         "gap": int(a.get("gap", 3)), "choices": []}
@@ -556,6 +586,14 @@ class _DTLParser(HTMLParser):
                 self._cur_pdc["action"] = (
                     a.get("action") or a.get("run") or a.get("cmd") or self._cur_pdc["action"]
                 )
+        elif tag == "pdsep":
+            # A separator line within an action-bar pull-down: close the choice
+            # above it (DTL omits end tags) and record a divider row between the
+            # pull-down choices. Rendered by _show_pulldown when the menu opens.
+            if self._cur_abc is None:
+                raise DTLError("<pdsep> outside of an <abc>")
+            self._end_pdc()
+            self._cur_abc["pdc"].append({"separator": True})
         elif tag == "m":
             # <M> marks the mnemonic character of an action-bar choice or pull-down
             # item — the shortcut letter ISPF shows highlighted. Record where it
@@ -727,6 +765,10 @@ class _DTLParser(HTMLParser):
             self._da["body"].append(data)
         elif self._tag is not None:
             self._chars.append(data)
+        elif self._cmd_chars is not None:
+            # A <cmd>'s external-name text (between it and its <cmdact>/end tag),
+            # captured so a nested <t> can locate the truncation point.
+            self._cmd_chars.append(data)
         elif (self._selfld is not None and not self._selfld["prompt_done"]):
             # Text between <selfld ...> and its first <choice> is the field prompt.
             self._selfld["prompt_chars"].append(data)
@@ -734,10 +776,15 @@ class _DTLParser(HTMLParser):
     def handle_endtag(self, tag):
         if self._panel_title is not None:
             self._finalize_panel_title()
-        # Closing an inline <hp> banks its emphasised run and keeps the enclosing
-        # text element open (it is not a block child).
-        if tag == "hp" and self._runs is not None:
+        # Closing an inline <hp>/<rp> banks its emphasised run and keeps the
+        # enclosing text element open (it is not a block child).
+        if tag in ("hp", "rp") and self._runs is not None:
             self._end_hp()
+            return
+        # <varsub> is an empty tag: its text was injected on the start tag, so a
+        # (rare) explicit </varsub> is a no-op — return before the implicit flush
+        # below, which would otherwise prematurely close the enclosing <msg>.
+        if tag == "varsub":
             return
         # A container closing flushes any open content child first (end tags are
         # omitted in DTL), while its context is still intact. The element's own
@@ -778,8 +825,10 @@ class _DTLParser(HTMLParser):
             self._keylist = None
             return
         if tag == "cmdtbl":
+            self._finalize_cmd_trunc()
             self._in_cmdtbl = False
             self._cur_cmd = None
+            self._cmd_chars = self._cmd_tpos = None
             return
         if tag == "pdc":
             self._end_pdc()
@@ -794,7 +843,9 @@ class _DTLParser(HTMLParser):
             self._ab = None
             return
         if tag == "cmd":
+            self._finalize_cmd_trunc()
             self._cur_cmd = None
+            self._cmd_chars = self._cmd_tpos = None
             return
         if tag == "varclass":
             # An <xlatl format=upper> marks the whole class case-insensitive, even
@@ -1890,6 +1941,13 @@ class _DTLParser(HTMLParser):
                 self.screen.add(Text(ab["row"], col, label, DisplayIntensity.HIGH))
             col += len(label) + ab["gap"]
         self.screen.action_bar = ab["choices"]
+
+    def _finalize_cmd_trunc(self):
+        """Apply a captured <t> truncation point to the current <cmd>: the number
+        of characters before it is the command's minimum abbreviation (``trunc``).
+        A <t> wins over any TRUNC= attribute; with no <t> the command is unchanged."""
+        if self._cur_cmd is not None and self._cmd_tpos is not None:
+            self._cur_cmd["trunc"] = self._cmd_tpos
 
     def _emit_keyi(self, a):
         if self._keylist is None:
