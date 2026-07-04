@@ -1235,6 +1235,22 @@ def test_panel_dimensions_default_and_explicit():
     assert (s.width, s.depth) == (132, 43)
 
 
+def test_panel_dimensions_validate_bounds_and_fit():
+    # Per the PANEL reference: WIDTH is 16..160, DEPTH is 5..62; an out-of-range,
+    # FIT, %varname or non-numeric value falls back to the default (as ISPDTLC
+    # warns + uses the default) rather than crashing or using the bad value.
+    assert load_dtl('<panel width="16" depth="5"></panel>').width == 16      # min ok
+    assert load_dtl('<panel width="160" depth="62"></panel>').depth == 62    # max ok
+    assert load_dtl('<panel width="15"></panel>').width == 80                # below min
+    assert load_dtl('<panel width="161"></panel>').width == 80               # above max
+    assert load_dtl('<panel depth="4"></panel>').depth == 24                 # below min
+    assert load_dtl('<panel depth="63"></panel>').depth == 24                # above max
+    # FIT / %varname / non-numeric no longer raise; they keep the default.
+    assert load_dtl('<panel width="FIT" depth="FIT"></panel>').width == 80
+    assert load_dtl('<panel width="%wvar"></panel>').width == 80
+    assert load_dtl('<panel width="wide"></panel>').width == 80
+
+
 def test_row_beyond_depth_raises():
     with pytest.raises(DTLError):
         load_dtl('<panel><info row="24" col="0">off-screen</info></panel>')
@@ -1762,17 +1778,23 @@ def test_choice_reference_figure_snapshot():
     single-choice list (``__  1.  New``) beside a multiple-choice list
     (``_ North Branch``, mark + description, the NAME not shown).
 
+    The panel has an <AB> action bar, so the title is centered on row 2 below the
+    CUA separator rule (row 1), as in the figure.
+
     Honest deltas from the IBM figure (documented, not asserted):
-      * The "File  Search  Help" action bar comes from the external ``&sampabc;``
-        entity, which we cannot resolve — so the bar and its rule are absent and
-        the title sits on row 0 (the figure pushes it down one bar + rule).
+      * The "File  Search  Help" action-bar *labels* come from the external
+        ``&sampabc;`` entity, which we cannot resolve — so the bar row is blank
+        (the separator rule and the title-below-it still render).
       * CUA prompt dot-leaders (``Date . . . :``) and the USAGE=out ``:`` are not
         modelled — the prompt renders as plain text.
       * The runtime F-key area (``F1=Help ...``) is ISPF chrome, not in the markup.
       * A +1 left-margin column from our field-attribute-byte convention.
     """
     expected = "\n".join([
-        "                           Library Card Registration",
+        "",                                              # blank action-bar row (no labels)
+        "-" * 79,                                        # CUA separator rule
+        "                           Library Card Registration",   # title on row 2
+        "",
         " Type in patron's name and card number (if applicable).",
         " Then select an action bar choice.",
         " Date",
@@ -1788,6 +1810,91 @@ def test_choice_reference_figure_snapshot():
         " Enter a command  ________",
     ])
     assert _ascii_snapshot(load_dtl(_CHOICE_FIGURE_SRC)) == expected
+
+
+# Verbatim PANEL-reference "Figure 1" (Dream Vacation Guide) markup.
+_PANEL_FIGURE_SRC = (
+    "<!DOCTYPE DM SYSTEM>\n\n"
+    "<VARCLASS NAME=selcls TYPE='CHAR 2'>\n"
+    "<VARLIST>\n"
+    "  <VARDCL NAME=loc  VARCLASS=selcls>\n"
+    "  <VARDCL NAME=mode VARCLASS=selcls>\n"
+    "</VARLIST>\n\n"
+    "<PANEL NAME=panel HELP=trvlhlp KEYLIST=keylxmp\n"
+    "  DEPTH=22 WIDTH=60>Dream Vacation Guide\n"
+    "<AB>\n"
+    "  <ABC>File\n"
+    "    <PDC>Add Entry\n        <ACTION RUN=add>\n"
+    "    <PDC>Delete Entry\n        <ACTION RUN=delete>\n"
+    "    <PDC>Update Entry\n        <ACTION RUN=update>\n"
+    "    <PDC>Exit\n        <ACTION RUN=exit>\n"
+    "  <ABC>Help\n"
+    "    <PDC>Extended Help...\n        <ACTION RUN=exhelp>\n"
+    "    <PDC>Keys Help...\n        <ACTION RUN=keyshelp>\n"
+    "</AB>\n"
+    "<TOPINST>Choose one of the following exotic locations and\n"
+    "your preferred mode of travel, then press Enter.\n"
+    "<AREA>\n"
+    "  <REGION DIR=horiz>\n"
+    "  <SELFLD NAME=loc PMTWIDTH=23 SELWIDTH=25>Exotic Location:\n"
+    "    <CHOICE>Athens, GA\n"
+    "    <CHOICE>Berlin, CT\n"
+    "    <CHOICE>Cairo, IL\n"
+    "    <CHOICE>Lizard Lick, NC\n"
+    "    <CHOICE>Paris, TX\n"
+    "    <CHOICE>Rome, NY\n"
+    "    <CHOICE>Venice, FL\n"
+    "  </SELFLD>\n"
+    "  <DIVIDER>\n"
+    "  <SELFLD NAME=mode PMTWIDTH=25 SELWIDTH=25>Travel Mode:\n"
+    "    <CHOICE>Boxcar\n"
+    "    <CHOICE>Hitchhike\n"
+    "    <CHOICE>Mule\n"
+    "  </SELFLD>\n"
+    "  </REGION>\n"
+    "</AREA>\n"
+    "<CMDAREA>\n"
+    "</PANEL>\n"
+)
+
+
+def test_panel_reference_figure_snapshot():
+    """Layout snapshot of the PANEL-reference Figure 1 (Dream Vacation Guide).
+    Pins: validated WIDTH=60/DEPTH=22, an inline <AB> action bar ("File Help",
+    labels rendered — unlike the external-entity bar in the CHOICE figure) with a
+    CUA separator rule beneath it and the title centered below (action bar row 0,
+    rule row 1, title row 2, blank, body), a <topinst>, and two side-by-side
+    single-choice <selfld>s in a horizontal <region>, each auto-numbered "N.",
+    plus the <cmdarea> input field.
+
+    Honest deltas from the IBM figure (documented, not asserted):
+      * The empty <CMDAREA> renders just the input field; ISPF supplies a default
+        "Command ===>" prompt we don't add.
+      * The runtime F-key area (F1=Help ...) is ISPF chrome, not in the markup.
+      * A +1 left-margin column from our field-attribute-byte convention.
+    """
+    s = load_dtl(_PANEL_FIGURE_SRC)
+    assert (s.width, s.depth) == (60, 22)               # validated dimensions
+    assert [c["label"] for c in s.action_bar] == ["File", "Help"]
+    assert s.title == "Dream Vacation Guide"
+    expected = "\n".join([
+        " File   Help",
+        "-" * 59,                                        # separator rule under the bar
+        "                    Dream Vacation Guide",       # title centered on row 2
+        "",
+        " Choose one of the following exotic locations and your",
+        " preferred mode of travel, then press Enter.",
+        " Exotic Location:           Travel Mode:",
+        " __  1.  Athens, GA         __  1.  Boxcar",
+        "     2.  Berlin, CT             2.  Hitchhike",
+        "     3.  Cairo, IL              3.  Mule",
+        "     4.  Lizard Lick, NC",
+        "     5.  Paris, TX",
+        "     6.  Rome, NY",
+        "     7.  Venice, FL",
+        "   ________",
+    ])
+    assert _ascii_snapshot(s) == expected
 
 
 def test_nested_unordered_lists_matches_guide_figure():

@@ -358,7 +358,8 @@ class _DTLParser(HTMLParser):
         self._cur_abc = None      # current <abc> action-bar choice, or None
         self._cur_pdc = None      # current <pdc> pull-down choice, or None
         self._panel_title = None  # capturing the panel's title text, or None
-        self._title_item = None   # the centered title Text (retracted on row-0 collision)
+        self._title_item = None   # the centered title Text (retracted on collision)
+        self._title_rule = None   # the action-bar separator rule (retracted on collision)
         self._titline = True      # <panel titline=no> suppresses the on-screen title line
         self._lists = []          # stack of open <ul>/<ol> ({"type", "n"})
         self._lstfld = None       # active <lstfld> table {"cols", "groups", …}
@@ -438,9 +439,10 @@ class _DTLParser(HTMLParser):
     def handle_starttag(self, tag, attrs):
         a = {k: v for k, v in attrs}
         # The panel's title text (between <panel ...> and its first child) ends
-        # at the first child tag.
+        # at the first child tag (which we pass so an <ab> can push the title
+        # below the action bar).
         if self._panel_title is not None:
-            self._finalize_panel_title()
+            self._finalize_panel_title(tag)
         # An inline <hp> (highlighted phrase) inside a text element does NOT close
         # it — it emphasises a phrase *within* one field. Bank the runs and return
         # before the implicit-flush below (see _begin_hp / _finalize_runs). A <rp>
@@ -496,11 +498,15 @@ class _DTLParser(HTMLParser):
             if self._override_cols is not None:
                 self.screen.width = self._override_cols
             elif "width" in a:
-                self.screen.width = int(a["width"])
+                w = self._panel_dim(a["width"], self._WIDTH_MIN, self._WIDTH_MAX)
+                if w is not None:
+                    self.screen.width = w
             if self._override_rows is not None:
                 self.screen.depth = self._override_rows
             elif "depth" in a:
-                self.screen.depth = int(a["depth"])
+                d = self._panel_dim(a["depth"], self._DEPTH_MIN, self._DEPTH_MAX)
+                if d is not None:
+                    self.screen.depth = d
             # The panel itself is an implicit flow box: elements that omit
             # row/col flow down from the top. Explicit positions still win, so
             # fully-positioned panels are unaffected.
@@ -1149,6 +1155,24 @@ class _DTLParser(HTMLParser):
     _LIST_INDENT = 4   # columns added per nesting level
     _DL_TSIZE = 10     # default <dl>/<parml> term-column width (chars)
     _HGAP = 2          # default column gap between side-by-side (dir=horiz) items
+    # <panel> WIDTH/DEPTH validation bounds (z/OS ISPF DTL Guide, PANEL tag).
+    _WIDTH_MIN, _WIDTH_MAX = 16, 160
+    _DEPTH_MIN, _DEPTH_MAX = 5, 62
+
+    @staticmethod
+    def _panel_dim(value, lo, hi):
+        """A validated <panel> WIDTH/DEPTH: the integer if it is in ``[lo, hi]``,
+        else ``None`` (keep the default). FIT, ``%varname`` and any out-of-range
+        or non-numeric value fall back to the default, as ISPDTLC does (it warns
+        and uses the default rather than the out-of-range value)."""
+        v = str(value).strip().upper()
+        if v == "FIT" or v.startswith("%"):
+            return None
+        try:
+            n = int(v)
+        except ValueError:
+            return None
+        return n if lo <= n <= hi else None
 
     def _box_extent(self, start_idx):
         """The ``(bottom, right)`` extent of the screen items added since
@@ -1180,13 +1204,16 @@ class _DTLParser(HTMLParser):
             box["maxbottom"] = max(box.get("maxbottom", box["row0"]), bottom)
         box["row"] = box["row0"]
 
-    def _finalize_panel_title(self):
-        """Emit the panel's title text (centered on row 0) and start the flow
-        below it. Called when the first child tag follows the ``<panel>``.
+    def _finalize_panel_title(self, next_tag=None):
+        """Emit the panel's title text (centered) and start the flow below it.
+        Called when the first child tag follows the ``<panel>``.
+
+        With an action bar (``next_tag == "ab"``) the bar takes row 0, so CUA draws
+        a separator rule on row 1 and centers the title on row 2, with the body
+        flowing below a blank line. Otherwise the title is centered on row 0.
 
         With ``TITLINE=NO`` the title is kept as ``Screen.title`` metadata only —
-        no on-screen line — and the body flows from row 0 (the suppressed title
-        line is free)."""
+        no on-screen line — and the body flows from the top (the line is free)."""
         text = re.sub(r"\s+", " ", "".join(self._panel_title or [])).strip()
         self._panel_title = None
         if not text:
@@ -1195,26 +1222,33 @@ class _DTLParser(HTMLParser):
             self.screen.title = text
         if not self._titline:            # TITLINE=NO: metadata only, no title line
             return
+        if next_tag == "ab":
+            rule = Text(1, 0, "-" * max(1, self.screen.width - 1))
+            self.screen.add(rule)
+            self._title_rule = rule
+            title_row, flow_row = 2, 4    # bar(0), rule(1), title(2), blank(3), body(4)
+        else:
+            title_row, flow_row = 0, 1
         col = max(0, (self.screen.width - len(text)) // 2)
-        item = Text(0, col, text, DisplayIntensity.NORMAL)
+        item = Text(title_row, col, text, DisplayIntensity.NORMAL)
         self.screen.add(item)
         self._title_item = item
-        if self._areas and self._areas[-1]["row"] < 1:
-            self._areas[-1]["row"] = 1  # flow starts below the title
+        if self._areas and self._areas[-1]["row"] < flow_row:
+            self._areas[-1]["row"] = flow_row  # flow starts below the title
 
     def _retract_title_if_collision(self):
-        """A ``panel-title-text`` content title renders centered on row 0. If the
-        panel also puts an explicit element on row 0 — the bundled panels draw
-        their own title rule / action bar there — drop the auto centered title, so
-        the standard content form is byte-identical to the metadata-only ``title=``
-        attribute it replaces (which added no body item)."""
-        item = self._title_item
-        self._title_item = None
-        if item is not None and any(
-            it is not item and getattr(it, "row", None) == 0
-            for it in self.screen.items
-        ):
-            self.screen.items.remove(item)
+        """Drop an auto title (and its action-bar separator rule) that collides
+        with an explicit element on the same row. The bundled panels draw their own
+        title rule / title, so the auto ones must not duplicate them — this keeps
+        those panels byte-identical to before the content-title form."""
+        for attr in ("_title_item", "_title_rule"):
+            item = getattr(self, attr, None)
+            setattr(self, attr, None)
+            if item is not None and any(
+                it is not item and getattr(it, "row", None) == item.row
+                for it in self.screen.items
+            ):
+                self.screen.items.remove(item)
 
     def _store_figcap(self, content):
         """Capture a <figcap>'s text for the enclosing <fig>; it is rendered below
