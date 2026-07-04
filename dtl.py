@@ -37,8 +37,10 @@ Supported tags
                                  them, and the enclosing flow resumes below the
                                  tallest column. Explicit positions always win, so
                                  non-flowed panels are unaffected.
-``<info row col intensity>``     protected text (label / instruction / rule).
-                                 ``fill`` + ``width`` repeats a character (rules).
+``<info row col intens>``        protected text (label / instruction / rule).
+                                 ``intens`` is HIGH / LOW / NON (``intensity`` is a
+                                 tolerated alias); ``fill`` + ``width`` repeats a
+                                 character (rules).
 ``<topinst row col>``            top / panel / bottom instruction text. Render like
 ``<pnlinst row col>``            ``<info>`` (protected text); semantic DTL tags. A
 ``<botinst row col>``            flowed ``<botinst>`` anchors at the panel foot.
@@ -124,7 +126,7 @@ Inline in body text: ``<hp>``/``<rp>`` emphasise a phrase within a text element
 length), ``display`` (``display=no`` is non-display, e.g. password), ``numeric``, ``default``,
 ``required`` (``required=yes`` must be non-empty on submit; ``msg`` names the error),
 ``deswidth`` (width of a trailing ``<dtafldd>`` description),
-``cursor`` (place the cursor here), ``mdt`` (default yes), ``intensity`` (prompt).
+``cursor`` (place the cursor here), ``mdt`` (default yes), ``intens`` (prompt).
 
 Variable substitution: dialog-variable references are written ISPF-style with a
 leading ``&`` (e.g. ``&ZUSER``, ``&ZTIME``) and resolved from the keyword
@@ -192,9 +194,16 @@ def _resolve_entities(source: str) -> str:
     )
 
 
+# DTL INTENS attribute values → the screen model's display intensities. The
+# canonical DTL keywords are HIGH | LOW | NON (LOW is normal-intensity text, NON
+# is non-display); ``normal`` is a tolerated alias of LOW, and ``highlighted``
+# (normal intensity but light-pen detectable, FA bits 01) is a retained extension
+# with no standard INTENS equivalent — see #187.
 _INTENSITY = {
-    "normal": DisplayIntensity.NORMAL,
     "high": DisplayIntensity.HIGH,
+    "low": DisplayIntensity.NORMAL,
+    "non": DisplayIntensity.NON_DISPLAY,
+    "normal": DisplayIntensity.NORMAL,
     "highlighted": DisplayIntensity.HIGHLIGHTED,
 }
 
@@ -300,8 +309,14 @@ def _bool_attr(attrs, key, default=False):
     return _truthy(value) or str(value).strip().lower() == key
 
 
-def _intensity(attrs, key="intensity", default=DisplayIntensity.NORMAL):
-    return _INTENSITY.get(str(attrs.get(key, "")).lower(), default)
+def _intensity(attrs, key="intens", default=DisplayIntensity.NORMAL):
+    """Map a DTL INTENS value to a :class:`DisplayIntensity`. The canonical
+    attribute is ``intens`` (DTL's spelling); the older ``intensity`` spelling is
+    accepted as an alias for the default key so existing panels keep working."""
+    raw = attrs.get(key)
+    if raw is None and key == "intens":
+        raw = attrs.get("intensity")           # tolerated alias
+    return _INTENSITY.get(str(raw if raw is not None else "").lower(), default)
 
 
 def _resolve_color(value, subs):

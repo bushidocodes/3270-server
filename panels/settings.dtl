@@ -10,9 +10,9 @@
     <abc><M>Colors<pdc action="passthru">CUA attributes</pdc></abc>
     <abc><M>Help<pdc action="alias help">Help for settings</pdc></abc>
   </ab>
-  <info row="1" col="0" intensity="high" fill="-" width="79"/>
+  <info row="1" col="0" intens="high" fill="-" width="79"/>
 
-  <info row="2" col="1" intensity="high">ISPF Settings</info>
+  <info row="2" col="1" intens="high">ISPF Settings</info>
 
   <info row="4" col="1">Terminal type . . . . : 3278</info>
   <info row="5" col="1">Screen format . . . . : DATA</info>

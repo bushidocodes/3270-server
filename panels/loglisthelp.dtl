@@ -4,13 +4,13 @@
      and HELP (PF1) is pressed - DTL <pdc help="loglisthelp">. PF3 returns to the
      open pull-down. -->
 <panel name="loglisthelp" title="Log Data Set Defaults HELP">
-  <info row="0" col="0" intensity="high">--------------------- Log Data Set Defaults HELP ------------------------------</info>
+  <info row="0" col="0" intens="high">--------------------- Log Data Set Defaults HELP ------------------------------</info>
 
   <info row="2" col="1">The <hp>Log Data Set defaults</hp> choice controls how ISPF disposes of the</info>
   <info row="3" col="1">session <hp>log</hp> - the running record of your ISPF activity - when you</info>
   <info row="4" col="1">exit.</info>
 
-  <info row="6" col="1" intensity="high">Process option:</info>
+  <info row="6" col="1" intens="high">Process option:</info>
   <info row="7" col="3">- <hp>Print</hp> and delete the data set.</info>
   <info row="8" col="3">- <hp>Delete</hp> the data set without printing.</info>
   <info row="9" col="3">- <hp>Keep</hp> the data set for the next session.</info>

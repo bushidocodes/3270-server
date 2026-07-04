@@ -3,11 +3,11 @@
      it describes the Workplace and lists the object types it works with.
      Shown via _show_overlay; PF3 returns to the Primary Option Menu. -->
 <panel name="workplace" title="ISPF Object/Action Workplace" help="ispfhelp">
-  <info row="0" col="0" intensity="high">-------------------------- ISPF Object/Action Workplace ------------------------</info>
+  <info row="0" col="0" intens="high">-------------------------- ISPF Object/Action Workplace ------------------------</info>
   <topinst row="2" col="1">The Workplace lets you act on objects by selecting them and choosing</topinst>
   <topinst row="3" col="1">an action, rather than navigating the option menus.</topinst>
 
-  <info row="5" col="3" intensity="high">Objects you can work with:</info>
+  <info row="5" col="3" intens="high">Objects you can work with:</info>
   <info row="7" col="5">o  Data sets and libraries</info>
   <info row="8" col="5">o  Library members</info>
   <info row="9" col="5">o  Workstation files</info>
@@ -17,7 +17,7 @@
   <info row="13" col="3">(Object selection is not implemented in this demo.)</info>
 
   <info row="22" col="1">Enter PF3 to return to the Primary Option Menu.</info>
-  <info row="23" col="0" intensity="high" fill="-" width="79"/>
+  <info row="23" col="0" intens="high" fill="-" width="79"/>
 
   <keyl name="WPKEYS">
     <keyi key="PF1" cmd="HELP">Help</keyi>

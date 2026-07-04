@@ -5,7 +5,7 @@
      (usage=out). Point-and-shoot: server._show_member_list maps the cursor row
      to a member so Enter browses it. PF3 returns to the Utility panel. -->
 <panel name="memlist" title="Library - Member List" help="ispfhelp">
-  <info row="0" col="0" intensity="high">--------------------------- ISPF.ISPPLIB - Member List -------------------------</info>
+  <info row="0" col="0" intens="high">--------------------------- ISPF.ISPPLIB - Member List -------------------------</info>
   <topinst row="2" col="1">Put the cursor on a member and press Enter to browse it; PF3 returns.</topinst>
 
   <area row="4" col="2">

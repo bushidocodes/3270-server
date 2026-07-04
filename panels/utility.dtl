@@ -5,7 +5,7 @@
      with Screen.command_value() and validates it against Screen.selections;
      an unimplemented leaf reports back via &SELMSG. PF3 returns to the menu. -->
 <panel name="utility" title="Utility Selection Panel" help="ispfhelp">
-  <info row="0" col="0" intensity="high">------------------------------ Utility Selection Panel -------------------------</info>
+  <info row="0" col="0" intens="high">------------------------------ Utility Selection Panel -------------------------</info>
 
   <cmdarea row="2" col="1" fldcol="13" entwidth="6" cursor="yes">Option ===></cmdarea>
 
@@ -18,9 +18,9 @@
     <choice num="8" name="  Outlist       ">  Display, delete, or print held job output</choice>
   </selfld>
 
-  <info row="20" col="1" intensity="high">&SELMSG</info>
+  <info row="20" col="1" intens="high">&SELMSG</info>
   <info row="22" col="1">Enter an option, or PF3 to return to the Primary Option Menu.</info>
-  <info row="23" col="0" intensity="high" fill="-" width="79"/>
+  <info row="23" col="0" intens="high" fill="-" width="79"/>
 
   <keyl name="UTILKEYS">
     <keyi key="PF1" cmd="HELP">Help</keyi>

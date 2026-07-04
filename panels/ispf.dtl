@@ -4,7 +4,7 @@
      &ZUSER (padded to 8) and &ZTIME are ISPF dialog variables substituted at
      load time; the transient short message (row 2) is injected at runtime. -->
 <panel name="ispfmenu" title="ISPF Primary Option Menu" help="ispfhelp">
-  <info row="0" col="0" intensity="high">-------------------------- ISPF Primary Option Menu ---------------------------</info>
+  <info row="0" col="0" intens="high">-------------------------- ISPF Primary Option Menu ---------------------------</info>
 
   <!-- Command area: the option line. datavar defaults to ZCMD (ISPF convention);
        the server reads the typed option via Screen.command_value(). -->
@@ -35,7 +35,7 @@
   <info row="21" col="41">Time. . . . :  &ZTIME</info>
   <info row="22" col="1">System ID . :  SY1     </info>
   <info row="22" col="41">ISPF Ver. . :  7.1.0   </info>
-  <info row="23" col="0" intensity="high" fill="-" width="79"/>
+  <info row="23" col="0" intens="high" fill="-" width="79"/>
 
   <!-- Keylist: PF3/PF15 exit ISPF (back to the logon panel). Metadata only. -->
   <keyl name="ISPFKEYS">

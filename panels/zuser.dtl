@@ -3,7 +3,7 @@
      authentic ISPF sub-functions; each leaf reports back via &SELMSG
      (not yet implemented). Driven by server._show_submenu; PF3 returns. -->
 <panel name="zuser" title="z/OS User Applications" help="ispfhelp">
-  <info row="0" col="0" intensity="high">--------------------------- z/OS User Applications ----------------------------</info>
+  <info row="0" col="0" intens="high">--------------------------- z/OS User Applications ----------------------------</info>
 
   <cmdarea row="2" col="1" fldcol="13" entwidth="6" cursor="yes">Option ===></cmdarea>
 
@@ -14,9 +14,9 @@
     <choice num="4" name="  REXX/CLIST      ">  Run a REXX exec or CLIST</choice>
   </selfld>
 
-  <info row="20" col="1" intensity="high">&SELMSG</info>
+  <info row="20" col="1" intens="high">&SELMSG</info>
   <info row="22" col="1">Enter an option, or PF3 to return to the Primary Option Menu.</info>
-  <info row="23" col="0" intensity="high" fill="-" width="79"/>
+  <info row="23" col="0" intens="high" fill="-" width="79"/>
 
   <keyl name="ZUSRKEYS">
     <keyi key="PF1" cmd="HELP">Help</keyi>

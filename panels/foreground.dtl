@@ -3,7 +3,7 @@
      authentic ISPF sub-functions; each leaf reports back via &SELMSG
      (not yet implemented). Driven by server._show_submenu; PF3 returns. -->
 <panel name="foreground" title="Foreground Selection Panel" help="ispfhelp">
-  <info row="0" col="0" intensity="high">------------------------- Foreground Selection Panel --------------------------</info>
+  <info row="0" col="0" intens="high">------------------------- Foreground Selection Panel --------------------------</info>
 
   <cmdarea row="2" col="1" fldcol="13" entwidth="6" cursor="yes">Option ===></cmdarea>
 
@@ -16,9 +16,9 @@
     <choice num="6" name="  Member list     ">  Display a member parts list</choice>
   </selfld>
 
-  <info row="20" col="1" intensity="high">&SELMSG</info>
+  <info row="20" col="1" intens="high">&SELMSG</info>
   <info row="22" col="1">Enter an option, or PF3 to return to the Primary Option Menu.</info>
-  <info row="23" col="0" intensity="high" fill="-" width="79"/>
+  <info row="23" col="0" intens="high" fill="-" width="79"/>
 
   <keyl name="FGNDKEYS">
     <keyi key="PF1" cmd="HELP">Help</keyi>

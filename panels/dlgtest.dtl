@@ -5,7 +5,7 @@
      from the live session (see server._dialog_vars); the <lstfld> lays them
      out as a read-only (usage=out) two-column table. PF3 returns to the menu. -->
 <panel name="dlgtvars" title="Dialog Test - Variables" help="ispfhelp">
-  <info row="0" col="0" intensity="high">--------------------------- Dialog Test - Variables ----------------------------</info>
+  <info row="0" col="0" intens="high">--------------------------- Dialog Test - Variables ----------------------------</info>
   <topinst row="2" col="1">ISPF dialog variables and their current values for this session.</topinst>
 
   <area row="4" col="2">
@@ -18,7 +18,7 @@
   </area>
 
   <info row="22" col="1">Enter PF3 to return to the Primary Option Menu.</info>
-  <info row="23" col="0" intensity="high" fill="-" width="79"/>
+  <info row="23" col="0" intens="high" fill="-" width="79"/>
 
   <keyl name="DLGTKEYS">
     <keyi key="PF1" cmd="HELP">Help</keyi>

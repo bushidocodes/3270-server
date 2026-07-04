@@ -268,6 +268,31 @@ def test_info_intensity_and_fill():
     assert s.items[1] == Text(1, 0, "-----", DisplayIntensity.NORMAL)
 
 
+def test_intens_is_the_canonical_attribute_with_dtl_values():
+    # DTL spells display intensity INTENS=HIGH|LOW|NON (#187). LOW is normal-
+    # intensity text, NON is non-display; `highlighted` is a retained extension.
+    s = load_dtl(
+        '<panel>'
+        '<info row="0" col="0" intens="high">a</info>'
+        '<info row="1" col="0" intens="low">b</info>'
+        '<info row="2" col="0" intens="non">c</info>'
+        '<info row="3" col="0" intens="highlighted">d</info>'
+        '</panel>'
+    )
+    assert s.items[0] == Text(0, 0, "a", DisplayIntensity.HIGH)
+    assert s.items[1] == Text(1, 0, "b", DisplayIntensity.NORMAL)
+    assert s.items[2] == Text(2, 0, "c", DisplayIntensity.NON_DISPLAY)
+    assert s.items[3] == Text(3, 0, "d", DisplayIntensity.HIGHLIGHTED)
+
+
+def test_intensity_is_a_tolerated_alias_of_intens():
+    # The older `intensity=` spelling stays valid and renders byte-identically to
+    # the canonical `intens=`, so migrating panels changes no bytes.
+    new = load_dtl('<panel><info row="0" col="0" intens="high">hi</info></panel>')
+    old = load_dtl('<panel><info row="0" col="0" intensity="high">hi</info></panel>')
+    assert new.render() == old.render()
+
+
 def test_dtafld_emits_prompt_then_field():
     s = load_dtl(
         '<panel><dtafld row="5" col="1" fldcol="16" datavar="userid" '

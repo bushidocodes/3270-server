@@ -1,7 +1,7 @@
 <!DOCTYPE DM SYSTEM>
 <!-- Help panel for the ISPF Primary Option Menu. Shown on PF1; PF3 returns. -->
 <panel name="ispfhelp" title="ISPF Primary Option Menu - HELP">
-  <info row="0" col="0" intensity="high">------------------- ISPF Primary Option Menu  -  HELP -------------------------</info>
+  <info row="0" col="0" intens="high">------------------- ISPF Primary Option Menu  -  HELP -------------------------</info>
 
   <info row="2" col="1">The Primary Option Menu is the top of the ISPF dialog hierarchy.</info>
 
