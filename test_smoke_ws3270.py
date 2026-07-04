@@ -110,22 +110,25 @@ def _drive(port, actions, model="2", tls=False):
     return proc.stdout + proc.stderr
 
 
-def _drive_traced(port, actions, model="2", basic=False):
+def _drive_traced(port, actions, model="2", basic=False, charset=None):
     """Like :func:`_drive`, but also captures the emulator's protocol trace and
     returns ``(output, trace_text)``. The trace records exactly what the emulator
     SENT and RCVD on the wire, so assertions on it are deterministic — unlike
     ``Ascii()`` screen dumps, which race the emulator's own screen rendering.
-    ``basic`` forces the basic-TN3270 (``N:``) path."""
+    ``basic`` forces the basic-TN3270 (``N:``) path; ``charset`` sets the host code
+    page (``-charset``, e.g. ``"german"`` → the terminal reports CPGID 273)."""
     with tempfile.NamedTemporaryFile(
             prefix="ws3270-", suffix=".trace", delete=False) as tf:
         trace_path = tf.name
     try:
         script = "\n".join(actions) + "\n"
+        cmd = [EMULATOR, "-model", model, "-trace", "-tracefile", trace_path]
+        if charset:
+            cmd += ["-charset", charset]
+        cmd.append(_host_arg(port, basic=basic))
         try:
             proc = subprocess.run(
-                [EMULATOR, "-model", model, "-trace", "-tracefile", trace_path,
-                 _host_arg(port, basic=basic)],
-                input=script, capture_output=True, text=True,
+                cmd, input=script, capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=60,
             )
         except subprocess.TimeoutExpired as exc:
@@ -562,3 +565,41 @@ def test_ws3270_charset_discovery_reports_graphic_escape():
     assert (model.base_cgcsgid & 0xFFFF) == 37           # base CPGID 37 = CP037
     # The APL / line-drawing graphic set (CP310) GE draws from.
     assert any((cg & 0xFFFF) == 310 for (_s, _f, _l, cg) in model.char_sets), model.char_sets
+
+
+def test_ws3270_german_charset_selects_cp273():
+    """A German-configured ws3270 reports base CPGID 273 in its Character Sets
+    reply; the server resolves that to the cp273 code page for the session —
+    real discovery driving real code-page selection (not a synthetic reply)."""
+    _require_emulator()
+    port, result, t = _query_one_terminal()
+    _drive_traced(port, ["Wait(4,Output)", "Quit()"], basic=True, charset="german")
+    t.join(5)
+
+    model = result.get("model")
+    assert model is not None, result
+    assert (model.base_cgcsgid & 0xFFFF) == 273           # CPGID 273 (German)
+    assert server.code_page_for_model(model) == "cp273"
+
+
+def test_ws3270_german_terminal_reads_cp273_encoded_text():
+    """End-to-end code-page agreement: text the server encodes in cp273 is what a
+    German ws3270 displays. '@' is 0x7C in cp037 but 0xB5 in cp273 — so if the
+    server used the wrong page the emulator would show 'Ä' instead of '@'."""
+    _require_emulator()
+    from screen import Screen, Text
+
+    # Render the screen under the German session page, exactly as handle_client
+    # would once it resolved cp273 from the terminal's Character Sets reply.
+    server._session.code_page = "cp273"
+    try:
+        record = Screen().add(Text(1, 1, "AT=@ END")).render()
+    finally:
+        del server._session.code_page
+
+    port = _serve_one_screen(record)
+    out, _ = _drive_traced(port, [
+        "Wait(3,Output)", "Ascii()", "Wait(1,Seconds)", "Quit()",
+    ], basic=True, charset="german")
+
+    assert "AT=@ END" in out, out[-1500:]     # '@' round-tripped, not mangled to 'Ä'
