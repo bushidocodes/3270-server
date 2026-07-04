@@ -138,7 +138,7 @@ def test_instruction_tags_render_like_info():
     s = load_dtl(
         '<panel>'
         '<topinst row="2" col="1">Enter parameters:</topinst>'
-        '<pnlinst row="16" col="1" intensity="high">Press ENTER</pnlinst>'
+        '<pnlinst row="16" col="1" intens="high">Press ENTER</pnlinst>'
         '<botinst row="23" col="1">PF3=Exit</botinst>'
         '</panel>'
     )
@@ -260,7 +260,7 @@ def test_hp_surrounding_text_keeps_the_element_role():
 def test_info_intensity_and_fill():
     s = load_dtl(
         '<panel>'
-        '<info row="0" col="0" intensity="high">hi</info>'
+        '<info row="0" col="0" intens="high">hi</info>'
         '<info row="1" col="0" fill="-" width="5"/>'
         '</panel>'
     )
@@ -285,12 +285,14 @@ def test_intens_is_the_canonical_attribute_with_dtl_values():
     assert s.items[3] == Text(3, 0, "d", DisplayIntensity.HIGHLIGHTED)
 
 
-def test_intensity_is_a_tolerated_alias_of_intens():
-    # The older `intensity=` spelling stays valid and renders byte-identically to
-    # the canonical `intens=`, so migrating panels changes no bytes.
-    new = load_dtl('<panel><info row="0" col="0" intens="high">hi</info></panel>')
-    old = load_dtl('<panel><info row="0" col="0" intensity="high">hi</info></panel>')
-    assert new.render() == old.render()
+def test_intens_is_the_only_permitted_spelling():
+    # `intens` is DTL's spelling and the only accepted attribute name; the old
+    # non-standard `intensity=` is not recognised (it falls through to the default
+    # NORMAL intensity), so nothing outside `intens` is silently honoured.
+    canonical = load_dtl('<panel><info row="0" col="0" intens="high">hi</info></panel>')
+    legacy = load_dtl('<panel><info row="0" col="0" intensity="high">hi</info></panel>')
+    assert canonical.items[0] == Text(0, 0, "hi", DisplayIntensity.HIGH)
+    assert legacy.items[0] == Text(0, 0, "hi", DisplayIntensity.NORMAL)  # ignored
 
 
 def test_dtafld_emits_prompt_then_field():
@@ -1950,7 +1952,7 @@ def test_doctype_prolog_is_tolerated():
 
 
 def test_tag_and_attribute_names_are_case_insensitive():
-    s = load_dtl('<PANEL><INFO ROW="1" COL="2" INTENSITY="high">hi</INFO></PANEL>')
+    s = load_dtl('<PANEL><INFO ROW="1" COL="2" INTENS="high">hi</INFO></PANEL>')
     assert s.items == [Text(1, 2, "hi", DisplayIntensity.HIGH)]
 
 

@@ -38,9 +38,8 @@ Supported tags
                                  tallest column. Explicit positions always win, so
                                  non-flowed panels are unaffected.
 ``<info row col intens>``        protected text (label / instruction / rule).
-                                 ``intens`` is HIGH / LOW / NON (``intensity`` is a
-                                 tolerated alias); ``fill`` + ``width`` repeats a
-                                 character (rules).
+                                 ``intens`` is HIGH / LOW / NON; ``fill`` +
+                                 ``width`` repeats a character (rules).
 ``<topinst row col>``            top / panel / bottom instruction text. Render like
 ``<pnlinst row col>``            ``<info>`` (protected text); semantic DTL tags. A
 ``<botinst row col>``            flowed ``<botinst>`` anchors at the panel foot.
@@ -195,15 +194,15 @@ def _resolve_entities(source: str) -> str:
 
 
 # DTL INTENS attribute values → the screen model's display intensities. The
-# canonical DTL keywords are HIGH | LOW | NON (LOW is normal-intensity text, NON
-# is non-display); ``normal`` is a tolerated alias of LOW, and ``highlighted``
-# (normal intensity but light-pen detectable, FA bits 01) is a retained extension
-# with no standard INTENS equivalent — see #187.
+# DTL keywords are HIGH | LOW | NON (LOW is normal-intensity text, NON is
+# non-display). ``highlighted`` (normal intensity but light-pen detectable, FA
+# bits 01) has no standard INTENS keyword and is a retained value-level extension
+# — it is a distinct field-attribute byte from HIGH, load-bearing on the logon
+# panel, so it cannot be folded into HIGH (#187).
 _INTENSITY = {
     "high": DisplayIntensity.HIGH,
     "low": DisplayIntensity.NORMAL,
     "non": DisplayIntensity.NON_DISPLAY,
-    "normal": DisplayIntensity.NORMAL,
     "highlighted": DisplayIntensity.HIGHLIGHTED,
 }
 
@@ -310,13 +309,9 @@ def _bool_attr(attrs, key, default=False):
 
 
 def _intensity(attrs, key="intens", default=DisplayIntensity.NORMAL):
-    """Map a DTL INTENS value to a :class:`DisplayIntensity`. The canonical
-    attribute is ``intens`` (DTL's spelling); the older ``intensity`` spelling is
-    accepted as an alias for the default key so existing panels keep working."""
-    raw = attrs.get(key)
-    if raw is None and key == "intens":
-        raw = attrs.get("intensity")           # tolerated alias
-    return _INTENSITY.get(str(raw if raw is not None else "").lower(), default)
+    """Map a DTL ``INTENS`` value (HIGH | LOW | NON) to a :class:`DisplayIntensity`.
+    ``intens`` is DTL's spelling and the only accepted attribute name."""
+    return _INTENSITY.get(str(attrs.get(key, "")).lower(), default)
 
 
 def _resolve_color(value, subs):
