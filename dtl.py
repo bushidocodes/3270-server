@@ -554,9 +554,8 @@ class _DTLParser(HTMLParser):
                 # choice. Empty (the bundled numbered menus) → nothing rendered.
                 "origin": origin,
                 "pmtloc": str(a.get("pmtloc", "above")).strip().lower(),
-                "pmtwidth": int(a["pmtwidth"]) if "pmtwidth" in a else None,
-                "selwidth": int(a["selwidth"]) if "selwidth" in a
-                            and str(a["selwidth"]).strip().isdigit() else None,
+                "pmtwidth": self._opt_int(a.get("pmtwidth")),
+                "selwidth": self._opt_int(a.get("selwidth")),
                 "prompt_chars": [],
                 "prompt_done": False,
             }
@@ -726,10 +725,10 @@ class _DTLParser(HTMLParser):
                 "start_idx": len(self.screen.items),
                 "explicit": "row" in a,
                 "parent": parent,
-                "pmtwidth": int(a["pmtwidth"]) if "pmtwidth" in a
-                            else (parent.get("pmtwidth") if parent else None),
-                "entwidth": int(a["entwidth"]) if "entwidth" in a
-                            else (parent.get("entwidth") if parent else None),
+                "pmtwidth": (self._opt_int(a["pmtwidth"]) if "pmtwidth" in a
+                             else (parent.get("pmtwidth") if parent else None)),
+                "entwidth": (self._opt_int(a["entwidth"]) if "entwidth" in a
+                             else (parent.get("entwidth") if parent else None)),
             })
         elif tag == "divider":
             ctx = self._areas[-1] if self._areas else None
@@ -1173,6 +1172,55 @@ class _DTLParser(HTMLParser):
         except ValueError:
             return None
         return n if lo <= n <= hi else None
+
+    @staticmethod
+    def _opt_int(value):
+        """``int(value)`` or ``None`` when absent / non-numeric (e.g. a ``*`` / ``**``
+        / ``%varname`` PMTWIDTH on a container, which each field then resolves)."""
+        try:
+            return int(str(value).strip())
+        except (ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def _prompt_width(value, prompt_len, avail):
+        """Resolve a PMTWIDTH ``n | * | **`` value: ``*`` = the prompt-text length,
+        ``**`` = the maximum available width, ``n`` = that many bytes. Non-numeric
+        junk falls back to the prompt length. (DTAFLD/DTACOL/SELFLD PMTWIDTH.)"""
+        v = str(value).strip()
+        if v == "*":
+            return prompt_len
+        if v == "**":
+            return avail
+        if v.startswith("%"):
+            return prompt_len
+        try:
+            return int(v)
+        except ValueError:
+            return prompt_len
+
+    @staticmethod
+    def _format_prompt(prompt, pmtwidth, usage_out, pmtfmt):
+        """Format a data-field prompt to PMTWIDTH per PMTFMT (z/OS DTL, DTAFLD):
+        ``cua`` (default) fills the leader with CUA dots, ``ispf`` puts ``===>`` in
+        the rightmost 4 bytes, ``end`` right-justifies, ``none`` left-justifies.
+        USAGE=OUT makes the last prompt byte a colon."""
+        pmtfmt = (pmtfmt or "cua").strip().lower()
+        p = prompt
+        if pmtwidth and pmtwidth > len(prompt):
+            if pmtfmt == "cua":
+                p = prompt + "".join(
+                    "." if (j - len(prompt)) % 2 else " "
+                    for j in range(len(prompt), pmtwidth))
+            elif pmtfmt == "ispf":
+                p = (prompt.ljust(pmtwidth - 4) + "===>"
+                     if pmtwidth - len(prompt) >= 4 else prompt.ljust(pmtwidth))
+            elif pmtfmt == "end":
+                p = prompt.rjust(pmtwidth)
+            # else "none": no leader characters added (prompt unchanged)
+        if usage_out and prompt:               # trailing colon for an output field
+            p = (p[:pmtwidth - 1] + ":") if pmtwidth and len(p) >= pmtwidth else p + ":"
+        return p
 
     def _box_extent(self, start_idx):
         """The ``(bottom, right)`` extent of the screen items added since
@@ -1734,21 +1782,36 @@ class _DTLParser(HTMLParser):
         # BEFORE, is beside it). Emit the caption now and drop the field to the
         # next line at the base column.
         pmt_above = str(a.get("pmtloc", "")).strip().lower() == "above"
+        usage_out = str(a.get("usage", "")).strip().lower() == "out"
+        # A field's own PMTWIDTH (n | * | **) overrides the enclosing <dtacol>'s.
+        avail = max(1, self.screen.width - col - 2)
+        if "pmtwidth" in a:
+            pmtwidth = self._prompt_width(a["pmtwidth"], len(content), avail)
+        else:
+            pmtwidth = ctx.get("pmtwidth") if ctx else None
+        # The prompt is filled with CUA leader dots to PMTWIDTH (PMTFMT=CUA, the
+        # default) and an output field's prompt ends with a colon. Above-prompts
+        # sit on their own line, so they take the colon but no leader fill.
+        prompt_text = self._format_prompt(
+            content, None if pmt_above else pmtwidth, usage_out,
+            a.get("pmtfmt")) if content else ""
         if pmt_above and content:
-            self.screen.add(Text(row, col, content, _intensity(a), role="prompt"))
-            content = ""                   # caption already placed
+            self.screen.add(Text(row, col, prompt_text, _intensity(a), role="prompt"))
+            content = prompt_text = ""     # caption already placed
             row += 1
             if ctx is not None:
                 ctx["row"] += 1            # the field occupies a second line
-        pmtwidth = ctx.get("pmtwidth") if ctx else None
         if "fldcol" in a:
             fldcol = int(a["fldcol"])
         elif pmt_above:
             fldcol = col                   # under the prompt, at the base column
         elif pmtwidth:
-            fldcol = col + pmtwidth        # <dtacol>: entry at a fixed prompt column
+            # Entry at the fixed prompt column, past the prompt's own trailing
+            # attribute byte (so the field's leading attribute doesn't overwrite
+            # the last prompt char — the CUA colon / final leader dot).
+            fldcol = col + pmtwidth + 1
         elif ctx is not None:
-            fldcol = col + len(content) + ctx["fldgap"]  # entry flows after prompt
+            fldcol = col + len(prompt_text) + ctx["fldgap"]  # entry flows after prompt
         else:
             fldcol = col
         # Entry width: explicit ``entwidth`` wins; otherwise fall back to the
@@ -1774,18 +1837,19 @@ class _DTLParser(HTMLParser):
                     f"<{tag}> field at col {fldcol} width {length} overflows "
                     f"panel width {self.screen.width}"
                 )
-        if content:
+        if prompt_text:
             # The prompt/caption is a CUA element with its own role colour (green,
             # the field-prompt colour); DTL's COLOR on a <dtafld> colours the
             # *field*, not the caption.
-            self.screen.add(Text(row, col, content, _intensity(a), role="prompt"))
+            self.screen.add(Text(row, col, prompt_text, _intensity(a), role="prompt"))
         # A trailing <dtafldd> description renders after the entry (past the
         # field's data byte run and its terminator attribute), truncated to
-        # DESWIDTH when the author sizes it.
+        # DESWIDTH when the author sizes it (DESWIDTH=* keeps the full text).
         if description and description.strip():
             desc = " ".join(description.split())
-            if "deswidth" in a:
-                desc = desc[: int(a["deswidth"])]
+            dw = str(a.get("deswidth", "")).strip()
+            if dw.isdigit():
+                desc = desc[: int(dw)]
             desc_col = fldcol + length + 2      # attr + data + terminator attr
             desc = desc[: max(0, self.screen.width - desc_col)]
             if desc:

@@ -1785,8 +1785,6 @@ def test_choice_reference_figure_snapshot():
       * The "File  Search  Help" action-bar *labels* come from the external
         ``&sampabc;`` entity, which we cannot resolve — so the bar row is blank
         (the separator rule and the title-below-it still render).
-      * CUA prompt dot-leaders (``Date . . . :``) and the USAGE=out ``:`` are not
-        modelled — the prompt renders as plain text.
       * The runtime F-key area (``F1=Help ...``) is ISPF chrome, not in the markup.
       * A +1 left-margin column from our field-attribute-byte convention.
     """
@@ -1797,10 +1795,10 @@ def test_choice_reference_figure_snapshot():
         "",
         " Type in patron's name and card number (if applicable).",
         " Then select an action bar choice.",
-        " Date",
-        " Card No  _______ (A 7-digit number)",
-        " Name  _________________________ (Last, First, M.I.)",
-        " Address  _________________________",
+        " Date . . . :",                                 # PMTFMT=CUA dots; USAGE=out colon
+        " Card No . .   _______ (A 7-digit number)",
+        " Name . . . .  _________________________ (Last, First, M.I.)",
+        " Address . .   _________________________",
         " " + "-" * 78,
         " Choose one of the following  Check valid branches",
         " __  1.  New                   _ North Branch",
@@ -2032,8 +2030,8 @@ def test_area_flows_rows_and_derives_fldcol():
 
 
 def test_dtacol_aligns_entries_at_a_fixed_prompt_column():
-    # <dtacol pmtwidth=20>: each field's entry starts at col + pmtwidth,
-    # regardless of caption length (the DTL data-column layout).
+    # <dtacol pmtwidth=20>: each field's entry starts at col + pmtwidth (+1 for the
+    # prompt's trailing attribute byte), regardless of caption length.
     s = load_dtl(
         '<panel name="books1">Book Title Search'
         '<area><dtacol pmtwidth="20">'
@@ -2042,8 +2040,8 @@ def test_dtacol_aligns_entries_at_a_fixed_prompt_column():
         '</dtacol></area></panel>'
     )
     fields = [i for i in s.items if isinstance(i, Field)]
-    assert [(f.col, f.length, f.name) for f in fields] == [(21, 40, "author"),
-                                                           (21, 10, "catnum")]
+    assert [(f.col, f.length, f.name) for f in fields] == [(22, 40, "author"),
+                                                           (22, 10, "catnum")]
 
 
 def test_dtacol_supplies_default_entry_width():
@@ -2053,7 +2051,7 @@ def test_dtacol_supplies_default_entry_width():
         '</dtacol></area></panel>'
     )
     field = next(i for i in s.items if isinstance(i, Field))
-    assert field.length == 25 and field.col == 13
+    assert field.length == 25 and field.col == 14      # col 1 + pmtwidth 12 + 1
 
 
 # ── <dtafld> USAGE / PMTLOC (#122) ───────────────────────────────────────────
@@ -2068,7 +2066,7 @@ def test_dtafld_usage_out_is_a_protected_display_field():
     )
     assert not [i for i in s.items if isinstance(i, Field)]     # display-only
     texts = [t.text for t in s.items if isinstance(t, Text)]
-    assert "Date" in texts                                      # the prompt
+    assert "Date:" in texts                # output field prompt ends with a colon
     assert any(t.strip() == "07/03/26" for t in texts)         # the value shown
 
 
@@ -2079,6 +2077,44 @@ def test_dtafld_usage_in_stays_an_input_field():
         '</area></panel>'
     )
     assert [i for i in s.items if isinstance(i, Field)]         # still editable
+
+
+def test_dtafld_cua_leader_dots_and_output_colon():
+    # PMTFMT=CUA (default): a prompt shorter than PMTWIDTH is padded with CUA
+    # leader dots; USAGE=out ends the prompt with a colon (the DTAFLD figure).
+    s = load_dtl(
+        '<panel><area row="3" col="1"><dtacol pmtwidth="12">'
+        '<dtafld datavar="curdate" usage="out" entwidth="8">Date</dtafld>'
+        '<dtafld datavar="namevar" entwidth="25">Name</dtafld>'
+        '<dtafld datavar="passvar" entwidth="8">Password</dtafld>'
+        '</dtacol></area></panel>'
+    )
+    prompts = [t.text for t in s.items if isinstance(t, Text) and t.role == "prompt"]
+    assert "Date . . . :" in prompts        # output field: dots + colon
+    assert "Name . . . ." in prompts        # input field: dots, no colon
+    assert "Password . ." in prompts        # 8-char prompt fills to 12
+
+
+def test_dtafld_pmtfmt_ispf_and_none():
+    # PMTFMT=ISPF puts "===>" in the rightmost 4 bytes; NONE adds no leaders.
+    ispf = load_dtl('<panel><area row="1" col="1"><dtafld datavar="x" '
+                    'pmtwidth="12" pmtfmt="ispf">Name</dtafld></area></panel>')
+    assert any(t.text == "Name".ljust(8) + "===>"       # rightmost 4 bytes
+               for t in ispf.items if isinstance(t, Text))
+    none = load_dtl('<panel><area row="1" col="1"><dtafld datavar="x" '
+                    'pmtwidth="12" pmtfmt="none">Name</dtafld></area></panel>')
+    assert any(t.text == "Name" for t in none.items if isinstance(t, Text))
+
+
+def test_dtafld_star_widths_do_not_crash():
+    # PMTWIDTH=n|*|** and DESWIDTH=n|* are valid DTL; the '*'/'**' forms must not
+    # raise (they were parsed with a bare int() before).
+    for w in ("*", "**"):
+        load_dtl(f'<panel><dtacol row=1 col=1 pmtwidth="{w}">'
+                 f'<dtafld datavar=x>P</dtafld></dtacol></panel>')
+    s = load_dtl('<panel><dtafld row=1 col=1 deswidth="*" datavar=x>P'
+                 '<dtafldd>a long description</dtafldd></dtafld></panel>')
+    assert any(getattr(t, "text", "") == "a long description" for t in s.items)
 
 
 def test_dtafld_pmtloc_above_puts_prompt_on_the_line_above():
