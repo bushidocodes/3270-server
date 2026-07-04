@@ -489,10 +489,12 @@ class _DTLParser(HTMLParser):
                     a.get("action") or a.get("run") or a.get("cmd") or self._cur_pdc["action"]
                 )
         elif tag == "m":
-            # <M> marks the mnemonic character of an action-bar choice — the
-            # shortcut letter ISPF shows highlighted. Record where it falls in the
-            # label text being captured (offset in the raw, pre-strip chars).
-            if self._cur_abc is not None and self._cur_pdc is None:
+            # <M> marks the mnemonic character of an action-bar choice or pull-down
+            # item — the shortcut letter ISPF shows highlighted. Record where it
+            # falls in the label text being captured (offset in the raw chars).
+            if self._cur_pdc is not None:
+                self._cur_pdc["mnemonic"] = len("".join(self._cur_pdc["chars"]))
+            elif self._cur_abc is not None:
                 self._cur_abc["mnemonic"] = len("".join(self._cur_abc["chars"]))
         elif tag == "varclass":
             self._emit_varclass(a)
@@ -1445,9 +1447,14 @@ class _DTLParser(HTMLParser):
         """Finalise the open <pdc> onto its <abc>. DTL omits most end tags, so a
         pull-down is also closed by the next <pdc> or by </abc> (not only </pdc>)."""
         if self._cur_pdc is not None and self._cur_abc is not None:
+            raw = "".join(self._cur_pdc["chars"])
+            label = raw.strip()
+            mnem = self._cur_pdc.get("mnemonic")
+            if mnem is not None:               # re-base the offset onto the label
+                mnem -= len(raw) - len(raw.lstrip())
+                mnem = mnem if 0 <= mnem < len(label) else None
             self._cur_abc["pdc"].append({
-                "label": "".join(self._cur_pdc["chars"]).strip(),
-                "action": self._cur_pdc["action"],
+                "label": label, "action": self._cur_pdc["action"], "mnemonic": mnem,
             })
         self._cur_pdc = None
 

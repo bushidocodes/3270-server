@@ -1240,6 +1240,26 @@ def _show_overlay(client_socket, panel_name: str, rows=None, enter_returns=True)
             continue  # display panel: Enter stays; only PF3/PF15 exits
 
 
+def _pdc_item_text(row, col, number, item, inner):
+    """Build one framed pull-down item line ``| N. label |``, underlining the
+    item's mnemonic letter (DTL ``<M>``) when it has one. Mono renders identically
+    to the plain framed line, so only colour/extended terminals show the underline."""
+    from screen import Text, Highlight
+    label = item["label"]
+    t = f"{number}. {label}"
+    framed = "|" + (" " + t).ljust(inner) + "|"
+    m = item.get("mnemonic")
+    if m is not None:
+        pos = 2 + (len(t) - len(label)) + m      # past ``| `` and the ``N. `` prefix
+        if 0 <= pos < len(framed):
+            runs = [(framed[:pos], None, None),
+                    (framed[pos], None, Highlight.UNDERSCORE),
+                    (framed[pos + 1:], None, None)]
+            return Text.rich(row, col, [r for r in runs if r[0]],
+                             intensity=DisplayIntensity.HIGH)
+    return Text(row, col, framed, DisplayIntensity.HIGH)
+
+
 def _show_pulldown(client_socket, screen, choice):
     """Overlay a choice's pull-down menu and wait for the user to act on it.
 
@@ -1257,11 +1277,10 @@ def _show_pulldown(client_socket, screen, choice):
     border = "+" + "-" * inner + "+"
     screen.add(Text(top, col, border, DisplayIntensity.HIGH))
     action_by_row = {}
-    for n, t in enumerate(texts):
+    for n, item in enumerate(pdc):
         row = top + 1 + n
-        screen.add(Text(row, col, "|" + (" " + t).ljust(inner) + "|",
-                        DisplayIntensity.HIGH))
-        action_by_row[row] = pdc[n]["action"]
+        screen.add(_pdc_item_text(row, col, n + 1, item, inner))
+        action_by_row[row] = item["action"]
     screen.add(Text(top + 1 + len(texts), col, border, DisplayIntensity.HIGH))
     _send_screen(client_socket, screen)
 

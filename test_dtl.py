@@ -454,9 +454,9 @@ def test_action_bar_renders_labels_and_records_pulldowns():
     # Pull-down structure + rendered position preserved for interaction.
     assert s.action_bar == [
         {"label": "Menu", "row": 0, "col": 1, "mnemonic": None,
-         "pdc": [{"label": "Exit", "action": "exit"}]},
+         "pdc": [{"label": "Exit", "action": "exit", "mnemonic": None}]},
         {"label": "Help", "row": 0, "col": 8, "mnemonic": None,
-         "pdc": [{"label": "About", "action": "passthru"}]},
+         "pdc": [{"label": "About", "action": "passthru", "mnemonic": None}]},
     ]
 
 
@@ -475,10 +475,10 @@ def test_action_bar_implicit_pdc_and_abc_end_tags():
     )
     assert s.action_bar == [
         {"label": "File", "row": 0, "col": 1, "mnemonic": None,
-         "pdc": [{"label": "Add", "action": "add"},
-                 {"label": "Delete", "action": "delete"}]},
+         "pdc": [{"label": "Add", "action": "add", "mnemonic": 0},
+                 {"label": "Delete", "action": "delete", "mnemonic": 0}]},
         {"label": "View", "row": 0, "col": 8, "mnemonic": None,
-         "pdc": [{"label": "Name", "action": "name"}]},
+         "pdc": [{"label": "Name", "action": "name", "mnemonic": 0}]},
     ]
 
 
@@ -505,6 +505,25 @@ def test_settings_action_bar_underlines_its_mnemonics():
     s = load_panel("settings")
     assert [c["mnemonic"] for c in s.action_bar] == [0, 0, 0, 0]   # first letters
     assert SA in s.render(color=True) and SA not in s.render(color=False)
+
+
+def test_pulldown_item_underlines_its_mnemonic():
+    # A pull-down item with a mnemonic renders "| N. label |" with the mnemonic
+    # letter underlined; mono is byte-identical to the plain framed line.
+    from server import _pdc_item_text
+    item = {"label": "Delete", "action": "delete", "mnemonic": 2}   # 'l' in Delete
+    rich = _pdc_item_text(3, 5, 1, item, inner=11)                   # len("1. Delete")+2
+    assert rich.text == "| 1. Delete |"
+    # "| " (2) + "1. " (3) + offset 2 -> the 'l'
+    assert rich.text[2 + 3 + 2] == "l"
+    mono = bytearray(); rich.render(mono, color=False)
+    plain = bytearray(); Text(3, 5, "| 1. Delete |", DisplayIntensity.HIGH).render(plain)
+    assert bytes(mono) == bytes(plain)                             # mono unchanged
+    col = bytearray(); rich.render(col, color=True)
+    assert SA in bytes(col)                                        # colour: underline
+
+    plain_item = {"label": "Open", "action": "x", "mnemonic": None}
+    assert _pdc_item_text(3, 5, 1, plain_item, 8).runs is None    # no mnemonic -> plain
 
 
 def test_action_choice_at_maps_cursor_to_choice():
