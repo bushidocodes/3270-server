@@ -1115,6 +1115,45 @@ def test_dtacol_supplies_default_entry_width():
     assert field.length == 25 and field.col == 13
 
 
+# ── <dtafld> USAGE / PMTLOC (#122) ───────────────────────────────────────────
+
+def test_dtafld_usage_out_is_a_protected_display_field():
+    # usage=out renders the variable's value as protected text — no input field.
+    s = load_dtl(
+        '<panel><area row="3" col="1">'
+        '<dtafld datavar="curdate" usage="out" entwidth="8">Date</dtafld>'
+        '</area></panel>',
+        CURDATE="07/03/26",
+    )
+    assert not [i for i in s.items if isinstance(i, Field)]     # display-only
+    texts = [t.text for t in s.items if isinstance(t, Text)]
+    assert "Date" in texts                                      # the prompt
+    assert any(t.strip() == "07/03/26" for t in texts)         # the value shown
+
+
+def test_dtafld_usage_in_stays_an_input_field():
+    s = load_dtl(
+        '<panel><area row="3" col="1">'
+        '<dtafld datavar="x" usage="in" entwidth="8">Name</dtafld>'
+        '</area></panel>'
+    )
+    assert [i for i in s.items if isinstance(i, Field)]         # still editable
+
+
+def test_dtafld_pmtloc_above_puts_prompt_on_the_line_above():
+    s = load_dtl(
+        '<panel><area row="5" col="1">'
+        '<dtafld datavar="t" entwidth="20" pmtloc="above">Title</dtafld>'
+        '<dtafld datavar="u" entwidth="8">Next</dtafld>'
+        '</area></panel>'
+    )
+    prompt = next(t for t in s.items if isinstance(t, Text) and t.text == "Title")
+    fld = next(f for f in s.items if isinstance(f, Field) and f.name == "t")
+    assert prompt.row == 5 and fld.row == 6 and fld.col == 1    # prompt above, field below
+    nxt = next(f for f in s.items if isinstance(f, Field) and f.name == "u")
+    assert nxt.row == 7                                         # flow advanced past 2 rows
+
+
 def test_divider_draws_a_rule_across_the_flow():
     s = load_dtl(
         '<panel><area row="4" col="1"><info>above</info><divider>'
