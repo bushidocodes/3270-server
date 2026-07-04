@@ -1,0 +1,28 @@
+<!DOCTYPE DM SYSTEM>
+<!-- Pull-down-item help for the ISPF Settings "Log/List -> Log Data Set defaults"
+     choice. Shown when the Log/List pull-down is open, the cursor is on that item
+     and HELP (PF1) is pressed - DTL <pdc help="loglisthelp">. PF3 returns to the
+     open pull-down. -->
+<panel name="loglisthelp" title="Log Data Set Defaults HELP">
+  <info row="0" col="0" intensity="high">--------------------- Log Data Set Defaults HELP ------------------------------</info>
+
+  <info row="2" col="1">The <hp>Log Data Set defaults</hp> choice controls how ISPF disposes of the</info>
+  <info row="3" col="1">session <hp>log</hp> - the running record of your ISPF activity - when you</info>
+  <info row="4" col="1">exit.</info>
+
+  <info row="6" col="1" intensity="high">Process option:</info>
+  <info row="7" col="3">- <hp>Print</hp> and delete the data set.</info>
+  <info row="8" col="3">- <hp>Delete</hp> the data set without printing.</info>
+  <info row="9" col="3">- <hp>Keep</hp> the data set for the next session.</info>
+
+  <info row="11" col="1">SYSOUT class and local printer ID apply only when the log is printed.</info>
+
+  <info row="13" col="1">Press ENTER or PF3 to return to the pull-down.</info>
+
+  <info row="22" col="1">PF3=Return</info>
+
+  <keyl name="HELPKEYS">
+    <keyi key="PF3"  cmd="EXIT">Return</keyi>
+    <keyi key="PF15" cmd="EXIT">Return</keyi>
+  </keyl>
+</panel>

@@ -454,9 +454,9 @@ def test_action_bar_renders_labels_and_records_pulldowns():
     # Pull-down structure + rendered position preserved for interaction.
     assert s.action_bar == [
         {"label": "Menu", "row": 0, "col": 1, "mnemonic": None, "help": None,
-         "pdc": [{"label": "Exit", "action": "exit", "mnemonic": None}]},
+         "pdc": [{"label": "Exit", "action": "exit", "mnemonic": None, "help": None}]},
         {"label": "Help", "row": 0, "col": 8, "mnemonic": None, "help": None,
-         "pdc": [{"label": "About", "action": "passthru", "mnemonic": None}]},
+         "pdc": [{"label": "About", "action": "passthru", "mnemonic": None, "help": None}]},
     ]
 
 
@@ -475,11 +475,34 @@ def test_action_bar_implicit_pdc_and_abc_end_tags():
     )
     assert s.action_bar == [
         {"label": "File", "row": 0, "col": 1, "mnemonic": None, "help": None,
-         "pdc": [{"label": "Add", "action": "add", "mnemonic": 0},
-                 {"label": "Delete", "action": "delete", "mnemonic": 0}]},
+         "pdc": [{"label": "Add", "action": "add", "mnemonic": 0, "help": None},
+                 {"label": "Delete", "action": "delete", "mnemonic": 0, "help": None}]},
         {"label": "View", "row": 0, "col": 8, "mnemonic": None, "help": None,
-         "pdc": [{"label": "Name", "action": "name", "mnemonic": 0}]},
+         "pdc": [{"label": "Name", "action": "name", "mnemonic": 0, "help": None}]},
     ]
+
+
+def test_pulldown_item_records_its_help_panel():
+    # <pdc help=...> records a per-item help panel (like <dtafld help=>), resolved
+    # by name; NO/YES/*/% are field-help sentinels, not panel names, so they don't
+    # count as a help panel here.
+    s = load_dtl(
+        '<panel><ab row="0" col="1">'
+        '<abc>Log/List'
+        '<pdc action="passthru" help="loglisthelp">Log Data Set defaults</pdc>'
+        '<pdc action="passthru">Keylist settings</pdc>'
+        '</abc></ab></panel>'
+    )
+    pdc = s.action_bar[0]["pdc"]
+    assert pdc[0]["help"] == "loglisthelp"
+    assert pdc[1]["help"] is None          # no help attribute
+
+
+def test_settings_pulldown_item_carries_help():
+    s = load_panel("settings")
+    loglist = s.action_bar[0]["pdc"]
+    assert loglist[0]["label"] == "Log Data Set defaults"
+    assert loglist[0]["help"] == "loglisthelp"
 
 
 def test_action_bar_mnemonic_is_recorded_and_underlined():

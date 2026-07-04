@@ -481,7 +481,8 @@ class _DTLParser(HTMLParser):
             if self._cur_abc is None:
                 raise DTLError("<pdc> outside of an <abc>")
             self._end_pdc()                     # implicit end of a previous <pdc>
-            self._cur_pdc = {"chars": [], "action": a.get("action", "")}
+            self._cur_pdc = {"chars": [], "action": a.get("action", ""),
+                             "help": self._field_help(a)}
         elif tag == "action":
             # A pull-down choice's action (alternative to <pdc action=...>).
             if self._cur_pdc is not None:
@@ -1455,6 +1456,7 @@ class _DTLParser(HTMLParser):
                 mnem = mnem if 0 <= mnem < len(label) else None
             self._cur_abc["pdc"].append({
                 "label": label, "action": self._cur_pdc["action"], "mnemonic": mnem,
+                "help": self._cur_pdc.get("help"),
             })
         self._cur_pdc = None
 

@@ -18,7 +18,7 @@ IAC, EOR = 0xFF, 0xEF
 SBA, SF = 0x11, 0x1D
 DO, DONT, WILL, WONT, SB, SE = 0xFD, 0xFE, 0xFB, 0xFC, 0xFA, 0xF0
 BINARY, TERMINAL_TYPE, EOR_OPT = 0, 24, 25
-ENTER, PF3 = 0x7D, 0xF3
+ENTER, PF1, PF3 = 0x7D, 0xF1, 0xF3
 ERASE_WRITE = 0xF5
 
 # Field addresses the server reads (row * 80 + data col).
@@ -191,6 +191,21 @@ def test_dotted_jump_opens_member_list(session):
     _login(sock)
     sock.sendall(_reply(fields={ZCMD_ADDR: "3.1"}))    # jump straight to Library
     assert "Member List" in _text(_recv_screen(sock))
+
+
+def test_settings_pulldown_item_help(session):
+    sock, _ = session
+    _login(sock)
+    sock.sendall(_reply(fields={ZCMD_ADDR: "0"}))          # open the Settings panel
+    settings = _text(_recv_screen(sock))
+    assert "ISPF Settings" in settings
+    # Enter with the cursor on the "Log/List" action-bar choice opens its pull-down.
+    sock.sendall(_reply(cursor=0 * 80 + 2))
+    pulldown = _text(_recv_screen(sock))
+    assert "Log Data Set defaults" in pulldown
+    # PF1 with the cursor on that item shows the item's <pdc help=...> panel.
+    sock.sendall(_reply(aid=PF1, cursor=2 * 80 + 2))
+    assert "Log Data Set Defaults HELP" in _text(_recv_screen(sock))
 
 
 def test_pf3_from_menu_logs_off(session):
