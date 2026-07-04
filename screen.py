@@ -501,9 +501,9 @@ class Screen:
     # The panel's command-area input field (the ISPF "Option/Command ===>" line),
     # from a DTL <cmdarea>. None if the panel has no command area.
     command_field: Optional["Field"] = None
-    # Selectable menu values → choice name, from <choice matchval=...> entries.
-    # Lets the dialog validate/route a typed option against the panel's own
-    # declared choices. Metadata: not rendered.
+    # Selectable menu values → choice name, from each <choice>'s MATCH (or the
+    # older matchval alias, else its num). Lets the dialog validate/route a typed
+    # option against the panel's own declared choices. Metadata: not rendered.
     selections: Dict[str, str] = _dc_field(default_factory=dict)
     # Screen row → the option value of the <choice> rendered on it. Lets the
     # dialog resolve a cursor position to a menu choice (point-and-shoot: put

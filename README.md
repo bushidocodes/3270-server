@@ -264,8 +264,10 @@ like:
 
 Supported tags: `<panel>`, `<info>` (text/instructions, with `fill`+`width` rules),
 `<dtafld>` (prompt + input field), `<cmdarea>` (the ISPF "Option/Command ===>" line, bound to
-`ZCMD`), `<selfld>`/`<choice>` (menu lists; each `<choice matchval>` registers a selectable
-value the server validates against, `<selfld type=multi>` is a multiple-selection field —
+`ZCMD`), `<selfld>`/`<choice>` (menu lists; each `<choice>`'s `match` — IBM's attribute, or the
+older `matchval` alias, else its `num` — registers a selectable value the server validates against,
+`<choice checkvar>` lands the cursor on the current choice, `<choice hide/hidex>` conditionally
+removes a choice, `<selfld type=multi>` is a multiple-selection field —
 each choice gets a 1-char mark field, read back via `Screen.selected_values` — and the selection
 field's prompt caption is placed above the list or, with `pmtloc=before`, to its left),
 `<keyl>`/`<keyi>` (a keylist binding function keys to
