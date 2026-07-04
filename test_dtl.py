@@ -237,6 +237,46 @@ def test_dtafld_dtafldd_equivalent_to_text_shorthand():
     assert inline.render() == nested.render()
 
 
+def test_dtafld_inline_prompt_plus_dtafldd_description():
+    # A <dtafld> row is prompt + entry + description: the inline text is the
+    # prompt, and a nested <dtafldd> is the trailing description (past the entry).
+    s = load_dtl(
+        '<panel>'
+        '<dtafld row="5" col="1" fldcol="16" datavar="author" entwidth="20">Author'
+        '  <dtafldd>Last name, First name, M.I.'
+        '</dtafld></panel>'
+    )
+    texts = [it for it in s.items if isinstance(it, Text)]
+    prompt = [t for t in texts if t.col == 1]
+    assert prompt and prompt[0].text.strip() == "Author" and prompt[0].role == "prompt"
+    # description sits past the entry's data run + terminator attr: 16 + 20 + 2.
+    desc = [t for t in texts if t.col == 38]
+    assert desc and desc[0].text == "Last name, First name, M.I."
+
+
+def test_dtafld_deswidth_truncates_the_description():
+    s = load_dtl(
+        '<panel>'
+        '<dtafld row="5" col="1" fldcol="10" datavar="x" entwidth="5" deswidth="10">P'
+        '  <dtafldd>0123456789ABCDEF'
+        '</dtafld></panel>'
+    )
+    desc = [t for t in s.items if isinstance(t, Text) and t.col > 10]
+    assert desc and desc[0].text == "0123456789"      # sized to DESWIDTH=10
+
+
+def test_dtafld_sole_dtafldd_is_still_the_prompt():
+    # With no inline text, a <dtafldd> stands in as the prompt and adds no
+    # trailing description (the shorthand the bundled panels use).
+    s = load_dtl(
+        '<panel>'
+        '<dtafld row="5" col="1" fldcol="16" datavar="u" entwidth="8">'
+        '  <dtafldd>Userid ===></dtafld></panel>'
+    )
+    texts = [it for it in s.items if isinstance(it, Text)]
+    assert len(texts) == 1 and texts[0] == Text(5, 1, "Userid ===>", DisplayIntensity.NORMAL, role="prompt")
+
+
 def test_dtafld_mdt_defaults_true():
     s = load_dtl('<panel><dtafld row="1" col="1" datavar="x" entwidth="4">L</dtafld></panel>')
     assert s.items[1].mdt is True
