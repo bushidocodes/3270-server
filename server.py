@@ -1214,6 +1214,13 @@ def _show_overlay(client_socket, panel_name: str, rows=None, enter_returns=True)
         aid_str = aid_to_string(aid)
         if screen.command_for(aid_str) in _LEAVE_COMMANDS:
             return
+        if aid_str == "PF1":
+            # HELP inside an overlay: the action-bar choice (or field) the cursor
+            # is on, else this panel's own help. (Overlays ignored PF1 before.)
+            help_panel = screen.help_for(cursor) or screen.help
+            if help_panel:
+                _show_overlay(client_socket, help_panel)
+            continue
         if screen.action_bar and aid_str in ("PF10", "PF11"):
             # F10/F11 move the cursor left/right along the action-bar choices
             # (jumping onto the bar from elsewhere), wrapping around.

@@ -700,3 +700,25 @@ def test_ws3270_settings_action_bar_underlines_mnemonics():
 
     assert "SetAttribute" in trace, trace[-2000:]        # mnemonic underline on the wire
     assert "Log/List" in out and "Colors" in out, out[-1500:]
+
+
+def test_ws3270_help_works_inside_the_settings_overlay():
+    """PF1 inside an overlay panel (the Settings action-bar panel, ISPF option 0)
+    now shows its help — overlays ignored HELP entirely before. Verified on a real
+    emulator: HELP from Settings brings up the help panel (ispfhelp)."""
+    _require_emulator()
+    port = _serve_one_client()
+    out = _drive(port, [
+        "Wait(20,InputField)",
+        "String(IBMUSER)", "Tab()", "String(SYS1)", "Enter()",
+        "Wait(20,Output)",          # ISPF menu
+        "String(0)", "Enter()",     # option 0 -> Settings overlay
+        "Wait(10,Output)",          # Settings panel (action bar)
+        "Ascii()",
+        "PF(1)",                    # HELP
+        "Wait(10,Output)",
+        "Ascii()",                  # the help panel
+        "Quit()",
+    ])
+    assert "ISPF Settings" in out, out[-1500:]      # reached the Settings overlay
+    assert "Menu  -  HELP" in out, out[-1500:]       # HELP (ispfhelp) then shown

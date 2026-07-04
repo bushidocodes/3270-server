@@ -615,12 +615,14 @@ class Screen:
         return self.keylist.get(key.upper())
 
     def help_for(self, cursor_addr: Optional[int]) -> Optional[str]:
-        """The field-level help panel for the field the cursor is on, or ``None``.
+        """The context-sensitive help panel for whatever the cursor is on, or
+        ``None``.
 
         ISPF's HELP key is context-sensitive: with the cursor in a field that has
-        its own ``<dtafld help=...>`` panel, HELP shows that instead of the panel's
-        general help. ``cursor_addr`` is the linear buffer address from the reply;
-        it's "on" a field when it falls within the field's data span.
+        its own ``<dtafld help=...>`` panel — or on an action-bar choice with a
+        ``<abc help=...>`` — HELP shows that instead of the panel's general help.
+        ``cursor_addr`` is the linear buffer address from the reply; it's "on" an
+        element when it falls within that element's span.
         """
         if cursor_addr is None:
             return None
@@ -628,6 +630,10 @@ class Screen:
             if isinstance(f, Field) and f.help and \
                     f.data_addr <= cursor_addr < f.data_addr + f.length:
                 return f.help
+        for choice in self.action_bar:
+            start = choice["row"] * 80 + choice["col"]
+            if choice.get("help") and start <= cursor_addr < start + len(choice["label"]):
+                return choice["help"]
         return None
 
     def text(self, row, col, s, intensity=DisplayIntensity.NORMAL) -> "Screen":
