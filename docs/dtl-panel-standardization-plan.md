@@ -68,6 +68,32 @@ Attributes that **are** standard DTL and need no change: `name`, `key`, `cmd`, `
 
 Every one of the 21 panels uses explicit positioning; none is currently pure-flow.
 
+## Per-attribute issues
+
+Each non-standard attribute is tracked as its own child issue under #181 (the `row`/`col` pair
+and the `<selfld>` grid are each one issue — a single mechanism removed by a single fix).
+"Blocked" means the standard equivalent is not yet implemented in the parser.
+
+| Child | Attribute(s) | Standard equivalent | Status |
+|---|---|---|---|
+| #184 | `row`, `col` | auto-flow positioning | blocked on #51 |
+| #185 | `fldcol` | auto field-entry column | blocked on #51, #122 |
+| #186 | `num`/`numcol`/`namecol`/`desccol`/`numwidth`/`numintensity` | `<selfld>` auto-layout | blocked on #183 |
+| #187 | `intensity` | `intens=HIGH \| LOW \| NON` | ready (small parser add) |
+| #188 | `title` | panel content text | decision needed (byte-parity) |
+| #189 | `fill` | `<divider>` / `DIV=` | blocked on #125 |
+| #190 | `cursor` | `<panel cursor=field-name>` | blocked on #125 |
+| #191 | `action` on `<pdc>` | `<action run=…>` child | ready (already implemented) |
+| #192 | `default` | `init=` | ready (small parser add) |
+| #193 | `trunc` on `<cmd>` | `<t>` marker | ready (implemented, #118) |
+| #194 | `gap` on `<ab>` | automatic AB spacing | blocked on #126 |
+| #195 | `fldgap` on `<area>` | `FLDSPACE` | blocked on #122 |
+
+**Implementation blockers:** #51 (auto-flow) · #183 (`<selfld>` auto-layout — opened for this work) ·
+#125 (`CURSOR`, `DIVIDER`) · #122 (`FLDSPACE`, `PMTWIDTH`) · #126 (AB spacing/`ABSEPCHAR`).
+
+**Ready now (no external blocker):** #187, #191, #192, #193 — byte-preserving alias migrations.
+
 ## Tiered plan
 
 Each tier is independently schedulable. The rule for all of them: **verify byte-identity** — render
