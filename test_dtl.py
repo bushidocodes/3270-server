@@ -1541,14 +1541,28 @@ def test_note_renders_as_a_labelled_callout():
 
 
 @pytest.mark.parametrize("tag,label", [
-    ("warning", "Warning:"), ("caution", "Caution:"),
-    ("attention", "Attention:"), ("nt", "Note:"),
+    ("warning", "Warning:"), ("attention", "Attention:"), ("nt", "Note:"),
 ])
 def test_admonition_labels(tag, label):
+    # ATTENTION / WARNING / NOTE prefix the body inline (the reference figures).
     s = load_dtl(f'<panel width="50"><area><info><{tag}>Mind the gap.'
                  f'</info></area></panel>')
     texts = [t.text for t in s.items if isinstance(t, Text)]
     assert any(t.startswith(label) and "Mind the gap." in t for t in texts)
+
+
+def test_caution_heading_on_own_line_and_emphasized():
+    # Unlike ATTENTION/WARNING, the CAUTION reference puts "CAUTION:" (uppercase)
+    # on its own line with the emphasised (high-intensity) body beneath it.
+    s = load_dtl('<panel width="50"><area><info>'
+                 '<p>The DELETE command erases the file.'
+                 '<p><caution>Issuing DELETE permanently removes the file.</caution>'
+                 '</info></area></panel>')
+    heading = next(t for t in s.items if getattr(t, "text", "") == "CAUTION:")
+    assert heading.intensity == DisplayIntensity.HIGH
+    body = [t for t in s.items if t.row > heading.row
+            and getattr(t, "text", "").startswith("Issuing")]
+    assert body and all(t.intensity == DisplayIntensity.HIGH for t in body)
 
 
 def test_inline_note_keeps_following_paragraph():

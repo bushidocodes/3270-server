@@ -265,10 +265,12 @@ _HIGHLIGHTS = {
 # unless it carries an explicit COLOR.
 
 # Admonition tags: a note/callout that flows as a labelled block within body text
-# (help panels) — the label prefixes the text. <notel> (below) is the list form.
+# (help panels). ATTENTION/WARNING/NOTE prefix the text inline; CAUTION puts its
+# uppercase heading on its own line with the emphasised body beneath (see
+# _emit_info). <notel> (below) is the list form.
 _ADMONITIONS = {
     "note": "Note:", "nt": "Note:",           # note / inline note
-    "attention": "Attention:", "caution": "Caution:", "warning": "Warning:",
+    "attention": "Attention:", "caution": "CAUTION:", "warning": "Warning:",
 }
 # Block tags whose text flows as protected lines (like <info>): paragraphs,
 # list items (<li>/<dt>/<dd>/<pt>/<pd>/<lp>), preformatted <lines>/<xmp>, and the
@@ -1363,7 +1365,7 @@ class _DTLParser(HTMLParser):
         return f"{n}."
 
     def _emit_flow_lines(self, text, row, col, ctx, marker=None, marker_col=None,
-                         role=None):
+                         role=None, intensity=DisplayIntensity.NORMAL):
         """Word-wrap ``text`` and emit it as protected lines from ``row`` at
         ``col`` (hanging indent for continuations). Optionally place a ``marker``
         (bullet/number) on the first line. Advances the flow cursor."""
@@ -1371,7 +1373,7 @@ class _DTLParser(HTMLParser):
         if marker is not None:
             self.screen.add(Text(row, marker_col, marker, DisplayIntensity.NORMAL))
         for i, ln in enumerate(lines):
-            self.screen.add(Text(row + i, col, ln, DisplayIntensity.NORMAL, role=role))
+            self.screen.add(Text(row + i, col, ln, intensity, role=role))
         if ctx is not None:
             ctx["row"] = row + len(lines)
 
@@ -1628,9 +1630,11 @@ class _DTLParser(HTMLParser):
         # concatenation is the field's plain text, so mono renders identically.
         if runs is not None and not content:
             content = "".join(t for t, _, _ in runs)
-        # An admonition (<note>/<warning>/…) flows as a labelled callout.
+        # An admonition (<note>/<warning>/…) flows as a labelled callout. CAUTION
+        # is special: heading on its own line + emphasised body (handled below).
         label = _ADMONITIONS.get(tag)
-        if label and content.strip():
+        caution = tag == "caution"
+        if label and content.strip() and not caution:
             content = label + " " + content.strip()
         # CUA role → default colour: a fill line is a separator rule; a top/panel
         # instruction is an instruction; a high-intensity heading is the title;
@@ -1684,6 +1688,15 @@ class _DTLParser(HTMLParser):
                 self.screen.add(Text(row + i, col, ln, DisplayIntensity.NORMAL,
                                      role=role))
             ctx["row"] = row + len(lines)
+            return
+        if caution:
+            # CAUTION: uppercase heading on its own line, then the emphasised
+            # (high-intensity) body beneath it (per the CAUTION reference).
+            self.screen.add(Text(row, col, label, DisplayIntensity.HIGH, role=role))
+            if ctx is not None:
+                ctx["row"] = row + 1
+            self._emit_flow_lines(text, row + 1, col, ctx, role=role,
+                                  intensity=DisplayIntensity.HIGH)
             return
         if runs is not None:
             # Flowed text with inline <hp>: keep each phrase's colour/highlight
