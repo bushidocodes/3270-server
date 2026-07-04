@@ -789,6 +789,54 @@ def test_lines_preserves_internal_spacing_and_truncates_to_width():
     ]
 
 
+# ── help-panel admonitions (<note>/<nt>/<warning>/…, <notel>) ────────────────
+
+def test_note_renders_as_a_labelled_callout():
+    # <note> was previously dropped entirely; it now flows as "Note: <body>".
+    s = load_dtl(
+        '<panel width="50"><area><info>'
+        '<p>Pick a widget.<note>If it is out of stock, use the Back Order panel.'
+        '</info></area></panel>'
+    )
+    texts = [t.text for t in s.items if isinstance(t, Text)]
+    assert any(t.startswith("Note: If it is out of stock") for t in texts)
+
+
+@pytest.mark.parametrize("tag,label", [
+    ("warning", "Warning:"), ("caution", "Caution:"),
+    ("attention", "Attention:"), ("nt", "Note:"),
+])
+def test_admonition_labels(tag, label):
+    s = load_dtl(f'<panel width="50"><area><info><{tag}>Mind the gap.'
+                 f'</info></area></panel>')
+    texts = [t.text for t in s.items if isinstance(t, Text)]
+    assert any(t.startswith(label) and "Mind the gap." in t for t in texts)
+
+
+def test_inline_note_keeps_following_paragraph():
+    # <nt>text<p>more</nt>: the note flows labelled, the nested <p> flows after it.
+    s = load_dtl(
+        '<panel width="50"><area><info>'
+        '<nt>Out of stock.<p>Arrives in three days.</nt>'
+        '<p>Order below.</info></area></panel>'
+    )
+    texts = [t.text for t in s.items if isinstance(t, Text)]
+    assert any(t.startswith("Note: Out of stock.") for t in texts)
+    assert any("three days" in t for t in texts)
+    assert any("Order below." in t for t in texts)
+
+
+def test_note_list_renders_heading_and_bulleted_items():
+    s = load_dtl(
+        '<panel width="50"><area><info><notel>'
+        '<li>First note.<li>Second note.</notel></info></area></panel>'
+    )
+    texts = [t.text for t in s.items if isinstance(t, Text)]
+    assert "Notes:" in texts
+    assert any("First note." in t for t in texts)
+    assert any("Second note." in t for t in texts)
+
+
 # ── list/table fields (<lstfld>/<lstcol>/<lstgrp>) ───────────────────────────
 
 def test_list_field_columns_laid_out_with_headings():
