@@ -35,8 +35,9 @@ EXAMPLE_FILES = sorted(glob.glob(os.path.join(_DIR, "*.dtl")))
 # auto-flow; 18 once a panel became an implicit flow box (#51); 87 with implicit
 # end tags + text/list tags (#52); 126 with panel-title text + nested-list
 # bullets/indentation; 132 with <msg suffix> + lenient unsupported <checki>;
-# 134 with <dtacol>/<divider> + tolerating a stray <vardcl> (as ISPDTLC does).
-RENDER_BASELINE = 134
+# 134 with <dtacol>/<divider> + tolerating a stray <vardcl> (as ISPDTLC does);
+# 135 with implicit <pdc>/<abc> end tags (action-bar pull-downs).
+RENDER_BASELINE = 135
 
 
 def _load(path):
