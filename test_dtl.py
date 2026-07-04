@@ -738,8 +738,8 @@ def test_action_bar_renders_labels_and_records_pulldowns():
     s = load_dtl(
         '<panel>'
         '<ab row="0" col="1" gap="3">'
-        '<abc>Menu<pdc action="exit">Exit</pdc></abc>'
-        '<abc>Help<pdc action="passthru">About</pdc></abc>'
+        '<abc>Menu<pdc>Exit<action run="exit"></pdc></abc>'
+        '<abc>Help<pdc>About<action run="passthru"></pdc></abc>'
         '</ab>'
         '</panel>'
     )
@@ -784,8 +784,8 @@ def test_pulldown_item_records_its_help_panel():
     s = load_dtl(
         '<panel><ab row="0" col="1">'
         '<abc>Log/List'
-        '<pdc action="passthru" help="loglisthelp">Log Data Set defaults</pdc>'
-        '<pdc action="passthru">Keylist settings</pdc>'
+        '<pdc help="loglisthelp">Log Data Set defaults<action run="passthru"></pdc>'
+        '<pdc>Keylist settings<action run="passthru"></pdc>'
         '</abc></ab></panel>'
     )
     pdc = s.action_bar[0]["pdc"]
@@ -805,8 +805,8 @@ def test_action_bar_mnemonic_is_recorded_and_underlined():
     # underscore highlight (mono is byte-identical to a plain high-intensity label).
     s = load_dtl(
         '<panel><ab row="0" col="1">'
-        '<abc><M>File<pdc action="x">Open</pdc>'
-        '<abc>E<M>xit<pdc action="alias exit">Leave</pdc>'
+        '<abc><M>File<pdc>Open<action run="x"></pdc>'
+        '<abc>E<M>xit<pdc>Leave<action run="exit"></pdc>'
         '</ab></panel>'
     )
     assert [c["mnemonic"] for c in s.action_bar] == [0, 1]   # File->F, Exit->x
@@ -848,8 +848,8 @@ def test_action_choice_at_maps_cursor_to_choice():
     s = load_dtl(
         '<panel>'
         '<ab row="0" col="1" gap="3">'
-        '<abc>Menu<pdc action="x">A</pdc></abc>'
-        '<abc>Help<pdc action="y">B</pdc></abc>'
+        '<abc>Menu<pdc>A<action run="x"></pdc></abc>'
+        '<abc>Help<pdc>B<action run="y"></pdc></abc>'
         '</ab>'
         '</panel>'
     )
@@ -892,8 +892,8 @@ def test_pdsep_records_separator_between_pulldown_choices():
     s = load_dtl(
         '<panel><ab row="0" col="1">'
         '<abc>File'
-        '<pdc action=add>Add<pdsep>'
-        '<pdc action=exit>Exit'
+        '<pdc>Add<action run=add><pdsep>'
+        '<pdc>Exit<action run=exit>'
         '</abc></ab></panel>'
     )
     assert s.action_bar[0]["pdc"] == [
@@ -1251,8 +1251,8 @@ def test_action_bar_choice_help_resolved_by_cursor():
     # own help; a choice without HELP resolves to None (the panel help is used).
     s = load_dtl(
         '<panel><ab row="0" col="1">'
-        '<abc help="filehelp">File<pdc action="x">Open</pdc>'
-        '<abc>Edit<pdc action="y">Cut</pdc>'
+        '<abc help="filehelp">File<pdc>Open<action run="x"></pdc>'
+        '<abc>Edit<pdc>Cut<action run="y"></pdc>'
         '</ab></panel>'
     )
     file_c, edit_c = s.action_bar
