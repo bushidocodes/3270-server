@@ -638,8 +638,11 @@ class _DTLParser(HTMLParser):
                 col = int(a["col"]) if "col" in a else (ctx["col"] if ctx else 1)
                 if ctx is not None:
                     ctx["row"] = row + 1
-                width = max(1, self.screen.width - col - 1)
-                self.screen.add(Text(row, col, "-" * width))
+                # TYPE=NONE/BLANK is a blank spacer (consumes the row but draws no
+                # rule); SOLID (the default) / DASH draw a horizontal rule.
+                if str(a.get("type", "solid")).strip().lower() not in ("none", "blank"):
+                    width = max(1, self.screen.width - col - 1)
+                    self.screen.add(Text(row, col, "-" * width))
         elif tag in ("area", "region"):
             # A flow box. With explicit row/col it is a positioned sub-box; with
             # neither it transparently continues the enclosing flow (so its

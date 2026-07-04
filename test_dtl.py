@@ -1541,6 +1541,19 @@ def test_divider_draws_a_rule_across_the_flow():
     assert texts[2] == Text(6, 1, "below", DisplayIntensity.NORMAL)  # flow resumed
 
 
+def test_divider_type_none_is_a_blank_spacer():
+    # TYPE=NONE/BLANK draws no rule but still consumes a row (a blank divider),
+    # whereas the default/SOLID divider draws a rule.
+    for dtype in ("none", "blank"):
+        s = load_dtl(
+            f'<panel><area row="4" col="1"><info>above</info>'
+            f'<divider type="{dtype}"><info>below</info></area></panel>'
+        )
+        texts = [i for i in s.items if isinstance(i, Text)]
+        assert not any(set(t.text) == {"-"} for t in texts)          # no rule
+        assert texts[-1] == Text(6, 1, "below", DisplayIntensity.NORMAL)  # row consumed
+
+
 def test_area_explicit_position_wins_and_continues_flow():
     s = load_dtl(
         '<panel><area row="5" col="1">'
