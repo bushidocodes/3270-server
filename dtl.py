@@ -294,7 +294,9 @@ class _DTLParser(HTMLParser):
         self._in_varlist = False  # inside a <varlist>?
         self._in_msgmbr = False   # inside a <msgmbr>?
         self._msgmbr_name = ""    # current <msgmbr name=...> (for <msg suffix>)
+        self._msgmbr_width = None  # <msgmbr width=...>, or None
         self.messages = {}        # <msg> msgid (upper) → message text
+        self._msg_attrs = {}      # <msg> msgid (upper) → {alarm, msgtype, smsg}
         self._areas = []          # stack of <area>/<region> flow contexts
         self._in_cmdtbl = False   # inside a <cmdtbl>?
         self._cur_cmd = None      # current <cmd> dict awaiting its <cmdact>
@@ -325,6 +327,18 @@ class _DTLParser(HTMLParser):
         return _HIGHLIGHTS.get(str(a.get("hilite", "")).strip().lower())
 
     # ── inline <hp> (highlighted phrase) mixed content ───────────────────────
+
+    @staticmethod
+    def _message_attrs(a) -> dict:
+        """Presentation attributes of a <msg>. ALARM defaults from MSGTYPE:
+        WARNING/ACTION/CRITICAL messages sound the alarm, INFO does not (an
+        explicit ALARM=YES/NO overrides). SMSG is the short-message text."""
+        msgtype = str(a.get("msgtype", "")).strip().lower()
+        if "alarm" in a:
+            alarm = _truthy(a.get("alarm"))
+        else:
+            alarm = msgtype in ("warning", "action", "critical")
+        return {"alarm": alarm, "msgtype": msgtype or None, "smsg": a.get("smsg")}
 
     def _hp_hilite(self, a):
         """The Highlight for an <hp> phrase: its HILITE= or the DTL TYPE= (both
@@ -567,6 +581,7 @@ class _DTLParser(HTMLParser):
         elif tag == "msgmbr":
             self._in_msgmbr = True
             self._msgmbr_name = a.get("name", "")
+            self._msgmbr_width = int(a["width"]) if "width" in a else None
         elif tag == "msg":
             if not self._in_msgmbr:
                 raise DTLError("<msg> outside of a <msgmbr>")
@@ -737,7 +752,9 @@ class _DTLParser(HTMLParser):
         elif tag == "choice":
             self._emit_choice(a, content)
         elif tag == "msg":
-            self.messages[a["msgid"].upper()] = content.strip()
+            mid = a["msgid"].upper()
+            self.messages[mid] = content.strip()
+            self._msg_attrs[mid] = self._message_attrs(a)
         elif tag == "checki":
             self._emit_checki(a, content)
         self._tag, self._attrs, self._chars = None, None, []
@@ -1459,17 +1476,32 @@ class MessageCatalog:
 
     Mirrors how ISPF keeps messages in a message library (ISPMLIB), separate
     from panels: :meth:`format` returns the displayable ``"<id> <text>"`` with
-    any ``&NAME`` references in the text substituted at display time.
+    any ``&NAME`` references in the text substituted at display time. Each message
+    also carries presentation attributes (see :meth:`alarm` / :meth:`short`).
     """
 
-    def __init__(self, messages: dict):
+    def __init__(self, messages: dict, attrs: dict = None, width: int = None):
         self.messages = messages
+        self.attrs = attrs or {}
+        self.width = width          # <msgmbr width=>, or None
 
     def format(self, msgid: str, **subs) -> str:
         text = self.messages.get(msgid.upper())
         if text is None:
             return msgid
         return f"{msgid} {_substitute(text, subs)}".rstrip()
+
+    def alarm(self, msgid: str) -> bool:
+        """Whether displaying this message should sound the terminal alarm
+        (<msg alarm=> / its MSGTYPE default). Unknown ids don't alarm."""
+        return bool(self.attrs.get(msgid.upper(), {}).get("alarm"))
+
+    def short(self, msgid: str, **subs) -> str:
+        """The short-message text (<msg smsg=>) if present, else the long form."""
+        smsg = self.attrs.get(msgid.upper(), {}).get("smsg")
+        if smsg is None:
+            return self.format(msgid, **subs)
+        return _substitute(smsg, subs)
 
 
 def load_messages(source: str) -> MessageCatalog:
@@ -1481,7 +1513,7 @@ def load_messages(source: str) -> MessageCatalog:
     parser = _DTLParser()
     parser.feed(source)
     parser.close()
-    return MessageCatalog(parser.messages)
+    return MessageCatalog(parser.messages, parser._msg_attrs, parser._msgmbr_width)
 
 
 def load_message_member(name: str, directory: str = None) -> MessageCatalog:

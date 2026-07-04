@@ -607,6 +607,41 @@ def test_shipped_tso_messages_match_legacy_strings():
     assert cat.format("IKJ56700I") == "IKJ56700I USERID MUST BE SPECIFIED"
 
 
+def test_msg_alarm_defaults_from_msgtype_and_overrides():
+    cat = load_messages(
+        '<msgmbr name="M">'
+        '<msg msgid="W" msgtype="WARNING">warn</msg>'
+        '<msg msgid="A" msgtype="ACTION">act</msg>'
+        '<msg msgid="I" msgtype="INFO">info</msg>'
+        '<msg msgid="Q" msgtype="CRITICAL" alarm="no">quiet</msg>'
+        '<msg msgid="B">bare</msg>'
+        '</msgmbr>'
+    )
+    assert cat.alarm("W") and cat.alarm("A")            # warning/action alarm
+    assert not cat.alarm("I")                            # info does not
+    assert not cat.alarm("Q")                            # explicit alarm=no wins
+    assert not cat.alarm("B")                            # no type → no alarm
+    assert not cat.alarm("NOSUCH")                       # unknown id
+
+
+def test_msg_short_message_and_member_width():
+    cat = load_messages(
+        '<msgmbr name="M" width="70">'
+        '<msg msgid="L" smsg="Short &N">Long form for &N</msg>'
+        '<msg msgid="P">Plain</msg>'
+        '</msgmbr>'
+    )
+    assert cat.width == 70
+    assert cat.short("L", N="X") == "Short X"            # smsg used, substituted
+    assert cat.short("P") == "P Plain"                   # falls back to long form
+
+
+def test_shipped_tso_error_messages_sound_the_alarm():
+    cat = load_message_member("tsomsgs")
+    for mid in ("IKJ56425I", "IKJ56700I", "TSO001"):
+        assert cat.alarm(mid), mid                       # logon errors beep
+
+
 def test_msg_outside_msgmbr_raises():
     with pytest.raises(DTLError):
         load_dtl('<msg msgid="X">hi</msg>')

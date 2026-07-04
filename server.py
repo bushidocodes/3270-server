@@ -817,10 +817,11 @@ def _send_screen(client_socket, screen, color: bool = None):
     client_socket.sendall(data)
 
 
-def send_tso_logon(client_socket, error_msg: str = None, model=None):
+def send_tso_logon(client_socket, error_msg: str = None, model=None, alarm=False):
     """Send the z/OS TSO/E LOGON panel, rendered from panels/logon.dtl. On a
     colour terminal the panel's declared colours are emitted and a logon error
-    is shown in red."""
+    is shown in red. ``alarm`` sounds the terminal alarm (an error message whose
+    <msg> asks for it, e.g. a bad password), the way real ISPF beeps on error."""
     # Imported lazily: screen.py imports primitives from this module, so a
     # top-level import here would create a circular import at load time.
     from dtl import load_panel
@@ -832,6 +833,7 @@ def send_tso_logon(client_socket, error_msg: str = None, model=None):
         col = max(0, (80 - len(error_msg)) // 2)
         screen.add(Text(19, col, error_msg, DisplayIntensity.HIGH,
                         color=Color.RED if color else None))
+        screen.sound_alarm = alarm
     _send_screen(client_socket, screen, color=color)
     return screen
 
@@ -1856,9 +1858,11 @@ def handle_client(client_socket, addr):
     while True:
         # Logon loop
         error_msg = None
+        error_alarm = False
         userid = None
         while True:
-            screen = send_tso_logon(client_socket, error_msg, model=model)
+            screen = send_tso_logon(client_socket, error_msg, model=model,
+                                    alarm=error_alarm)
             result = read_client_input(client_socket)
             if result is None:
                 return
@@ -1880,6 +1884,7 @@ def handle_client(client_socket, addr):
             if verr:
                 msgid, subs = verr
                 error_msg = _messages().format(msgid, **subs)
+                error_alarm = _messages().alarm(msgid)
                 continue
 
             userid_raw = fields.get(LOGON_USERID_ADDR, "").strip().upper()
@@ -1887,10 +1892,12 @@ def handle_client(client_socket, addr):
 
             if not userid_raw:
                 error_msg = _messages().format("IKJ56700I")
+                error_alarm = _messages().alarm("IKJ56700I")
                 continue
 
             if _CREDENTIALS.get(userid_raw) != password_raw:
                 error_msg = _messages().format("IKJ56425I", USERID=userid_raw)
+                error_alarm = _messages().alarm("IKJ56425I")
                 continue
 
             userid = userid_raw
