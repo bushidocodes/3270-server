@@ -1806,6 +1806,90 @@ def test_choice_reference_figure_snapshot():
     assert _ascii_snapshot(load_dtl(_CHOICE_FIGURE_SRC)) == expected
 
 
+# Verbatim PANEL-reference "Figure 1" (Dream Vacation Guide) markup.
+_PANEL_FIGURE_SRC = (
+    "<!DOCTYPE DM SYSTEM>\n\n"
+    "<VARCLASS NAME=selcls TYPE='CHAR 2'>\n"
+    "<VARLIST>\n"
+    "  <VARDCL NAME=loc  VARCLASS=selcls>\n"
+    "  <VARDCL NAME=mode VARCLASS=selcls>\n"
+    "</VARLIST>\n\n"
+    "<PANEL NAME=panel HELP=trvlhlp KEYLIST=keylxmp\n"
+    "  DEPTH=22 WIDTH=60>Dream Vacation Guide\n"
+    "<AB>\n"
+    "  <ABC>File\n"
+    "    <PDC>Add Entry\n        <ACTION RUN=add>\n"
+    "    <PDC>Delete Entry\n        <ACTION RUN=delete>\n"
+    "    <PDC>Update Entry\n        <ACTION RUN=update>\n"
+    "    <PDC>Exit\n        <ACTION RUN=exit>\n"
+    "  <ABC>Help\n"
+    "    <PDC>Extended Help...\n        <ACTION RUN=exhelp>\n"
+    "    <PDC>Keys Help...\n        <ACTION RUN=keyshelp>\n"
+    "</AB>\n"
+    "<TOPINST>Choose one of the following exotic locations and\n"
+    "your preferred mode of travel, then press Enter.\n"
+    "<AREA>\n"
+    "  <REGION DIR=horiz>\n"
+    "  <SELFLD NAME=loc PMTWIDTH=23 SELWIDTH=25>Exotic Location:\n"
+    "    <CHOICE>Athens, GA\n"
+    "    <CHOICE>Berlin, CT\n"
+    "    <CHOICE>Cairo, IL\n"
+    "    <CHOICE>Lizard Lick, NC\n"
+    "    <CHOICE>Paris, TX\n"
+    "    <CHOICE>Rome, NY\n"
+    "    <CHOICE>Venice, FL\n"
+    "  </SELFLD>\n"
+    "  <DIVIDER>\n"
+    "  <SELFLD NAME=mode PMTWIDTH=25 SELWIDTH=25>Travel Mode:\n"
+    "    <CHOICE>Boxcar\n"
+    "    <CHOICE>Hitchhike\n"
+    "    <CHOICE>Mule\n"
+    "  </SELFLD>\n"
+    "  </REGION>\n"
+    "</AREA>\n"
+    "<CMDAREA>\n"
+    "</PANEL>\n"
+)
+
+
+def test_panel_reference_figure_snapshot():
+    """Layout snapshot of the PANEL-reference Figure 1 (Dream Vacation Guide).
+    Pins: validated WIDTH=60/DEPTH=22, an inline <AB> action bar ("File Help",
+    labels rendered — unlike the external-entity bar in the CHOICE figure), a
+    <topinst>, and two side-by-side single-choice <selfld>s in a horizontal
+    <region>, each auto-numbered "N.", plus the <cmdarea> input field.
+
+    Honest deltas from the IBM figure (documented, not asserted):
+      * The title "Dream Vacation Guide" is dropped: the action bar occupies row 0
+        and our title retracts on a row-0 collision (#188). CUA instead draws a
+        separator rule under the bar and centers the title below it — a known
+        action-bar/title layout gap.
+      * No auto-generated action-bar separator rule.
+      * The empty <CMDAREA> renders just the input field; ISPF supplies a default
+        "Command ===>" prompt we don't add.
+      * The runtime F-key area (F1=Help ...) is ISPF chrome, not in the markup.
+      * A +1 left-margin column from our field-attribute-byte convention.
+    """
+    s = load_dtl(_PANEL_FIGURE_SRC)
+    assert (s.width, s.depth) == (60, 22)               # validated dimensions
+    assert [c["label"] for c in s.action_bar] == ["File", "Help"]
+    expected = "\n".join([
+        " File   Help",
+        " Choose one of the following exotic locations and your",
+        " preferred mode of travel, then press Enter.",
+        " Exotic Location:           Travel Mode:",
+        " __  1.  Athens, GA         __  1.  Boxcar",
+        "     2.  Berlin, CT             2.  Hitchhike",
+        "     3.  Cairo, IL              3.  Mule",
+        "     4.  Lizard Lick, NC",
+        "     5.  Paris, TX",
+        "     6.  Rome, NY",
+        "     7.  Venice, FL",
+        "   ________",
+    ])
+    assert _ascii_snapshot(s) == expected
+
+
 def test_nested_unordered_lists_matches_guide_figure():
     # IBM DTL Guide "Nested Unordered Lists" figure: a centered title, then o/-/--
     # bullets by depth with increasing indentation. (Verbatim guide source.)
