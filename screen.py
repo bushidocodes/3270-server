@@ -192,12 +192,20 @@ def _emit_attr_runs(buf: bytearray, runs, base_color: Optional[Color],
         buf.extend(to_ebcdic(text))
 
 
+# A valid symbol name (DTL <checki type="name">): a letter or one of @ # $,
+# then up to 7 more of those or digits — the ISPF/TSO name rule.
+_NAME_FIRST = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@#$")
+_NAME_REST = _NAME_FIRST | set("0123456789")
+
+
 def _check_failure(check: dict, value: str):
     """Return message substitutions if ``value`` fails ``check``, else ``None``.
 
     Mirrors a DTL ``<checki>``: ``range`` requires a number within [min, max];
-    ``values`` requires membership in a fixed set. The returned dict feeds the
-    check's ``checkmsg`` (e.g. ``{"VALUE": .., "MIN": .., "MAX": ..}``).
+    ``values`` requires membership in a fixed set (or, when ``negate``, absence
+    from it); ``alpha`` requires all letters; ``name`` requires a valid symbol
+    name. The returned dict feeds the check's ``checkmsg`` (e.g.
+    ``{"VALUE": .., "MIN": .., "MAX": ..}``).
     """
     if check["type"] == "range":
         try:
@@ -208,9 +216,15 @@ def _check_failure(check: dict, value: str):
             return {"VALUE": value, "MIN": check["min"], "MAX": check["max"]}
         return None
     if check["type"] == "values":
-        if value.upper() not in check["values"]:
-            return {"VALUE": value}
-        return None
+        present = value.upper() in check["values"]
+        failed = present if check.get("negate") else not present
+        return {"VALUE": value} if failed else None
+    if check["type"] == "alpha":
+        return None if (value.isascii() and value.isalpha()) else {"VALUE": value}
+    if check["type"] == "name":
+        ok = (1 <= len(value) <= 8 and value[0] in _NAME_FIRST
+              and all(c in _NAME_REST for c in value))
+        return None if ok else {"VALUE": value}
     return None  # unknown check type: treat as passing
 
 
