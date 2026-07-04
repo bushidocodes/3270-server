@@ -3,7 +3,7 @@
      name; the server (server._show_view) reads the `member` field, and if it
      names a real panels/*.dtl member opens the Browse panel on its source.
      An unknown member is reported via &VIEWMSG. PF3 returns to the menu. -->
-<panel name="viewentry" title="View - Entry Panel" help="ispfhelp">
+<panel name="viewentry" help="ispfhelp">View - Entry Panel
   <info row="0" col="0" intensity="high">------------------------------ View - Entry Panel ------------------------------</info>
   <topinst row="2" col="1">Enter the name of a panel library (ISPPLIB) member to browse.</topinst>
 

@@ -3,7 +3,7 @@
      EDIT frame. Editing is display-only in this demo; the server (_show_view
      with verb=EDIT) reads the `member` field and browses its source. An unknown
      member is reported via &VIEWMSG. PF3 returns to the menu. -->
-<panel name="editentry" title="Edit - Entry Panel" help="ispfhelp">
+<panel name="editentry" help="ispfhelp">Edit - Entry Panel
   <info row="0" col="0" intensity="high">------------------------------ Edit - Entry Panel ------------------------------</info>
   <topinst row="2" col="1">Enter the name of a panel library (ISPPLIB) member to edit.</topinst>
 

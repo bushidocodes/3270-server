@@ -4,7 +4,7 @@
      Screen.command_value(), runs it (server._run_tso_command), and feeds the
      response back as &CMDMSG for the next display. PF3 returns to the menu;
      Enter runs the typed command and stays (an empty command just clears). -->
-<panel name="cmdshell" title="ISPF Command Shell" help="ispfhelp">
+<panel name="cmdshell" help="ispfhelp">ISPF Command Shell
   <info row="0" col="0" intensity="high">------------------------------ ISPF Command Shell ------------------------------</info>
   <topinst row="2" col="1">Enter a TSO command and press Enter; its response appears below.</topinst>
 

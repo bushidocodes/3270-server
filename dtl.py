@@ -24,8 +24,10 @@ prolog (tolerated and ignored), tag and attribute names are case-insensitive
 
 Supported tags
 --------------
-``<panel name title help          root container. ``title`` → ``Screen.title``;
-   width depth>``                 ``help`` names a help panel; ``width``/``depth``
+``<panel name help>Title``      root container. The panel's content text is its
+   ``width depth``                title (``panel-title-text`` → ``Screen.title``,
+                                 centered on row 0 when that row is free);
+                                 ``help`` names a help panel; ``width``/``depth``
                                  give the presentation-space size (default 80x24)
                                  and bound element positions at load time.
 ``<area row col fldgap>``        a flow box: contained elements that omit ``row``
@@ -355,6 +357,7 @@ class _DTLParser(HTMLParser):
         self._cur_abc = None      # current <abc> action-bar choice, or None
         self._cur_pdc = None      # current <pdc> pull-down choice, or None
         self._panel_title = None  # capturing the panel's title text, or None
+        self._title_item = None   # the centered title Text (retracted on row-0 collision)
         self._lists = []          # stack of open <ul>/<ol> ({"type", "n"})
         self._lstfld = None       # active <lstfld> table {"cols", "groups", …}
         self._lstgrp = None       # current <lstgrp> column group, or None
@@ -481,8 +484,9 @@ class _DTLParser(HTMLParser):
                 "pending": None,
             })
         if tag in ("panel", "help"):
-            # A top-level <help> is itself a (help) panel — same flow root.
-            self.screen.title = a.get("title")
+            # A top-level <help> is itself a (help) panel — same flow root. The
+            # title is the panel's content text (panel-title-text), captured into
+            # screen.title by _finalize_panel_title — not an attribute.
             self.screen.help = a.get("help")
             if self._override_cols is not None:
                 self.screen.width = self._override_cols
@@ -807,6 +811,7 @@ class _DTLParser(HTMLParser):
             if self._da is not None:      # a <da> with an omitted end tag
                 self._emit_da()
                 self._da = None
+            self._retract_title_if_collision()
             self._areas.clear()  # drop the panel's implicit flow box
             return
         if tag == "selfld":
@@ -927,6 +932,7 @@ class _DTLParser(HTMLParser):
             self._finalize_panel_title()
         if self._tag is not None:
             self._emit_current()
+        self._retract_title_if_collision()
 
     def _emit_current(self):
         """Emit the open content element (``self._tag``) and reset capture state.
@@ -1129,9 +1135,25 @@ class _DTLParser(HTMLParser):
         if self.screen.title is None:
             self.screen.title = text
         col = max(0, (self.screen.width - len(text)) // 2)
-        self.screen.add(Text(0, col, text, DisplayIntensity.NORMAL))
+        item = Text(0, col, text, DisplayIntensity.NORMAL)
+        self.screen.add(item)
+        self._title_item = item
         if self._areas and self._areas[-1]["row"] < 1:
             self._areas[-1]["row"] = 1  # flow starts below the title
+
+    def _retract_title_if_collision(self):
+        """A ``panel-title-text`` content title renders centered on row 0. If the
+        panel also puts an explicit element on row 0 — the bundled panels draw
+        their own title rule / action bar there — drop the auto centered title, so
+        the standard content form is byte-identical to the metadata-only ``title=``
+        attribute it replaces (which added no body item)."""
+        item = self._title_item
+        self._title_item = None
+        if item is not None and any(
+            it is not item and getattr(it, "row", None) == 0
+            for it in self.screen.items
+        ):
+            self.screen.items.remove(item)
 
     def _wrap(self, text, width):
         """Greedy word-wrap ``text`` into lines no wider than ``width``."""
