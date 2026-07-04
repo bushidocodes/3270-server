@@ -265,7 +265,9 @@ like:
 Supported tags: `<panel>`, `<info>` (text/instructions, with `fill`+`width` rules),
 `<dtafld>` (prompt + input field), `<cmdarea>` (the ISPF "Option/Command ===>" line, bound to
 `ZCMD`), `<selfld>`/`<choice>` (menu lists; each `<choice matchval>` registers a selectable
-value the server validates against), `<keyl>`/`<keyi>` (a keylist binding function keys to
+value the server validates against, and `<selfld type=multi>` is a multiple-selection field —
+each choice gets a 1-char mark field, read back via `Screen.selected_values`), `<keyl>`/`<keyi>`
+(a keylist binding function keys to
 commands), `<cmdtbl>`/`<cmd>`/`<cmdact>` (an application command table — the command line
 recognizes named commands, with truncation), `<varclass>`/`<varlist>`/`<vardcl>` (typed variable
 declarations — a field inherits `numeric` from its class, and a class's `<checkl>`/`<checki>`

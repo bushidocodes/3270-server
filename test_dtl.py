@@ -254,6 +254,65 @@ def test_selfld_lays_out_choices_on_incrementing_rows():
     assert s.items[3] == Text(5, 1, "10", DisplayIntensity.HIGH)
 
 
+def test_selfld_type_multi_renders_a_mark_field_per_choice():
+    # TYPE=MULTI is a multiple-selection field: each choice gets its own 1-char
+    # input field to mark (in place of a number), so several can be selected.
+    s = load_dtl(
+        '<panel><selfld name="off" type="multi" row="4" namecol="4" desccol="21">'
+        '<choice name="pat" match="P">Patent</choice>'
+        '<choice name="def" match="D">Defamation</choice>'
+        '</selfld></panel>'
+    )
+    m0, m1 = s.items[0], s.items[3]
+    assert isinstance(m0, Field) and m0.row == 4 and m0.col == 1 and m0.length == 1
+    assert isinstance(m1, Field) and m1.row == 5 and m1.col == 1
+    assert s.items[1] == Text(4, 4, "pat", DisplayIntensity.NORMAL)
+    assert s.items[2] == Text(4, 21, "Patent", DisplayIntensity.NORMAL)
+    # No numbered Text is emitted for a multi-select choice.
+    assert not any(isinstance(it, Text) and it.role == "num" for it in s.items)
+
+
+def test_selfld_type_multi_records_and_reads_selected_values():
+    s = load_dtl(
+        '<panel><selfld name="off" type="multi" row="4">'
+        '<choice name="pat" match="P">Patent</choice>'
+        '<choice name="def" match="D">Defamation</choice>'
+        '<choice name="fra" match="F">Fraud</choice>'
+        '</selfld></panel>'
+    )
+    assert [sf["value"] for sf in s.selection_fields] == ["P", "D", "F"]
+    addrs = {sf["value"]: sf["addr"] for sf in s.selection_fields}
+    # The user marks Patent and Fraud (any non-blank char), leaves Defamation blank.
+    marked = {addrs["P"]: "/", addrs["D"]: " ", addrs["F"]: "S"}
+    assert s.selected_values(marked) == ["P", "F"]
+    assert s.selected_values({}) == []                 # nothing marked
+
+
+def test_selfld_type_multi_unavail_choice_has_no_mark_field():
+    # An unavailable choice can't be selected, so it gets no mark field and is
+    # not recorded as readable.
+    s = load_dtl(
+        '<panel><selfld name="off" type="multi" row="4">'
+        '<choice name="ok" match="A">Available</choice>'
+        '<choice name="no" match="B" unavail>Unavailable</choice>'
+        '</selfld></panel>'
+    )
+    marks = [it for it in s.items if isinstance(it, Field)]
+    assert len(marks) == 1 and marks[0].row == 4       # only the available choice
+    assert [sf["value"] for sf in s.selection_fields] == ["A"]
+
+
+def test_selfld_type_single_is_unchanged():
+    # The default (SINGLE) keeps the numbered layout — no mark fields.
+    s = load_dtl(
+        '<panel><selfld row="4"><choice num="1" name="A">desc</choice></selfld></panel>'
+    )
+    assert not any(isinstance(it, Field) for it in s.items)
+    assert s.items[0] == Text(4, 1, "1 ", DisplayIntensity.HIGH)
+    assert s.selection_fields == []
+    assert s.selection_rows == {4: "1"}
+
+
 def test_choice_records_selection_rows_for_point_and_shoot():
     # Each choice also records the row it renders on, so the cursor can select
     # it (point-and-shoot). selection_at(cursor) resolves a cursor address.

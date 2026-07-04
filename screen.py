@@ -509,6 +509,11 @@ class Screen:
     # dialog resolve a cursor position to a menu choice (point-and-shoot: put
     # the cursor on a choice and press Enter). Metadata: not rendered.
     selection_rows: Dict[int, str] = _dc_field(default_factory=dict)
+    # Multi-select mark fields (DTL <selfld type=multi>): each choice has its own
+    # 1-char input field the user marks (any non-blank char selects it), so more
+    # than one choice can be chosen. [{"value": match, "name": choice, "addr": n}].
+    # The mark Fields are also emitted as items; this records how to read them.
+    selection_fields: List[dict] = _dc_field(default_factory=list)
     # Field name (upper) → {"checkmsg": id, "checks": [...]}, from a variable's
     # <varclass> validation (<checkl>/<checki>). Metadata: not rendered.
     validations: Dict[str, dict] = _dc_field(default_factory=dict)
@@ -550,6 +555,14 @@ class Screen:
         if cursor_addr is None:
             return None
         return self.selection_rows.get(cursor_addr // 80)
+
+    def selected_values(self, fields_by_addr: Dict[int, str]) -> List[str]:
+        """For a multi-select panel (DTL ``<selfld type=multi>``), the MATCH
+        values of the choices the client marked — every mark field whose returned
+        value is a non-blank character. Empty when the panel has no multi-select
+        field or nothing was marked."""
+        return [sf["value"] for sf in self.selection_fields
+                if (fields_by_addr.get(sf["addr"], "") or "").strip()]
 
     def lookup_command(self, typed: Optional[str]) -> Optional[str]:
         """Resolve a typed command against the command table, honouring each

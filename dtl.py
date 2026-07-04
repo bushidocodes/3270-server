@@ -456,6 +456,13 @@ class _DTLParser(HTMLParser):
                 "color": self._color(a),
                 "ctx": ctx,
                 "start_idx": len(self.screen.items),
+                # TYPE=MULTI is a multiple-selection field: each choice gets its
+                # own 1-char mark field (instead of a number the user types on a
+                # command line), so several choices can be selected at once. SINGLE
+                # (the default), MENU, MODEL and TUTOR keep the numbered layout.
+                "multi": str(a.get("type", "single")).strip().lower() == "multi",
+                "name": (a.get("name") or "").strip(),
+                "count": 0,
             }
         elif tag == "dtafldd":
             # The authentic data-field description (prompt) child of a field.
@@ -1525,29 +1532,48 @@ class _DTLParser(HTMLParser):
         rnum, rname, rdesc = ("unavail", "unavail", "unavail") if unavail \
             else ("num", "name", "desc")
         num_int = DisplayIntensity.NORMAL if unavail else sf["numintensity"]
-        self.screen.add(Text(row, sf["numcol"], a.get("num", "").ljust(sf["numwidth"]),
-                             num_int, color=explicit, role=rnum))
+        # The value that selects this choice. IBM's attribute is MATCH; it defaults
+        # to the displayed number.
+        match = a.get("match", a.get("num", "")).strip().upper()
+        mark = None
+        if sf.get("multi") and not unavail:
+            # Multiple-selection: a 1-char input field the user marks, in place of
+            # the number. Its modified value (any non-blank char) selects the choice.
+            mark = Field(
+                row=row, col=sf["numcol"], length=1,
+                name=(a.get("name") or f'{sf["name"]}{sf["count"]}') or None,
+                color=explicit, role="field",
+            )
+            self.screen.add(mark)
+        else:
+            self.screen.add(Text(row, sf["numcol"], a.get("num", "").ljust(sf["numwidth"]),
+                                 num_int, color=explicit, role=rnum))
         self.screen.add(Text(row, sf["namecol"], a.get("name", ""),
                              color=explicit, role=rname))
         self.screen.add(Text(row, sf["desccol"], content,
                              color=explicit, role=rdesc))
         sf["row"] = row + 1
+        sf["count"] += 1
         if unavail:
             return                          # not selectable → no routing/point-and-shoot
-        # The value that selects this choice. IBM's attribute is MATCH; it defaults
-        # to the displayed number.
-        match = a.get("match", a.get("num", "")).strip().upper()
         if match:
             self.screen.selections[match] = a.get("name", "").strip()
-            # Remember which row this choice renders on, so the cursor can select it
-            # (point-and-shoot).
-            self.screen.selection_rows[row] = match
+            if mark is not None:
+                # Record how to read this multi-select mark field back.
+                self.screen.selection_fields.append(
+                    {"value": match, "name": a.get("name", "").strip(),
+                     "addr": mark.data_addr}
+                )
+            else:
+                # Single-select: remember which row this choice renders on, so the
+                # cursor can select it (point-and-shoot).
+                self.screen.selection_rows[row] = match
             # CHECKVAR names the variable holding the current selection; when its
             # value equals this choice's MATCH, the choice is current — land the
             # cursor on it so the user sees (and can re-select) the current choice.
             checkvar = a.get("checkvar")
             if checkvar and self._subs.get(checkvar.strip().upper(), "").strip().upper() == match:
-                self.screen.cursor_at = (row, sf["namecol"])
+                self.screen.cursor_at = (row, mark.col if mark is not None else sf["namecol"])
 
     def _end_pdc(self):
         """Finalise the open <pdc> onto its <abc>. DTL omits most end tags, so a
