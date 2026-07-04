@@ -60,8 +60,10 @@ renders centered on row 0, with the body flowing beneath it.
                                  ``usage=out`` makes it a protected display field
                                  (the variable's value); ``pmtloc=above`` puts the
                                  prompt on the line above. See attrs below.
-``<dtafldd>prompt</dtafldd>``    data-field description: the prompt for its
-                                 enclosing ``<dtafld>`` or ``<cmdarea>``.
+``<dtafldd>text</dtafldd>``      data-field description: a trailing description
+                                 (after the entry, sized by ``deswidth``) when the
+                                 field has its own prompt text, else it stands in
+                                 as the prompt.
 ``<cmdarea row col fldcol         the command area (ISPF "Option/Command ===>"
    entwidth ...>``                line). Renders like ``<dtafld>``; ``datavar``
                                  defaults to ``ZCMD`` and the field is recorded
@@ -110,6 +112,7 @@ renders centered on row 0, with the body flowing beneath it.
 ``<dtafld>`` attributes: ``datavar`` (field name sent back), ``entwidth`` (field
 length), ``display`` (``display=no`` is non-display, e.g. password), ``numeric``, ``default``,
 ``required`` (``required=yes`` must be non-empty on submit; ``msg`` names the error),
+``deswidth`` (width of a trailing ``<dtafldd>`` description),
 ``cursor`` (place the cursor here), ``mdt`` (default yes), ``intensity`` (prompt).
 
 Variable substitution: dialog-variable references are written ISPF-style with a
@@ -814,6 +817,11 @@ class _DTLParser(HTMLParser):
         tag = self._tag
         if tag is None:
             return
+        # An implicitly-closed <dtafldd> (no </dtafldd> — closed by the tag that
+        # follows) is still an open list here; finalize it to a string so it can
+        # serve as the field's prompt or its trailing description.
+        if isinstance(self._dtafldd, list):
+            self._dtafldd = "".join(self._dtafldd)
         # If the active flow box lays out horizontally, note where its next child's
         # items begin so we can advance its column cursor past them afterwards.
         # Choices are excluded — they belong to a <selfld>, flowed at its close.
@@ -841,7 +849,17 @@ class _DTLParser(HTMLParser):
         elif tag in _TEXT_TAGS:
             self._emit_info(a, content, tag, runs=runs)
         elif tag == "dtafld":
-            self._emit_dtafld(a, content)
+            # A <dtafld> row is prompt + entry + description. The inline text is
+            # the prompt and a nested <dtafldd> is the trailing description; but
+            # when the field has *only* a <dtafldd> (no inline text), it stands in
+            # as the prompt (the shorthand the bundled panels use).
+            inline = "".join(self._chars)
+            dtafldd = self._dtafldd if isinstance(self._dtafldd, str) else None
+            if dtafldd is not None and inline.strip():
+                prompt, description = inline, dtafldd
+            else:
+                prompt, description = content, None
+            self._emit_dtafld(a, prompt, description)
         elif tag == "cmdarea":
             self._emit_cmdarea(a, content)
         elif tag == "choice":
@@ -915,7 +933,8 @@ class _DTLParser(HTMLParser):
             ctx["row"] = row + 1
         else:
             raise DTLError(f"<{tag}> missing required attribute 'row'")
-        if "col" in a:
+        col_explicit = "col" in a
+        if col_explicit:
             col = int(a["col"])
         elif ctx is not None:
             col = ctx["col"]
@@ -925,10 +944,15 @@ class _DTLParser(HTMLParser):
             raise DTLError(
                 f"<{tag}> row {row} outside panel depth {self.screen.depth}"
             )
-        if not (0 <= col < self.screen.width):
+        if col < 0 or (col_explicit and col >= self.screen.width):
             raise DTLError(
                 f"<{tag}> col {col} outside panel width {self.screen.width}"
             )
+        if col >= self.screen.width:
+            # An auto-flowed column ran off the panel — our side-by-side
+            # (dir=horiz) column math only approximates ISPDTLC's, so clamp to the
+            # edge rather than abort the whole panel (as the width clamp does too).
+            col = max(0, self.screen.width - 2)
         return row, col, ctx
 
     # Unordered-list bullets by nesting depth (ISPF: o, then -, then --, …).
@@ -1336,10 +1360,11 @@ class _DTLParser(HTMLParser):
             self.screen.add(Text(row, col, content, spec["intens"],
                                  color=spec["color"], highlight=spec["hilite"]))
 
-    def _add_field(self, a, content, tag, name):
+    def _add_field(self, a, content, tag, name, description=None):
         """Emit a prompt (if any) plus its field: an unprotected input field, or —
-        for ``usage=out`` — the variable's value as protected display text. Returns
-        the Field, or ``None`` for a display field."""
+        for ``usage=out`` — the variable's value as protected display text. A
+        trailing ``<dtafldd>`` ``description`` renders after the entry, sized by
+        DESWIDTH. Returns the Field, or ``None`` for a display field."""
         # A flowed field (omitted end tag) captures the newline + indentation of
         # the following line into its caption; collapse it, as <info> does, so the
         # prompt is clean. Single-line captions are untouched (byte-identical).
@@ -1395,6 +1420,18 @@ class _DTLParser(HTMLParser):
             # the field-prompt colour); DTL's COLOR on a <dtafld> colours the
             # *field*, not the caption.
             self.screen.add(Text(row, col, content, _intensity(a), role="prompt"))
+        # A trailing <dtafldd> description renders after the entry (past the
+        # field's data byte run and its terminator attribute), truncated to
+        # DESWIDTH when the author sizes it.
+        if description and description.strip():
+            desc = " ".join(description.split())
+            if "deswidth" in a:
+                desc = desc[: int(a["deswidth"])]
+            desc_col = fldcol + length + 2      # attr + data + terminator attr
+            desc = desc[: max(0, self.screen.width - desc_col)]
+            if desc:
+                self.screen.add(Text(row, desc_col, desc, _intensity(a),
+                                     role="prompt"))
         # USAGE=OUT is a display-only (output) field: show the variable's value as
         # protected text — like a list column — not an editable input box.
         if str(a.get("usage", "")).strip().lower() == "out":
@@ -1535,8 +1572,9 @@ class _DTLParser(HTMLParser):
             return
         self._vardcls[name.upper()] = {"varclass": a.get("varclass", "")}
 
-    def _emit_dtafld(self, a, content):
-        self._add_field(a, content, "dtafld", a.get("datavar"))
+    def _emit_dtafld(self, a, content, description=None):
+        self._add_field(a, content, "dtafld", a.get("datavar"),
+                        description=description)
 
     def _emit_cmdarea(self, a, content):
         # The command area is ISPF's command/option line; its variable defaults
