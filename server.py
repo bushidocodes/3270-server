@@ -1297,16 +1297,19 @@ def _show_pulldown(client_socket, screen, choice):
 
 def _run_pdc_action(client_socket, screen, action) -> bool:
     """Run a selected pull-down action. Returns True if it should leave the
-    overlay (an EXIT-family alias), False otherwise (the panel is redisplayed).
-    """
+    overlay (an EXIT-family command), False otherwise (the panel is redisplayed).
+
+    Accepts both the DTL ``<action run=...>`` form (a bare command like ``exit``,
+    as the guide's action-bar pull-downs use) and the ``alias <command>`` form the
+    bundled panels use, so an exit choice actually leaves however it's authored."""
     act = (action or "").strip().lower()
     if act.startswith("alias "):
-        target = act.split(None, 1)[1].strip()
-        if target == "help" and screen.help:
-            _show_overlay(client_socket, screen.help)
-            return False
-        if target in ("exit", "end", "return"):
-            return True
+        act = act.split(None, 1)[1].strip()
+    if act in ("exit", "end", "return", "cancel"):
+        return True
+    if act == "help" and screen.help:
+        _show_overlay(client_socket, screen.help)
+        return False
     return False  # passthru / unknown / no selection: just redisplay
 
 

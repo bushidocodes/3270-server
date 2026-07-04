@@ -356,3 +356,34 @@ def test_member_path_rejects_unknown_and_traversal():
     assert _member_path("") is None
     for bad in ["../server", r"..\server", "a.b", "a/b", "foo.dtl", "toolongname"]:
         assert _member_path(bad) is None
+
+
+# ── action-bar pull-down actions (_run_pdc_action) ──────────────────────────
+
+def test_run_pdc_action_leaves_on_exit_family():
+    from server import _run_pdc_action
+    from screen import Screen
+    scr = Screen()
+    # A bare DTL command (<action run=exit>) and the alias form both leave.
+    for act in ("exit", "end", "return", "cancel", "alias exit", "ALIAS Return"):
+        assert _run_pdc_action(None, scr, act) is True, act
+    # passthru / unknown / empty stay on the panel.
+    for act in ("passthru", "add", "", None):
+        assert _run_pdc_action(None, scr, act) is False, act
+
+
+def test_run_pdc_action_help_shows_overlay_and_stays():
+    import server
+    from server import _run_pdc_action
+    from screen import Screen
+    scr = Screen()
+    scr.help = "tsohelp"
+    shown = []
+    orig = server._show_overlay
+    server._show_overlay = lambda sock, name, **kw: shown.append(name)
+    try:
+        assert _run_pdc_action(MagicMock(), scr, "help") is False        # bare
+        assert _run_pdc_action(MagicMock(), scr, "alias help") is False  # aliased
+    finally:
+        server._show_overlay = orig
+    assert shown == ["tsohelp", "tsohelp"]
