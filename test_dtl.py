@@ -1551,6 +1551,16 @@ def test_panel_title_kept_when_row0_is_free():
                               DisplayIntensity.NORMAL)
 
 
+def test_panel_titline_no_keeps_title_metadata_without_a_line():
+    # #204: TITLINE=NO suppresses the on-screen title line — the title is kept as
+    # Screen.title metadata only, and the body flows from row 0 (the freed line).
+    s = load_dtl('<panel name="p" titline="no" width="20">My Title'
+                 '<info>body</info></panel>')
+    assert s.title == "My Title"                               # metadata kept
+    assert all(getattr(it, "text", "") != "My Title" for it in s.items)  # no title line
+    assert s.items == [Text(0, 1, "body", DisplayIntensity.NORMAL)]      # body at row 0
+
+
 def test_title_only_panel_renders_its_title_at_eof():
     # DTL omits end tags: a panel whose only content is its title, with no <body>
     # and no </panel> (as in guide examples ex004/ex078), still renders the title.

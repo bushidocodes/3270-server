@@ -25,8 +25,9 @@ prolog (tolerated and ignored), tag and attribute names are case-insensitive
 Supported tags
 --------------
 ``<panel name help>Title``      root container. The panel's content text is its
-   ``width depth``                title (``panel-title-text`` → ``Screen.title``,
-                                 centered on row 0 when that row is free);
+   ``width depth titline``        title (``panel-title-text`` → ``Screen.title``,
+                                 centered on row 0 when that row is free;
+                                 ``titline=no`` keeps it metadata-only, no line);
                                  ``help`` names a help panel; ``width``/``depth``
                                  give the presentation-space size (default 80x24)
                                  and bound element positions at load time.
@@ -358,6 +359,7 @@ class _DTLParser(HTMLParser):
         self._cur_pdc = None      # current <pdc> pull-down choice, or None
         self._panel_title = None  # capturing the panel's title text, or None
         self._title_item = None   # the centered title Text (retracted on row-0 collision)
+        self._titline = True      # <panel titline=no> suppresses the on-screen title line
         self._lists = []          # stack of open <ul>/<ol> ({"type", "n"})
         self._lstfld = None       # active <lstfld> table {"cols", "groups", …}
         self._lstgrp = None       # current <lstgrp> column group, or None
@@ -488,6 +490,9 @@ class _DTLParser(HTMLParser):
             # title is the panel's content text (panel-title-text), captured into
             # screen.title by _finalize_panel_title — not an attribute.
             self.screen.help = a.get("help")
+            # TITLINE=NO keeps the title as metadata but suppresses its on-screen
+            # line (default YES); see _finalize_panel_title.
+            self._titline = _bool_attr(a, "titline", default=True)
             if self._override_cols is not None:
                 self.screen.width = self._override_cols
             elif "width" in a:
@@ -1127,13 +1132,19 @@ class _DTLParser(HTMLParser):
 
     def _finalize_panel_title(self):
         """Emit the panel's title text (centered on row 0) and start the flow
-        below it. Called when the first child tag follows the ``<panel>``."""
+        below it. Called when the first child tag follows the ``<panel>``.
+
+        With ``TITLINE=NO`` the title is kept as ``Screen.title`` metadata only —
+        no on-screen line — and the body flows from row 0 (the suppressed title
+        line is free)."""
         text = re.sub(r"\s+", " ", "".join(self._panel_title or [])).strip()
         self._panel_title = None
         if not text:
             return
         if self.screen.title is None:
             self.screen.title = text
+        if not self._titline:            # TITLINE=NO: metadata only, no title line
+            return
         col = max(0, (self.screen.width - len(text)) // 2)
         item = Text(0, col, text, DisplayIntensity.NORMAL)
         self.screen.add(item)
