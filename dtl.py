@@ -267,6 +267,8 @@ class _DTLParser(HTMLParser):
         self._tag = None          # current content-bearing tag, or None
         self._attrs = None
         self._chars = []
+        self._runs = None         # inline <hp> mixed-content runs, or None
+        self._hp = None           # the open <hp>'s (color, highlight), or None
         self._selfld = None       # active <selfld> layout state, or None
         self._in_dtafldd = False  # capturing a <dtafldd> prompt child?
         self._dtafldd = None      # captured <dtafldd> prompt text, or None
@@ -308,6 +310,43 @@ class _DTLParser(HTMLParser):
         """The Highlight for a tag's HILITE= attribute, or None."""
         return _HIGHLIGHTS.get(str(a.get("hilite", "")).strip().lower())
 
+    # ── inline <hp> (highlighted phrase) mixed content ───────────────────────
+
+    def _hp_hilite(self, a):
+        """The Highlight for an <hp> phrase: its HILITE= or the DTL TYPE= (both
+        mapped through the highlight table), or None."""
+        return (self._hilite(a)
+                or _HIGHLIGHTS.get(str(a.get("type", "")).strip().lower()))
+
+    def _begin_hp(self, a):
+        """Start an inline <hp> run: bank the text captured so far as a plain run,
+        then capture the phrase as an emphasised run. The enclosing text element
+        becomes a mixed-content Text.rich field (see _finalize_runs)."""
+        if self._runs is None:
+            self._runs = []
+        self._runs.append(("".join(self._chars), None, None))
+        self._chars = []
+        self._hp = (self._color(a), self._hp_hilite(a))
+
+    def _end_hp(self):
+        """Close the open <hp>: bank its text as an emphasised run."""
+        color, hilite = self._hp
+        self._runs.append(("".join(self._chars), color, hilite))
+        self._chars = []
+        self._hp = None
+
+    def _finalize_runs(self):
+        """Bank the trailing text and return the mixed-content runs (dropping empty
+        ones), or None when the element carried no inline <hp>."""
+        if self._runs is None:
+            return None
+        if self._hp is not None:        # tolerate an <hp> left open at flush
+            self._end_hp()
+        else:
+            self._runs.append(("".join(self._chars), None, None))
+        self._chars = []
+        return [r for r in self._runs if r[0]] or None
+
 
     # ── SGML event handling ──────────────────────────────────────────────────
 
@@ -317,6 +356,12 @@ class _DTLParser(HTMLParser):
         # at the first child tag.
         if self._panel_title is not None:
             self._finalize_panel_title()
+        # An inline <hp> (highlighted phrase) inside a text element does NOT close
+        # it — it emphasises a phrase *within* one field. Bank the runs and return
+        # before the implicit-flush below (see _begin_hp / _finalize_runs).
+        if tag == "hp" and self._tag in _TEXT_TAGS:
+            self._begin_hp(a)
+            return
         # Implicit end tags: a new block element closes the open content element
         # (DTL omits most end tags). <dtafldd> is the exception — it's a child
         # that supplies its parent <dtafld>'s prompt, so it must not close it.
@@ -536,6 +581,11 @@ class _DTLParser(HTMLParser):
     def handle_endtag(self, tag):
         if self._panel_title is not None:
             self._finalize_panel_title()
+        # Closing an inline <hp> banks its emphasised run and keeps the enclosing
+        # text element open (it is not a block child).
+        if tag == "hp" and self._runs is not None:
+            self._end_hp()
+            return
         # A container closing flushes any open content child first (end tags are
         # omitted in DTL), while its context is still intact. The element's own
         # end tag is handled below via the normal `tag == self._tag` path.
@@ -639,6 +689,8 @@ class _DTLParser(HTMLParser):
         tag = self._tag
         if tag is None:
             return
+        # Inline <hp> runs (only text tags can carry them, see _begin_hp).
+        runs = self._finalize_runs()
         # A <dtafldd> child, if present, supplies the prompt; otherwise the
         # element's own text is the prompt (a convenient shorthand).
         content = self._dtafldd if isinstance(self._dtafldd, str) else "".join(self._chars)
@@ -655,7 +707,7 @@ class _DTLParser(HTMLParser):
         elif tag == "lstcol":
             self._add_lstcol(a, content)
         elif tag in _TEXT_TAGS:
-            self._emit_info(a, content, tag)
+            self._emit_info(a, content, tag, runs=runs)
         elif tag == "dtafld":
             self._emit_dtafld(a, content)
         elif tag == "cmdarea":
@@ -667,6 +719,7 @@ class _DTLParser(HTMLParser):
         elif tag == "checki":
             self._emit_checki(a, content)
         self._tag, self._attrs, self._chars = None, None, []
+        self._runs, self._hp = None, None
         self._dtafldd, self._in_dtafldd = None, False
 
     def handle_startendtag(self, tag, attrs):
@@ -986,7 +1039,11 @@ class _DTLParser(HTMLParser):
             return text.center(width)
         return text  # start/left: no padding (an input field fills its own width)
 
-    def _emit_info(self, a, content, tag="info"):
+    def _emit_info(self, a, content, tag="info", runs=None):
+        # ``runs`` (from inline <hp>) is a list of (text, color, highlight); the
+        # concatenation is the field's plain text, so mono renders identically.
+        if runs is not None and not content:
+            content = "".join(t for t, _, _ in runs)
         # CUA role → default colour: a fill line is a separator rule; a top/panel
         # instruction is an instruction; a high-intensity heading is the title;
         # everything else is normal text (labels/values).
@@ -1011,7 +1068,15 @@ class _DTLParser(HTMLParser):
             if not content.strip():
                 return
             row, col, _ = self._resolve_pos(a, "info")
-            self.screen.add(Text(row, col, content, _intensity(a), role=role))
+            if runs is not None:
+                # A phrase inside this line is emphasised via SA runs (see #110):
+                # one Text.rich field whose surround uses the element's role colour
+                # and whose <hp> phrase carries its own colour/highlight. Mono
+                # renders as the plain concatenation, byte-for-byte unchanged.
+                self.screen.add(Text.rich(row, col, runs,
+                                          intensity=_intensity(a), role=role))
+            else:
+                self.screen.add(Text(row, col, content, _intensity(a), role=role))
             return
         # Flowed text: normalize whitespace and word-wrap to the panel width.
         text = " ".join(content.split())

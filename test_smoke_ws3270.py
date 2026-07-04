@@ -603,3 +603,21 @@ def test_ws3270_german_terminal_reads_cp273_encoded_text():
     ], basic=True, charset="german")
 
     assert "AT=@ END" in out, out[-1500:]     # '@' round-tripped, not mangled to 'Ä'
+
+
+def test_ws3270_ispf_menu_emphasises_keywords_via_hp():
+    """The ISPF menu's <hp>-authored instruction line ("Enter X or PF3 to
+    terminate ISPF.") emphasises its action keywords with SA colour runs. A real
+    ws3270 processes the SetAttribute orders and renders the line — proving that
+    declarative <hp> reaches the wire as #110's character-level SA mechanism."""
+    _require_emulator()
+    from dtl import load_panel
+
+    scr = load_panel("ispf", ZUSER="IBMUSER ", ZTIME="13:45")
+    port = _serve_one_screen(scr.render(color=True))
+    out, trace = _drive_traced(port, [
+        "Wait(3,Output)", "Ascii()", "Wait(1,Seconds)", "Quit()",
+    ], basic=True)
+
+    assert "SetAttribute" in trace, trace[-2000:]                 # SA on the wire
+    assert "Enter X or PF3 to terminate ISPF." in out, out[-1500:]  # line intact
