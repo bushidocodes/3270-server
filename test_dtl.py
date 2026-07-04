@@ -460,6 +460,28 @@ def test_action_bar_renders_labels_and_records_pulldowns():
     ]
 
 
+def test_action_bar_implicit_pdc_and_abc_end_tags():
+    # DTL omits most end tags: a new <pdc>/<abc> (or </ab>) closes the previous.
+    # The <action run=...> child gives each pull-down its command, and <M> (the
+    # mnemonic marker) is transparent to the label text.
+    s = load_dtl(
+        '<panel><ab row="0" col="1">'
+        '<abc>File'
+        '<pdc><M>Add<action run=add>'
+        '<pdc><M>Delete<action run=delete>'
+        '<abc>View'
+        '<pdc checkvar=sorttype match=N><M>Name<action run=name>'
+        '</ab></panel>'
+    )
+    assert s.action_bar == [
+        {"label": "File", "row": 0, "col": 1,
+         "pdc": [{"label": "Add", "action": "add"},
+                 {"label": "Delete", "action": "delete"}]},
+        {"label": "View", "row": 0, "col": 8,
+         "pdc": [{"label": "Name", "action": "name"}]},
+    ]
+
+
 def test_action_choice_at_maps_cursor_to_choice():
     s = load_dtl(
         '<panel>'

@@ -475,10 +475,12 @@ class _DTLParser(HTMLParser):
         elif tag == "abc":
             if self._ab is None:
                 raise DTLError("<abc> outside of an <ab>")
+            self._end_abc()                     # implicit end of a previous <abc>
             self._cur_abc = {"chars": [], "pdc": []}
         elif tag == "pdc":
             if self._cur_abc is None:
                 raise DTLError("<pdc> outside of an <abc>")
+            self._end_pdc()                     # implicit end of a previous <pdc>
             self._cur_pdc = {"chars": [], "action": a.get("action", "")}
         elif tag == "action":
             # A pull-down choice's action (alternative to <pdc action=...>).
@@ -659,22 +661,13 @@ class _DTLParser(HTMLParser):
             self._cur_cmd = None
             return
         if tag == "pdc":
-            if self._cur_pdc is not None and self._cur_abc is not None:
-                self._cur_abc["pdc"].append({
-                    "label": "".join(self._cur_pdc["chars"]).strip(),
-                    "action": self._cur_pdc["action"],
-                })
-            self._cur_pdc = None
+            self._end_pdc()
             return
         if tag == "abc":
-            if self._cur_abc is not None and self._ab is not None:
-                self._ab["choices"].append({
-                    "label": "".join(self._cur_abc["chars"]).strip(),
-                    "pdc": self._cur_abc["pdc"],
-                })
-            self._cur_abc = None
+            self._end_abc()
             return
         if tag == "ab":
+            self._end_abc()                 # close any open <abc>/<pdc> (implicit)
             if self._ab is not None:
                 self._emit_action_bar(self._ab)
             self._ab = None
@@ -1438,6 +1431,27 @@ class _DTLParser(HTMLParser):
             checkvar = a.get("checkvar")
             if checkvar and self._subs.get(checkvar.strip().upper(), "").strip().upper() == match:
                 self.screen.cursor_at = (row, sf["namecol"])
+
+    def _end_pdc(self):
+        """Finalise the open <pdc> onto its <abc>. DTL omits most end tags, so a
+        pull-down is also closed by the next <pdc> or by </abc> (not only </pdc>)."""
+        if self._cur_pdc is not None and self._cur_abc is not None:
+            self._cur_abc["pdc"].append({
+                "label": "".join(self._cur_pdc["chars"]).strip(),
+                "action": self._cur_pdc["action"],
+            })
+        self._cur_pdc = None
+
+    def _end_abc(self):
+        """Finalise the open <abc> (and its last <pdc>) onto the action bar —
+        closed by the next <abc> or by </ab>, not only </abc>."""
+        self._end_pdc()
+        if self._cur_abc is not None and self._ab is not None:
+            self._ab["choices"].append({
+                "label": "".join(self._cur_abc["chars"]).strip(),
+                "pdc": self._cur_abc["pdc"],
+            })
+        self._cur_abc = None
 
     def _emit_action_bar(self, ab):
         """Lay the action-bar choice labels out across the bar's row (high
