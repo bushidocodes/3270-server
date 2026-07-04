@@ -1417,6 +1417,40 @@ def test_xmp_renders_preformatted_like_lines():
     ]
 
 
+def test_fig_frames_content_with_rules_and_caption():
+    # #207: <fig> flows its content as a figure; FRAME=RULE (default) draws a
+    # horizontal rule above and below, and <figcap> renders a caption beneath.
+    s = load_dtl(
+        '<panel name="p" width="24">'
+        '<fig><p>Assemble it.<figcap>Fig 1. Assembly.</figcap></fig>'
+        '</panel>'
+    )
+    N = DisplayIntensity.NORMAL
+    rule = "-" * (24 - 1 - 1)
+    assert s.items == [
+        Text(0, 1, rule, N),               # top rule
+        Text(1, 1, "Assemble it.", N),     # flowed content
+        Text(2, 1, rule, N),               # bottom rule
+        Text(3, 1, "Fig 1. Assembly.", N), # caption beneath
+    ]
+
+
+def test_fig_frame_none_omits_the_rules():
+    s = load_dtl('<panel name="p" width="24">'
+                 '<fig frame="none"><p>Bare.<figcap>Cap.</figcap></fig></panel>')
+    N = DisplayIntensity.NORMAL
+    assert s.items == [Text(0, 1, "Bare.", N), Text(1, 1, "Cap.", N)]
+
+
+def test_content_after_fig_resumes_below_it():
+    # The enclosing flow resumes on the row after the whole figure (rules +
+    # content + caption).
+    s = load_dtl('<panel name="p" width="24">'
+                 '<fig><p>In figure.</fig><p>After figure.</panel>')
+    after = [it for it in s.items if it.text == "After figure."]
+    assert after and after[0].row == 3   # top rule(0) + content(1) + bottom rule(2)
+
+
 # ── help-panel admonitions (<note>/<nt>/<warning>/…, <notel>) ────────────────
 
 def test_note_renders_as_a_labelled_callout():
