@@ -694,7 +694,7 @@ def _cmd_panel():
         '<panel>'
         '<cmdtbl applid="ISR">'
         '<cmd name="PANELID">Toggle<cmdact action="passthru"></cmd>'
-        '<cmd name="KEYLIST" trunc="3">Keys<cmdact action="passthru"></cmd>'
+        '<cmd name="KEYLIST" altdescr="Keys">KEY<t>LIST<cmdact action="passthru"></cmd>'
         '<cmd name="BYE">Leave<cmdact action="alias exit"></cmd>'
         '</cmdtbl>'
         '</panel>'
@@ -704,7 +704,8 @@ def _cmd_panel():
 def test_cmdtbl_parses_commands_and_actions():
     s = _cmd_panel()
     assert s.commands["PANELID"]["action"] == "passthru"
-    assert s.commands["KEYLIST"]["trunc"] == 3
+    assert s.commands["KEYLIST"]["trunc"] == 3       # from the <t> marker (KEY|LIST)
+    assert s.commands["KEYLIST"]["descr"] == "Keys"  # ALTDESCR (metadata)
     assert s.commands["BYE"]["action"] == "alias exit"
 
 
@@ -978,7 +979,8 @@ def test_cmd_t_marks_truncation_point():
     )
     assert s.commands["CANCEL"]["trunc"] == 4
     assert s.commands["FIND"]["trunc"] == 0        # no <t> -> not truncatable
-    assert sorted(s.commands["CANCEL"]) == ["action", "trunc"]  # no capture leaks
+    assert sorted(s.commands["CANCEL"]) == ["action", "descr", "trunc"]  # no capture leaks
+    assert s.commands["CANCEL"]["descr"] == ""     # no ALTDESCR given
     assert s.lookup_command("CANC") == "cancel"    # abbreviation matches
     assert s.lookup_command("CAN") is None         # below the truncation point
 
