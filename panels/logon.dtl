@@ -37,7 +37,7 @@
        explicit row/fldcol attributes used to give (proven by the golden test). -->
   <area row="5" col="1" fldgap="2">
     <dtafld datavar="userid" entwidth="8" cursor="yes" color="white">Userid   ===></dtafld>
-    <dtafld datavar="password" entwidth="8" hidden="yes">Password ===></dtafld>
+    <dtafld datavar="password" entwidth="8" display="no">Password ===></dtafld>
     <dtafld datavar="procedure" entwidth="8" default="IKJACCNT" color="white">Procedure===></dtafld>
   </area>
   <dtafld row="7" col="42" fldcol="60" datavar="acct" entwidth="8" color="white">Acct Nmbr    ===></dtafld>

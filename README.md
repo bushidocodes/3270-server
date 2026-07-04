@@ -292,7 +292,7 @@ carry DTL's `COLOR` (`WHITE|RED|BLUE|GREEN|PINK|YELLOW|TURQ`, or `%varname`) and
 mono ones. Messages live separately in a `<msgmbr>` (see `messages/`).
 As in real DTL the source is SGML: files may open with a `<!DOCTYPE DM SYSTEM>` prolog,
 tag/attribute names are case-insensitive, and boolean attributes may be minimized
-(`<dtafld hidden>`).
+(`<dtafld numeric>`).
 
 Placement is normally explicit (`row`/`col`), but an `<area>`/`<region>` flow box lets contained
 elements omit positions: they flow down one line each from the box's origin, and a field that

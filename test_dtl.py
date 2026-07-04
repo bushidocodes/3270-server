@@ -195,17 +195,19 @@ def test_dtafld_emits_prompt_then_field():
     assert (fld.row, fld.col, fld.length, fld.name, fld.cursor) == (5, 16, 8, "userid", True)
 
 
-def test_dtafld_hidden_and_numeric_and_default():
+def test_dtafld_display_no_numeric_and_default():
+    # IBM's DISPLAY=NO makes a non-display field (e.g. a password); a field with
+    # no DISPLAY= is shown.
     s = load_dtl(
         '<panel>'
-        '<dtafld row="6" col="1" fldcol="16" datavar="pw" entwidth="8" hidden="yes">P</dtafld>'
+        '<dtafld row="6" col="1" fldcol="16" datavar="pw" entwidth="8" display="no">P</dtafld>'
         '<dtafld row="8" col="1" fldcol="16" datavar="sz" entwidth="5" numeric="yes" default="00150">S</dtafld>'
         '</panel>'
     )
     pw = s.items[1]
     assert pw.hidden and not pw.numeric
     sz = s.items[3]
-    assert sz.numeric and sz.default == "00150"
+    assert not sz.hidden and sz.numeric and sz.default == "00150"
 
 
 def test_dtafld_prompt_from_dtafldd_child():
@@ -1660,14 +1662,14 @@ def test_tag_and_attribute_names_are_case_insensitive():
 
 
 def test_boolean_attribute_minimization():
-    # <dtafld hidden> (no value) means hidden="yes"; <... numeric> likewise.
+    # <dtafld cursor> (no value) means cursor="yes"; <... numeric> likewise.
     s = load_dtl(
         '<panel>'
-        '<dtafld row="6" col="1" fldcol="16" datavar="pw" entwidth="8" hidden>P</dtafld>'
+        '<dtafld row="6" col="1" fldcol="16" datavar="pw" entwidth="8" cursor>P</dtafld>'
         '<dtafld row="8" col="1" fldcol="16" datavar="sz" entwidth="5" numeric>S</dtafld>'
         '</panel>'
     )
-    assert s.items[1].hidden is True
+    assert s.items[1].cursor is True
     assert s.items[3].numeric is True
 
 
