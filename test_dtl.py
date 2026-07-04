@@ -453,9 +453,9 @@ def test_action_bar_renders_labels_and_records_pulldowns():
     assert s.items[1] == Text(0, 8, "Help", DisplayIntensity.HIGH)
     # Pull-down structure + rendered position preserved for interaction.
     assert s.action_bar == [
-        {"label": "Menu", "row": 0, "col": 1,
+        {"label": "Menu", "row": 0, "col": 1, "mnemonic": None,
          "pdc": [{"label": "Exit", "action": "exit"}]},
-        {"label": "Help", "row": 0, "col": 8,
+        {"label": "Help", "row": 0, "col": 8, "mnemonic": None,
          "pdc": [{"label": "About", "action": "passthru"}]},
     ]
 
@@ -474,12 +474,37 @@ def test_action_bar_implicit_pdc_and_abc_end_tags():
         '</ab></panel>'
     )
     assert s.action_bar == [
-        {"label": "File", "row": 0, "col": 1,
+        {"label": "File", "row": 0, "col": 1, "mnemonic": None,
          "pdc": [{"label": "Add", "action": "add"},
                  {"label": "Delete", "action": "delete"}]},
-        {"label": "View", "row": 0, "col": 8,
+        {"label": "View", "row": 0, "col": 8, "mnemonic": None,
          "pdc": [{"label": "Name", "action": "name"}]},
     ]
+
+
+def test_action_bar_mnemonic_is_recorded_and_underlined():
+    # <M> marks the shortcut letter; it's recorded by offset and rendered with an
+    # underscore highlight (mono is byte-identical to a plain high-intensity label).
+    s = load_dtl(
+        '<panel><ab row="0" col="1">'
+        '<abc><M>File<pdc action="x">Open</pdc>'
+        '<abc>E<M>xit<pdc action="alias exit">Leave</pdc>'
+        '</ab></panel>'
+    )
+    assert [c["mnemonic"] for c in s.action_bar] == [0, 1]   # File->F, Exit->x
+    file_label = s.items[0]
+    assert file_label.text == "File"                          # label text unchanged
+    mono = bytearray(); file_label.render(mono, color=False)
+    plain = bytearray(); Text(0, 1, "File", DisplayIntensity.HIGH).render(plain)
+    assert bytes(mono) == bytes(plain)                        # mono byte-identical
+    col = bytearray(); file_label.render(col, color=True)
+    assert SA in bytes(col)                                   # colour: mnemonic SA
+
+
+def test_settings_action_bar_underlines_its_mnemonics():
+    s = load_panel("settings")
+    assert [c["mnemonic"] for c in s.action_bar] == [0, 0, 0, 0]   # first letters
+    assert SA in s.render(color=True) and SA not in s.render(color=False)
 
 
 def test_action_choice_at_maps_cursor_to_choice():

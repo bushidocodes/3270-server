@@ -488,6 +488,12 @@ class _DTLParser(HTMLParser):
                 self._cur_pdc["action"] = (
                     a.get("action") or a.get("run") or a.get("cmd") or self._cur_pdc["action"]
                 )
+        elif tag == "m":
+            # <M> marks the mnemonic character of an action-bar choice — the
+            # shortcut letter ISPF shows highlighted. Record where it falls in the
+            # label text being captured (offset in the raw, pre-strip chars).
+            if self._cur_abc is not None and self._cur_pdc is None:
+                self._cur_abc["mnemonic"] = len("".join(self._cur_abc["chars"]))
         elif tag == "varclass":
             self._emit_varclass(a)
         elif tag == "checkl":
@@ -1450,9 +1456,14 @@ class _DTLParser(HTMLParser):
         closed by the next <abc> or by </ab>, not only </abc>."""
         self._end_pdc()
         if self._cur_abc is not None and self._ab is not None:
+            raw = "".join(self._cur_abc["chars"])
+            label = raw.strip()
+            mnem = self._cur_abc.get("mnemonic")
+            if mnem is not None:               # re-base the offset onto the label
+                mnem -= len(raw) - len(raw.lstrip())
+                mnem = mnem if 0 <= mnem < len(label) else None
             self._ab["choices"].append({
-                "label": "".join(self._cur_abc["chars"]).strip(),
-                "pdc": self._cur_abc["pdc"],
+                "label": label, "pdc": self._cur_abc["pdc"], "mnemonic": mnem,
             })
         self._cur_abc = None
 
@@ -1465,7 +1476,17 @@ class _DTLParser(HTMLParser):
         for choice in ab["choices"]:
             label = choice["label"]
             choice["row"], choice["col"] = ab["row"], col
-            self.screen.add(Text(ab["row"], col, label, DisplayIntensity.HIGH))
+            m = choice.get("mnemonic")
+            if m is not None and 0 <= m < len(label):
+                # Underline the mnemonic letter (the shortcut), as ISPF does. Mono
+                # renders the concatenation identically to a plain Text.
+                runs = [(label[:m], None, None),
+                        (label[m], None, Highlight.UNDERSCORE),
+                        (label[m + 1:], None, None)]
+                self.screen.add(Text.rich(ab["row"], col, [r for r in runs if r[0]],
+                                          intensity=DisplayIntensity.HIGH))
+            else:
+                self.screen.add(Text(ab["row"], col, label, DisplayIntensity.HIGH))
             col += len(label) + ab["gap"]
         self.screen.action_bar = ab["choices"]
 

@@ -683,3 +683,20 @@ def test_ws3270_field_level_help_on_the_size_field():
     ])
     assert "Size Field HELP" in out, out[-1500:]     # sizehelp, not tsohelp
     assert "region size" in out                       # its body text
+
+
+def test_ws3270_settings_action_bar_underlines_mnemonics():
+    """The Settings panel's action bar underlines each choice's mnemonic letter
+    (authored with <M>) via an SA highlight — verified on a real ws3270: its trace
+    shows the SetAttribute order and the labels render."""
+    _require_emulator()
+    from dtl import load_panel
+
+    scr = load_panel("settings")
+    port = _serve_one_screen(scr.render(color=True))
+    out, trace = _drive_traced(port, [
+        "Wait(3,Output)", "Ascii()", "Wait(1,Seconds)", "Quit()",
+    ], basic=True)
+
+    assert "SetAttribute" in trace, trace[-2000:]        # mnemonic underline on the wire
+    assert "Log/List" in out and "Colors" in out, out[-1500:]
