@@ -31,6 +31,17 @@ from server import (
     to_ebcdic,
 )
 
+
+def _display(text: str) -> bytes:
+    """Encode display text to EBCDIC, replacing any character the session's code
+    page can't encode with its substitute (``?``) rather than raising. Rendering a
+    panel must degrade a stray non-cp037 character, not crash the whole session —
+    a real host does the same (the browse path already does; see #150). All
+    cp037-safe text (every bundled panel) encodes identically to strict mode, so
+    this changes no bytes."""
+    return to_ebcdic(text, errors="replace")
+
+
 ERASE_WRITE = 0xF5
 # ERASE/WRITE ALTERNATE selects the terminal's *alternate* (model-specific)
 # presentation space instead of the 24x80 default — 32x80 (model 3), 43x80
@@ -190,7 +201,7 @@ def _emit_attr_runs(buf: bytearray, runs, base_color: Optional[Color],
         buf.append(SA)
         buf.append(XA_HIGHLIGHT)
         buf.append(highlight.value if highlight not in (None, Highlight.DEFAULT) else 0x00)
-        buf.extend(to_ebcdic(text))
+        buf.extend(_display(text))
 
 
 # A valid symbol name (DTL <checki type="name">): a letter or one of @ # $,
@@ -315,10 +326,10 @@ class Text:
             # single RA order instead of one byte per character. The field start
             # occupies self.col, so the run begins at self.col + 1.
             start = self.row * cols + self.col + 1
-            _emit_ra(buf, start + len(self.text), to_ebcdic(self.text[0])[0],
+            _emit_ra(buf, start + len(self.text), _display(self.text[0])[0],
                      cols, rows)
         else:
-            buf.extend(to_ebcdic(self.text))
+            buf.extend(_display(self.text))
 
 
 def _emit_graphic(buf: bytearray, row: int, col: int, codes: bytes,
@@ -454,7 +465,7 @@ class Field:
             _role_colour(self.color, self.role) if (color and not self.hidden) else None,
             self.highlight if (color and not self.hidden) else None,
         )
-        buf.extend(to_ebcdic(self.default.ljust(self.length)[: self.length]))
+        buf.extend(_display(self.default.ljust(self.length)[: self.length]))
         if self.terminator:
             _emit_sba(buf, self.row, self.col + 1 + self.length, cols)
             buf.append(SF)
