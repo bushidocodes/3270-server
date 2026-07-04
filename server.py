@@ -8,8 +8,35 @@ from datetime import datetime
 from enum import Enum
 
 
-def to_ebcdic(s: str) -> bytes:
-    return s.encode("cp037")  # US EBCDIC
+# Per-connection session context. Each client is served on its own thread (see
+# _client_thread), so its colour capability and EBCDIC code page are recorded here
+# once after negotiation and read by the render/encode helpers for every panel —
+# without threading flags through each one. Defined before the encode helpers
+# below because a module-level constant (_BIND_IMAGE) encodes text at import time.
+_session = threading.local()
+
+# The EBCDIC code page used to encode/decode text when a session hasn't chosen a
+# different one. cp037 (US) is what the bundled panels assume, so it stays the
+# default — leaving the mono data stream byte-for-byte unchanged.
+DEFAULT_CODE_PAGE = "cp037"
+
+
+def _session_code_page() -> str:
+    """The current session's EBCDIC code page (thread-local, see :data:`_session`),
+    or the US default when none was negotiated/selected."""
+    return getattr(_session, "code_page", DEFAULT_CODE_PAGE)
+
+
+def to_ebcdic(s: str, code_page: str = None, errors: str = "strict") -> bytes:
+    """Encode text to EBCDIC. Uses the session's code page (thread-local) unless
+    ``code_page`` is given — the explicit argument lets a caller override per field
+    (e.g. a future mixed-CCSID panel) without touching the session default."""
+    return s.encode(code_page or _session_code_page(), errors)
+
+
+def from_ebcdic(b: bytes, code_page: str = None, errors: str = "strict") -> str:
+    """Decode EBCDIC to text, mirroring :func:`to_ebcdic`'s code-page resolution."""
+    return bytes(b).decode(code_page or _session_code_page(), errors)
 
 
 def encode_pack_addr(row: int, col: int, cols=80) -> bytes:
@@ -632,6 +659,30 @@ def parse_query_reply(record: bytes) -> dict:
     return caps
 
 
+# CPGID (the low 16 bits of a CGCSGID) → Python EBCDIC codec, for the pages we can
+# actually render. A terminal's discovered base character set (see
+# base_cgcsgid / #137) selects the session code page; an unknown or unsupported
+# page falls back to the US default rather than guessing wrong. Only codecs that
+# ship with Python are listed — an entry we can't encode/decode is worse than the
+# default. (ws3270 -charset german reports CPGID 273, french 297, etc.)
+_CPGID_TO_CODEC = {
+    37: "cp037",       # US / Canada (the default)
+    273: "cp273",      # Austria / Germany
+    500: "cp500",      # International / Belgium / Switzerland
+    1140: "cp1140",    # US / Canada with euro
+}
+
+
+def code_page_for_model(model) -> str:
+    """The EBCDIC codec to use for a session, chosen from the terminal's discovered
+    base character set (CPGID) when we support it, else the cp037 default."""
+    if model is not None and model.base_cgcsgid:
+        codec = _CPGID_TO_CODEC.get(model.base_cgcsgid & 0xFFFF)
+        if codec is not None:
+            return codec
+    return DEFAULT_CODE_PAGE
+
+
 # How long to wait for a Query Reply before giving up. A terminal that answers
 # does so at once; one that ignores the Query must not stall the session — the
 # negotiation's 60s timeout would.
@@ -747,14 +798,6 @@ def _wants_color(model) -> bool:
     """Whether to render colour for this session — a 3279-family or any
     extended-data-stream (-E) terminal (see parse_terminal_type)."""
     return bool(model is not None and model.color)
-
-
-# Per-connection render context. Each client is served on its own thread
-# (see _client_thread), so the session's colour capability is recorded here once
-# after negotiation and read by _send_screen for every panel — colouring the
-# whole session (menu and sub-panels included) without threading a flag through
-# each helper.
-_session = threading.local()
 
 
 def _send_screen(client_socket, screen, color: bool = None):
@@ -992,9 +1035,9 @@ def _show_browse(client_socket, member: str, path: str, verb: str = "BROWSE",
         screen = load_panel("browse", BRTITLE=title)
         screen.width, screen.depth, screen.alternate = cols, rows, alternate
         for i, ln in enumerate(lines[top:top + page]):
-            # Browsed content is arbitrary; drop any byte the EBCDIC (cp037)
+            # Browsed content is arbitrary; drop any byte the session's EBCDIC
             # code page can't encode so the render can never crash.
-            safe = ln.encode("cp037", "replace").decode("cp037")
+            safe = from_ebcdic(to_ebcdic(ln, errors="replace"))
             screen.add(Text(1 + i, 0, safe[:line_width]))
         screen.add(Text(rows - 1, 0, foot, DisplayIntensity.HIGH))
         _send_screen(client_socket, screen)
@@ -1367,7 +1410,7 @@ def _parse_3270_reply(buffer):
             while i < len(buffer) and buffer[i] not in (SBA_ORD, SF_ORD):
                 field_bytes.append(buffer[i])
                 i += 1
-            field_text = field_bytes.decode("cp037").strip()
+            field_text = from_ebcdic(field_bytes).strip()
             if field_text:
                 results[addr] = field_text
         else:
@@ -1415,7 +1458,7 @@ def _sscp_text(payload: bytes) -> str:
     """Decode the text a terminal typed in the SSCP-LU session. The payload is
     unformatted EBCDIC (SCS); an AID/cursor prefix, if the emulator sends the
     line as a 3270 reply, is harmless once the control bytes are stripped."""
-    text = payload.decode("cp037", errors="replace")
+    text = from_ebcdic(payload, errors="replace")
     return "".join(ch for ch in text if ch >= " ").strip()
 
 
@@ -1795,6 +1838,10 @@ def handle_client(client_socket, addr):
     # Record the session's colour capability so every panel renders in colour on
     # a colour terminal (see _send_screen / _session).
     _session.color = _wants_color(model)
+    # Pick the session's EBCDIC code page from the terminal's discovered base
+    # character set (#137), so text is encoded/decoded in the page the terminal
+    # actually uses (e.g. cp273 for a German ws3270), defaulting to US cp037.
+    _session.code_page = code_page_for_model(model)
     # If BIND-IMAGE was negotiated, bind the LU-LU session before the first
     # screen: the client won't accept 3270-DATA until it has seen a BIND, and
     # being bound is what lets its ATTN key reach us (RFC 2355 §10.3).
