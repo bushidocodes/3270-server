@@ -1616,8 +1616,10 @@ class _DTLParser(HTMLParser):
                 last_in[c["line"]] = c
         last_in_ids = {id(c) for c in last_in.values()}
         data = self._rows if self._rows else [None]
+        clipped = False
         for entry in data:
             if row + entry_height > self.screen.depth - 1:
+                clipped = True
                 break  # leave room; don't overrun the panel
             for c in cols:
                 cy = row + (c["line"] - 1)
@@ -1634,6 +1636,18 @@ class _DTLParser(HTMLParser):
                         color=c.get("color"), role="cell",
                     ))
             row += entry_height
+        # When the end of the table is on screen (rows supplied, not clipped by a
+        # deeper page), ISPF draws a "BOTTOM OF DATA" line spanning the table.
+        if self._rows is not None and not clipped and cols \
+                and row < self.screen.depth - 1:
+            col0 = cols[0]["x"]
+            footer = " BOTTOM OF DATA "
+            w = max(len(footer), self.screen.width - col0 - 1)
+            pad = w - len(footer)
+            line = ("*" * (pad // 2) + footer + "*" * (pad - pad // 2))[:w]
+            self.screen.add(Text(row, col0, line, DisplayIntensity.HIGH,
+                                 role="heading"))
+            row += 1
         return row
 
     @staticmethod
