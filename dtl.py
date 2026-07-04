@@ -2077,18 +2077,23 @@ class _DTLParser(HTMLParser):
             num_text = num + "." if sf.get("period") else num.ljust(sf["numwidth"])
             self.screen.add(Text(row, sf["numcol"], num_text,
                                  num_int, color=explicit, role=rnum))
+        # A MULTI choice's NAME is the field identifier (used to read the mark
+        # back), not display text — the row is just the mark + description. A
+        # single/menu choice shows its keyword.
         name = a.get("name", "")
-        if name:
+        show_name = bool(name) and not sf.get("multi")
+        if show_name:
             self.screen.add(Text(row, sf["namecol"], name, color=explicit, role=rname))
-        # Description column: a standard single-choice (and any keyword-less auto
-        # choice) sits just past the number; a keyworded grid uses the far column.
+        # Description column: a standard single-choice, or any choice with no
+        # visible keyword (auto grid), hugs the number/mark; a keyworded grid uses
+        # the far description column.
         if sf.get("auto_single"):
             desccol = sf["desccol"]
-        elif sf.get("auto_cols") and not name:
+        elif sf.get("auto_cols") and not show_name:
             desccol = sf["namecol"]
         else:
             desccol = sf["desccol"]
-        self.screen.add(Text(row, desccol, content, color=explicit, role=rdesc))
+        self.screen.add(Text(row, desccol, content.rstrip(), color=explicit, role=rdesc))
         sf["row"] = row + 1
         sf["count"] += 1
         if unavail:

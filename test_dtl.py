@@ -460,11 +460,13 @@ def test_selfld_type_multi_renders_a_mark_field_per_choice():
         '<choice name="def" match="D">Defamation</choice>'
         '</selfld></panel>'
     )
-    m0, m1 = s.items[0], s.items[3]
+    m0, m1 = s.items[0], s.items[2]
     assert isinstance(m0, Field) and m0.row == 4 and m0.col == 1 and m0.length == 1
     assert isinstance(m1, Field) and m1.row == 5 and m1.col == 1
-    assert s.items[1] == Text(4, 4, "pat", DisplayIntensity.NORMAL)
-    assert s.items[2] == Text(4, 21, "Patent", DisplayIntensity.NORMAL)
+    # The choice NAME is the field identifier (read the mark back), not display
+    # text: a multi row is just the mark + description.
+    assert s.items[1] == Text(4, 21, "Patent", DisplayIntensity.NORMAL)
+    assert not any(getattr(it, "text", None) == "pat" for it in s.items)
     # No numbered Text is emitted for a multi-select choice.
     assert not any(isinstance(it, Text) and it.role == "num" for it in s.items)
 
@@ -1686,6 +1688,106 @@ def test_open_content_element_is_flushed_at_eof():
     # An open content element with no end tag and no </panel> is flushed at EOF.
     s = load_dtl('<panel name="p">Title<info row="3" col="1">Trailing')
     assert [i.text for i in s.items] == ["Title", "Trailing"]
+
+
+def _ascii_snapshot(screen):
+    """Render a Screen's items to a plain ASCII grid (fields shown as ``_`` runs,
+    one char past their attribute byte), for a readable layout snapshot. Each row
+    is right-trimmed; trailing blank rows are dropped."""
+    width = screen.width or 80
+    rows = {}
+    maxr = 0
+    for it in screen.items:
+        r = getattr(it, "row", None)
+        if r is None:
+            continue
+        maxr = max(maxr, r)
+        line = rows.setdefault(r, [" "] * width)
+        if isinstance(it, Field):
+            for k in range(it.length):
+                c = it.col + 1 + k
+                if 0 <= c < width:
+                    line[c] = "_"
+        else:
+            for k, ch in enumerate(it.text):
+                c = it.col + k
+                if ch != "\n" and 0 <= c < width:
+                    line[c] = ch
+    out = ["".join(rows.get(r, [])).rstrip() for r in range(maxr + 1)]
+    return "\n".join(out)
+
+
+# Verbatim CHOICE-reference "Figure 1" (Library Card Registration) markup.
+_CHOICE_FIGURE_SRC = (
+    "<!DOCTYPE DM SYSTEM(\n"
+    "  <!entity sampvar1 system>\n"
+    "  <!entity sampabc system>)>\n"
+    "&sampvar1;\n\n"
+    "<PANEL NAME=choice1 KEYLIST=keylxmp>Library Card Registration\n"
+    "<AB>\n&sampabc;\n</AB>\n"
+    "<TOPINST>Type in patron's name and card number (if applicable).\n"
+    "<TOPINST>Then select an action bar choice.\n"
+    "<AREA>\n"
+    "  <DTAFLD DATAVAR=curdate PMTWIDTH=12 ENTWIDTH=8 USAGE=out>Date\n"
+    "  <DTAFLD DATAVAR=cardno PMTWIDTH=12 ENTWIDTH=7 DESWIDTH=25>Card No\n"
+    "    <DTAFLDD>(A 7-digit number)\n"
+    "  <DTAFLD DATAVAR=name PMTWIDTH=12 ENTWIDTH=25 DESWIDTH=25>Name\n"
+    "    <DTAFLDD>(Last, First, M.I.)\n"
+    "  <DTAFLD DATAVAR=address PMTWIDTH=12 ENTWIDTH=25>Address\n"
+    "  <DIVIDER>\n"
+    "  <REGION DIR=horiz>\n"
+    "  <SELFLD NAME=cardsel PMTWIDTH=30 SELWIDTH=38>Choose\n"
+    "  one of the following\n"
+    "    <CHOICE CHECKVAR=card MATCH=new>New\n"
+    "    <CHOICE CHECKVAR=card MATCH=renew>Renewal\n"
+    "    <CHOICE CHECKVAR=card MATCH=replace>Replacement\n"
+    "  </SELFLD>\n"
+    "  <SELFLD TYPE=multi PMTWIDTH=30 SELWIDTH=25>Check valid branches\n"
+    "    <CHOICE NAME=north HELP=nthhlp CHECKVAR=nth>North Branch\n"
+    "    <CHOICE NAME=south HELP=sthhlp CHECKVAR=sth>South Branch\n"
+    "    <CHOICE NAME=east HELP=esthlp CHECKVAR=est>East Branch\n"
+    "    <CHOICE NAME=west HELP=wsthlp CHECKVAR=wst>West Branch\n"
+    "  </SELFLD>\n"
+    "  </REGION>\n"
+    "</AREA>\n"
+    "<CMDAREA>Enter a command\n"
+    "</PANEL>\n"
+)
+
+
+def test_choice_reference_figure_snapshot():
+    """Layout snapshot of the CHOICE-reference Figure 1 (Library Card
+    Registration). Pins the auto-flowed body: <dtafld> prompt+entry rows, a
+    <divider> rule, and two side-by-side <selfld>s in a horizontal <region> — a
+    single-choice list (``__  1.  New``) beside a multiple-choice list
+    (``_ North Branch``, mark + description, the NAME not shown).
+
+    Honest deltas from the IBM figure (documented, not asserted):
+      * The "File  Search  Help" action bar comes from the external ``&sampabc;``
+        entity, which we cannot resolve — so the bar and its rule are absent and
+        the title sits on row 0 (the figure pushes it down one bar + rule).
+      * CUA prompt dot-leaders (``Date . . . :``) and the USAGE=out ``:`` are not
+        modelled — the prompt renders as plain text.
+      * The runtime F-key area (``F1=Help ...``) is ISPF chrome, not in the markup.
+      * A +1 left-margin column from our field-attribute-byte convention.
+    """
+    expected = "\n".join([
+        "                           Library Card Registration",
+        " Type in patron's name and card number (if applicable).",
+        " Then select an action bar choice.",
+        " Date",
+        " Card No  _______ (A 7-digit number)",
+        " Name  _________________________ (Last, First, M.I.)",
+        " Address  _________________________",
+        " " + "-" * 78,
+        " Choose one of the following  Check valid branches",
+        " __  1.  New                   _ North Branch",
+        "     2.  Renewal               _ South Branch",
+        "     3.  Replacement           _ East Branch",
+        "                               _ West Branch",
+        " Enter a command  ________",
+    ])
+    assert _ascii_snapshot(load_dtl(_CHOICE_FIGURE_SRC)) == expected
 
 
 def test_nested_unordered_lists_matches_guide_figure():
