@@ -1541,14 +1541,34 @@ def test_note_renders_as_a_labelled_callout():
 
 
 @pytest.mark.parametrize("tag,label", [
-    ("warning", "Warning:"), ("attention", "Attention:"), ("nt", "Note:"),
+    ("warning", "Warning:"), ("attention", "Attention:"),
 ])
 def test_admonition_labels(tag, label):
-    # ATTENTION / WARNING / NOTE prefix the body inline (the reference figures).
+    # ATTENTION / WARNING prefix the body inline (the reference figures).
     s = load_dtl(f'<panel width="50"><area><info><{tag}>Mind the gap.'
                  f'</info></area></panel>')
     texts = [t.text for t in s.items if isinstance(t, Text)]
     assert any(t.startswith(label) and "Mind the gap." in t for t in texts)
+
+
+def test_note_wraps_to_margin_and_nt_hangs_and_text_overrides_heading():
+    # #116: <note> is a single paragraph, "Note:" inline, wrapping to the margin.
+    s = load_dtl('<panel width="50"><area><info>'
+                 '<note>Mind the gap between the platform and the train.</note>'
+                 '</info></area></panel>')
+    assert any(t.text.startswith("Note: Mind the gap") for t in s.items
+               if isinstance(t, Text))
+    # <nt> hangs its body under the text: heading and body are separate Texts.
+    nt = load_dtl('<panel width="30"><area><info>'
+                  '<nt>Mind the gap here please.</nt></info></area></panel>')
+    head = next(t for t in nt.items if getattr(t, "text", "") == "Note:")
+    body = [t for t in nt.items if t.col == head.col + 6]      # hung past "Note: "
+    assert body and body[0].row == head.row                    # first line shares the row
+    # TEXT= replaces the heading.
+    tip = load_dtl('<panel width="40"><area><info>'
+                   '<note text="Tip:">Save often.</note></info></area></panel>')
+    assert any(t.text.startswith("Tip: Save often") for t in tip.items
+               if isinstance(t, Text))
 
 
 def test_caution_heading_on_own_line_and_emphasized():
@@ -1566,27 +1586,31 @@ def test_caution_heading_on_own_line_and_emphasized():
 
 
 def test_inline_note_keeps_following_paragraph():
-    # <nt>text<p>more</nt>: the note flows labelled, the nested <p> flows after it.
+    # <nt>text<p>more</nt>: the note flows labelled (heading + hung body), the
+    # nested <p> flows after it, and the trailing <p> renders too.
     s = load_dtl(
         '<panel width="50"><area><info>'
         '<nt>Out of stock.<p>Arrives in three days.</nt>'
         '<p>Order below.</info></area></panel>'
     )
     texts = [t.text for t in s.items if isinstance(t, Text)]
-    assert any(t.startswith("Note: Out of stock.") for t in texts)
+    assert "Note:" in texts and any("Out of stock." in t for t in texts)
     assert any("three days" in t for t in texts)
     assert any("Order below." in t for t in texts)
 
 
-def test_note_list_renders_heading_and_bulleted_items():
+def test_note_list_renders_heading_and_numbered_items():
+    # #116: NOTEL is a "Notes:" heading, a blank line, then NUMBERED items (1. 2.)
+    # — the reference figure, not the bulleted form we had before.
     s = load_dtl(
         '<panel width="50"><area><info><notel>'
         '<li>First note.<li>Second note.</notel></info></area></panel>'
     )
     texts = [t.text for t in s.items if isinstance(t, Text)]
     assert "Notes:" in texts
+    assert "1." in texts and "2." in texts               # numbered, not bulleted
+    assert "o" not in texts                              # no ul bullet
     assert any("First note." in t for t in texts)
-    assert any("Second note." in t for t in texts)
 
 
 # ── list/table fields (<lstfld>/<lstcol>/<lstgrp>) ───────────────────────────
