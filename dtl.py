@@ -523,6 +523,12 @@ class _DTLParser(HTMLParser):
                 "namecol": base + int(a.get("namecol", 4)),
                 "desccol": base + int(a.get("desccol", 21)),
                 "numwidth": int(a.get("numwidth", 2)),
+                # No explicit grid → auto-layout: a keyword-less <choice> puts its
+                # description at the keyword column (right after the number) rather
+                # than the far description column. Explicit columns (the bundled
+                # panels) keep the fixed grid, so they stay byte-identical.
+                "auto_cols": not any(k in a for k in
+                                     ("numcol", "namecol", "desccol")),
                 "numintensity": _intensity(a, "numintensity", DisplayIntensity.HIGH),
                 # DTL COLOR on a <selfld> colours its choices; a <choice> may
                 # override with its own COLOR.
@@ -548,6 +554,19 @@ class _DTLParser(HTMLParser):
                 "prompt_chars": [],
                 "prompt_done": False,
             }
+            sf = self._selfld
+            # A standard single-choice field (TYPE=SINGLE, the default; not
+            # MENU/MODEL/TUTOR/MULTI) whose choices are auto-numbered (no explicit
+            # NUM) and which has no explicit grid follows the CHOICE reference
+            # figure: a selection input field precedes the first choice, and each
+            # choice is numbered "N." (number + period). Decided on the first
+            # choice (its NUM tells us). Explicit NUM / columns keep the fixed grid.
+            sf["single_eligible"] = (sf["auto_cols"] and not sf["multi"]
+                                     and str(a.get("type", "single")).strip().lower()
+                                     == "single")
+            sf["entwidth"] = int(a.get("entwidth", 2))
+            sf["auto_single"] = False
+            sf["period"] = False
         elif tag == "dtafldd":
             # The authentic data-field description (prompt) child of a field.
             if self._tag in _FIELD_TAGS:
@@ -2003,6 +2022,22 @@ class _DTLParser(HTMLParser):
         if self._choice_hidden(a):
             return
         row = sf["row"]
+        # Auto-number: standard DTL numbers the choices 1..n, so a <choice> that
+        # omits NUM takes the running position (single-select only — a MULTI field
+        # marks choices with an input field instead of numbering them). An explicit
+        # NUM still wins, so the bundled numbered menus are byte-for-byte unchanged.
+        auto_num = a.get("num") is None and not sf.get("multi")
+        num = str(sf["count"] + 1) if auto_num else (a.get("num") or "")
+        # On the first choice, a column-less single-choice field whose choices are
+        # auto-numbered switches to the reference figure layout: a selection input
+        # field before the first choice, and "N." (number + period) numbering.
+        if sf["count"] == 0 and sf.get("single_eligible") and auto_num:
+            sf["auto_single"] = True
+            sf["period"] = True
+            base, ew = sf["origin"] - 1, sf["entwidth"]
+            sf["inputcol"] = base                 # selection input field (attr byte)
+            sf["numcol"] = base + 1 + ew + 2      # input field + gap
+            sf["desccol"] = sf["numcol"] + 4      # "N." + gap
         # UNAVAIL: the choice is shown but can't be selected. 3270 has intensity
         # (normal / intensified-high / non-display) but no *sub-normal* dim level,
         # so it's de-emphasised by dropping the number from the usual high to
@@ -2017,8 +2052,8 @@ class _DTLParser(HTMLParser):
             else ("num", "name", "desc")
         num_int = DisplayIntensity.NORMAL if unavail else sf["numintensity"]
         # The value that selects this choice: IBM's MATCH attribute, defaulting
-        # to the displayed number.
-        match = a.get("match", a.get("num", "")).strip().upper()
+        # to the displayed (auto-)number.
+        match = a.get("match", num).strip().upper()
         mark = None
         if sf.get("multi") and not unavail:
             # Multiple-selection: a 1-char input field the user marks, in place of
@@ -2030,12 +2065,30 @@ class _DTLParser(HTMLParser):
             )
             self.screen.add(mark)
         else:
-            self.screen.add(Text(row, sf["numcol"], a.get("num", "").ljust(sf["numwidth"]),
+            if sf.get("auto_single") and sf["count"] == 0:
+                # A standard single-choice field has one selection input field
+                # before the first choice; the user types the chosen number into
+                # it. Its name is the SELFLD's NAME (per the CHOICE reference).
+                self.screen.add(Field(
+                    row=row, col=sf["inputcol"], length=sf["entwidth"],
+                    name=sf["name"] or None, color=explicit, role="field"))
+            # SINGLE choices are numbered "N." (number + period); a MENU/explicit
+            # field uses the bare number padded to numwidth.
+            num_text = num + "." if sf.get("period") else num.ljust(sf["numwidth"])
+            self.screen.add(Text(row, sf["numcol"], num_text,
                                  num_int, color=explicit, role=rnum))
-        self.screen.add(Text(row, sf["namecol"], a.get("name", ""),
-                             color=explicit, role=rname))
-        self.screen.add(Text(row, sf["desccol"], content,
-                             color=explicit, role=rdesc))
+        name = a.get("name", "")
+        if name:
+            self.screen.add(Text(row, sf["namecol"], name, color=explicit, role=rname))
+        # Description column: a standard single-choice (and any keyword-less auto
+        # choice) sits just past the number; a keyworded grid uses the far column.
+        if sf.get("auto_single"):
+            desccol = sf["desccol"]
+        elif sf.get("auto_cols") and not name:
+            desccol = sf["namecol"]
+        else:
+            desccol = sf["desccol"]
+        self.screen.add(Text(row, desccol, content, color=explicit, role=rdesc))
         sf["row"] = row + 1
         sf["count"] += 1
         if unavail:

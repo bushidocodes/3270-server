@@ -421,6 +421,36 @@ def test_selfld_lays_out_choices_on_incrementing_rows():
     assert s.items[3] == Text(5, 1, "10", DisplayIntensity.HIGH)
 
 
+def test_selfld_single_choice_auto_layout_matches_reference():
+    # #183: a column-less single-choice field whose choices omit NUM auto-lays out
+    # per the CHOICE reference figure — a selection input field before the first
+    # choice, then each choice numbered "N." (number + period), then its text.
+    s = load_dtl(
+        '<panel name="p"><selfld name="dest">Where:'
+        '<choice>London<choice>Madrid<choice>Paris</selfld></panel>'
+    )
+    N, H = DisplayIntensity.NORMAL, DisplayIntensity.HIGH
+    # one selection input field, before the first choice, named after the SELFLD
+    fields = [it for it in s.items if isinstance(it, Field)]
+    assert len(fields) == 1 and fields[0].row == 1 and fields[0].name == "dest"
+    # numbers carry a period; descriptions follow
+    assert Text(1, 5, "1.", H) in s.items and Text(1, 9, "London", N) in s.items
+    assert Text(2, 5, "2.", H) in s.items and Text(3, 5, "3.", H) in s.items
+    # the typed numbers are the selectable values
+    assert set(s.selections) == {"1", "2", "3"}
+
+
+def test_selfld_explicit_num_still_wins_and_grid_is_unchanged():
+    # An explicit NUM (and explicit columns) keep the fixed grid — the bundled
+    # panels rely on this, so it must stay byte-for-byte as before.
+    s = load_dtl(
+        '<panel><selfld row="4" numcol="1" namecol="4" desccol="21">'
+        '<choice num="7" name="  A">  desc-a</choice></selfld></panel>'
+    )
+    assert s.items[0] == Text(4, 1, "7 ", DisplayIntensity.HIGH)
+    assert s.items[2] == Text(4, 21, "  desc-a", DisplayIntensity.NORMAL)
+
+
 def test_selfld_type_multi_renders_a_mark_field_per_choice():
     # TYPE=MULTI is a multiple-selection field: each choice gets its own 1-char
     # input field to mark (in place of a number), so several can be selected.
