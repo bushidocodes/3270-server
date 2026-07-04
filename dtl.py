@@ -109,6 +109,7 @@ renders centered on row 0, with the body flowing beneath it.
 
 ``<dtafld>`` attributes: ``datavar`` (field name sent back), ``entwidth`` (field
 length), ``display`` (``display=no`` is non-display, e.g. password), ``numeric``, ``default``,
+``required`` (``required=yes`` must be non-empty on submit; ``msg`` names the error),
 ``cursor`` (place the cursor here), ``mdt`` (default yes), ``intensity`` (prompt).
 
 Variable substitution: dialog-variable references are written ISPF-style with a
@@ -182,6 +183,10 @@ _INTENSITY = {
     "high": DisplayIntensity.HIGH,
     "highlighted": DisplayIntensity.HIGHLIGHTED,
 }
+
+# Shown when a REQUIRED=YES field is left blank and neither the field nor its
+# variable class names a MSG — a stand-in for ISPF's own system message.
+_REQUIRED_DEFAULT_MSG = "Enter required field"
 
 # DTL COLOR / HILITE attribute values → the screen model's enums. These are real
 # DTL attributes (COLOR=WHITE|RED|BLUE|GREEN|PINK|YELLOW|TURQ|%var, HILITE=USCORE|
@@ -1416,7 +1421,7 @@ class _DTLParser(HTMLParser):
             help=self._field_help(a),
         )
         self.screen.add(field)
-        self._attach_validation(name)
+        self._attach_validation(name, a)
         return field
 
     @staticmethod
@@ -1429,19 +1434,26 @@ class _DTLParser(HTMLParser):
             return None
         return h
 
-    def _attach_validation(self, name):
-        """Attach a field's variable-class <checkl> validation to the Screen."""
+    def _attach_validation(self, name, a):
+        """Attach a field's validation to the Screen: its variable-class <checkl>
+        checks and/or IBM's REQUIRED=YES (the field must be non-empty on submit)."""
         if not name:
             return
         decl = self._vardcls.get(name.upper())
-        if not decl:
+        vc = (self._varclasses.get(str(decl.get("varclass", "")).upper())
+              if decl else None)
+        checks = vc["checks"] if (vc and vc.get("checks")) else []
+        required = _bool_attr(a, "required")
+        if not checks and not required:
             return
-        vc = self._varclasses.get(str(decl.get("varclass", "")).upper())
-        if vc and vc.get("checks"):
-            self.screen.validations[name.upper()] = {
-                "checkmsg": vc.get("msg"),
-                "checks": vc["checks"],
-            }
+        entry = {"checkmsg": (vc.get("msg") if vc else None), "checks": checks}
+        if required:
+            # REQUIRED's message: the field's own MSG, else the class MSG, else a
+            # stand-in for ISPF's system "required field" message. (format() echoes
+            # an id it doesn't know, so the default renders as plain text.)
+            entry["required_msg"] = (a.get("msg") or (vc.get("msg") if vc else None)
+                                     or _REQUIRED_DEFAULT_MSG)
+        self.screen.validations[name.upper()] = entry
 
     def _resolve_numeric(self, a, name):
         """Whether the field is numeric. An explicit ``numeric`` attribute wins;
