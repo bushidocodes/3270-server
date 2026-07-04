@@ -1235,6 +1235,22 @@ def test_panel_dimensions_default_and_explicit():
     assert (s.width, s.depth) == (132, 43)
 
 
+def test_panel_dimensions_validate_bounds_and_fit():
+    # Per the PANEL reference: WIDTH is 16..160, DEPTH is 5..62; an out-of-range,
+    # FIT, %varname or non-numeric value falls back to the default (as ISPDTLC
+    # warns + uses the default) rather than crashing or using the bad value.
+    assert load_dtl('<panel width="16" depth="5"></panel>').width == 16      # min ok
+    assert load_dtl('<panel width="160" depth="62"></panel>').depth == 62    # max ok
+    assert load_dtl('<panel width="15"></panel>').width == 80                # below min
+    assert load_dtl('<panel width="161"></panel>').width == 80               # above max
+    assert load_dtl('<panel depth="4"></panel>').depth == 24                 # below min
+    assert load_dtl('<panel depth="63"></panel>').depth == 24                # above max
+    # FIT / %varname / non-numeric no longer raise; they keep the default.
+    assert load_dtl('<panel width="FIT" depth="FIT"></panel>').width == 80
+    assert load_dtl('<panel width="%wvar"></panel>').width == 80
+    assert load_dtl('<panel width="wide"></panel>').width == 80
+
+
 def test_row_beyond_depth_raises():
     with pytest.raises(DTLError):
         load_dtl('<panel><info row="24" col="0">off-screen</info></panel>')

@@ -496,11 +496,15 @@ class _DTLParser(HTMLParser):
             if self._override_cols is not None:
                 self.screen.width = self._override_cols
             elif "width" in a:
-                self.screen.width = int(a["width"])
+                w = self._panel_dim(a["width"], self._WIDTH_MIN, self._WIDTH_MAX)
+                if w is not None:
+                    self.screen.width = w
             if self._override_rows is not None:
                 self.screen.depth = self._override_rows
             elif "depth" in a:
-                self.screen.depth = int(a["depth"])
+                d = self._panel_dim(a["depth"], self._DEPTH_MIN, self._DEPTH_MAX)
+                if d is not None:
+                    self.screen.depth = d
             # The panel itself is an implicit flow box: elements that omit
             # row/col flow down from the top. Explicit positions still win, so
             # fully-positioned panels are unaffected.
@@ -1149,6 +1153,24 @@ class _DTLParser(HTMLParser):
     _LIST_INDENT = 4   # columns added per nesting level
     _DL_TSIZE = 10     # default <dl>/<parml> term-column width (chars)
     _HGAP = 2          # default column gap between side-by-side (dir=horiz) items
+    # <panel> WIDTH/DEPTH validation bounds (z/OS ISPF DTL Guide, PANEL tag).
+    _WIDTH_MIN, _WIDTH_MAX = 16, 160
+    _DEPTH_MIN, _DEPTH_MAX = 5, 62
+
+    @staticmethod
+    def _panel_dim(value, lo, hi):
+        """A validated <panel> WIDTH/DEPTH: the integer if it is in ``[lo, hi]``,
+        else ``None`` (keep the default). FIT, ``%varname`` and any out-of-range
+        or non-numeric value fall back to the default, as ISPDTLC does (it warns
+        and uses the default rather than the out-of-range value)."""
+        v = str(value).strip().upper()
+        if v == "FIT" or v.startswith("%"):
+            return None
+        try:
+            n = int(v)
+        except ValueError:
+            return None
+        return n if lo <= n <= hi else None
 
     def _box_extent(self, start_idx):
         """The ``(bottom, right)`` extent of the screen items added since
