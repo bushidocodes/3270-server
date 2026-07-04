@@ -100,6 +100,11 @@ renders centered on row 0, with the body flowing beneath it.
                                  (letters), or ``type="name"`` (a valid symbol). A
                                  field's input is validated against its class's
                                  checks. Other types (``picture`` …) stay lenient.
+``<xlatl msg format>``           a translate list on a ``<varclass>``: its
+``<xlati value>external``        ``<xlati>`` items name the values a field may be
+                                 typed as (``format=upper`` matches case-insensitively);
+                                 an input that is not one fails with the ``msg``.
+                                 ``<lit>`` wraps an external with literal spacing.
 ``<varlist>``                    container for ``<vardcl>`` declarations.
 ``<vardcl name varclass>``       declares variable ``name`` to be of class
                                  ``varclass``; a field's ``numeric`` is inherited
@@ -319,6 +324,7 @@ class _DTLParser(HTMLParser):
         self._lists = []          # stack of open <ul>/<ol> ({"type", "n"})
         self._lstfld = None       # active <lstfld> table {"cols", "groups", …}
         self._lstgrp = None       # current <lstgrp> column group, or None
+        self._xlatl = None        # active <xlatl> {"msg", "upper", "items"} or None
         self._rows = None         # data rows for the list field (datavar→value)
         self._subs = {}           # &NAME/%NAME substitution values (for COLOR=%var)
         self._da = None           # active <da> data area {row, col, attrs, body}
@@ -403,9 +409,10 @@ class _DTLParser(HTMLParser):
             self._begin_hp(a)
             return
         # Implicit end tags: a new block element closes the open content element
-        # (DTL omits most end tags). <dtafldd> is the exception — it's a child
-        # that supplies its parent <dtafld>'s prompt, so it must not close it.
-        if tag != "dtafldd" and self._tag is not None:
+        # (DTL omits most end tags). <dtafldd> (a field's prompt/description) and
+        # <lit> (a literal run inside e.g. an <xlati> external) are exceptions —
+        # they are inline children that must not close their parent.
+        if tag not in ("dtafldd", "lit") and self._tag is not None:
             self._emit_current()
         if tag in ("ul", "ol"):
             self._lists.append({"type": tag, "n": 0})
@@ -543,6 +550,18 @@ class _DTLParser(HTMLParser):
             if self._checkl is None:
                 raise DTLError("<checki> outside of a <checkl>")
             self._tag, self._attrs, self._chars = "checki", a, []
+        elif tag == "xlatl":
+            if self._cur_varclass is None:
+                raise DTLError("<xlatl> outside of a <varclass>")
+            self._xlatl = {
+                "msg": a.get("msg"),
+                "upper": str(a.get("format", "")).strip().lower() == "upper",
+                "items": [],
+            }
+        elif tag == "xlati":
+            if self._xlatl is None:
+                raise DTLError("<xlati> outside of an <xlatl>")
+            self._tag, self._attrs, self._chars = "xlati", a, []
         elif tag == "varlist":
             self._in_varlist = True
         elif tag == "vardcl":
@@ -692,7 +711,7 @@ class _DTLParser(HTMLParser):
         # A container closing flushes any open content child first (end tags are
         # omitted in DTL), while its context is still intact. The element's own
         # end tag is handled below via the normal `tag == self._tag` path.
-        if self._tag is not None and tag != self._tag and tag != "dtafldd":
+        if self._tag is not None and tag != self._tag and tag not in ("dtafldd", "lit"):
             self._emit_current()  # flush at the current list depth, before any pop
         if tag == "da":
             self._emit_da()
@@ -757,6 +776,9 @@ class _DTLParser(HTMLParser):
                 # class-level <varclass msg=> (which also covers TYPE-derived checks).
                 vc["msg"] = self._checkl["msg"] or vc.get("msg")
             self._checkl = None
+            return
+        if tag == "xlatl":
+            self._end_xlatl()
             return
         if tag == "lstgrp":
             self._lstgrp = None  # the open <lstcol>, if any, was flushed above
@@ -870,6 +892,8 @@ class _DTLParser(HTMLParser):
             self._msg_attrs[mid] = self._message_attrs(a)
         elif tag == "checki":
             self._emit_checki(a, content)
+        elif tag == "xlati":
+            self._emit_xlati(a, content)
         if horiz:
             self._flow_horiz(box, start_idx)
         self._tag, self._attrs, self._chars = None, None, []
@@ -892,6 +916,8 @@ class _DTLParser(HTMLParser):
         elif tag == "msg":  # a self-closing msg has empty text
             self.handle_endtag(tag)
         elif tag == "checki":  # a self-closing checki carries params in attrs
+            self.handle_endtag(tag)
+        elif tag == "xlati":  # a self-closing xlati (no external text)
             self.handle_endtag(tag)
         elif tag == "varclass":  # a self-closing varclass has no checks; close it
             self.handle_endtag(tag)
@@ -1562,6 +1588,36 @@ class _DTLParser(HTMLParser):
             self._checkl["checks"].append({"type": "alpha"})
         elif ctype == "name":
             self._checkl["checks"].append({"type": "name"})
+
+    def _emit_xlati(self, a, content):
+        """One ``<xlati value=internal>external`` translation item. The external
+        (the form the user types and sees) is the value; the element text — which
+        may be a ``<lit>`` literal run — supplies it."""
+        external = " ".join(content.split())
+        if external:
+            self._xlatl["items"].append(external)
+
+    def _end_xlatl(self):
+        """Close an ``<xlatl>`` translate list. ``FORMAT=upper`` marks the class as
+        uppercased. An ``<xlatl>`` that lists ``<xlati>`` translations restricts
+        valid input to those external values (a typed value must translate) — added
+        as an ``xlati`` validation check that fails with the ``<xlatl>``'s MSG."""
+        xl = self._xlatl
+        self._xlatl = None
+        if xl is None or self._cur_varclass not in self._varclasses:
+            return
+        vc = self._varclasses[self._cur_varclass]
+        if xl["upper"]:
+            vc["upper"] = True
+        if xl["items"]:
+            upper = xl["upper"] or vc.get("upper", False)
+            values = [v.upper() for v in xl["items"]] if upper else list(xl["items"])
+            vc["checks"].append({
+                "type": "xlati",
+                "values": values,
+                "upper": upper,
+                "msg": xl["msg"] or vc.get("msg"),
+            })
 
     def _emit_vardcl(self, a):
         # A <vardcl> belongs in a <varlist>, but tolerate a stray one (some guide

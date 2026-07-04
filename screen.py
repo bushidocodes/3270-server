@@ -231,6 +231,9 @@ def _check_failure(check: dict, value: str):
         present = value.upper() in check["values"]
         failed = present if check.get("negate") else not present
         return {"VALUE": value} if failed else None
+    if check["type"] == "xlati":                       # <xlatl>/<xlati> translate
+        v = value.upper() if check.get("upper") else value
+        return None if v in check["values"] else {"VALUE": value}
     if check["type"] == "alpha":
         return None if (value.isascii() and value.isalpha()) else {"VALUE": value}
     if check["type"] == "name":
@@ -606,7 +609,9 @@ class Screen:
             for check in spec["checks"]:
                 subs = _check_failure(check, value)
                 if subs is not None:
-                    return spec["checkmsg"], subs
+                    # A check may name its own MSG (e.g. an <xlatl>); otherwise the
+                    # field's class-level checkmsg applies.
+                    return check.get("msg") or spec["checkmsg"], subs
         return None
 
     def command_value(self, fields_by_addr: Dict[int, str]) -> Optional[str]:

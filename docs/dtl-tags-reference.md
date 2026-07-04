@@ -61,7 +61,7 @@ Legend: **Name** — the tag's full name. **End tag** — whether a closing tag 
 | **KEYL** | Key List | Yes | NAME=key-list-name<br>HELP=help-panel-name<br>ACTION=UPDATE \| DELETE<br>APPLID=application-id | N/A | KEYI | — | 🟡 Partial — collects keys; NAME/HELP/ACTION/APPLID ignored — #126 |
 | **LI** | List Item | No | SPACE=NO \| YES<br>NOSKIP | item-text | (body text tags) | NOTEL, OL, SL, UL | 🟡 Partial — SPACE/NOSKIP ignored — #123 |
 | **LINES** | Lines | Yes | NOSKIP | text | DL, HP, NOTE, NOTEL, NT, OL, P, PARML, PS, RP, SL, UL, XMP | ATTENTION, CAUTION, DD, INFO, LI, LP, NT, PD, WARNING | 🟡 Partial — NOSKIP ignored — #123 |
-| **LIT** | Literal | Yes | — | literal-display-value | — | XLATI | ❌ #114 |
+| **LIT** | Literal | Yes | — | literal-display-value | — | XLATI | 🟡 Partial — its text is captured as an `<xlati>` external — #114 |
 | **LP** | List Part | No | NOSKIP | implied-paragraph | (body text tags) | NOTEL, OL, SL, UL | 🟡 Partial — NOSKIP ignored — #123 |
 | **LSTCOL** | List Column | No | DATAVAR=column-data<br>VARCLASS=variable-class-name<br>HELP=NO \| YES \| help-panel-name \| * help-message-id \| %varname \| *%varname<br>USAGE=BOTH \| IN \| OUT<br>REQUIRED=NO \| YES MSG=message-id<br>COLWIDTH=data-width<br>ALIGN=START \| CENTER \| END<br>AUTOTAB=NO \| YES<br>LINE=n<br>CLEAR<br>POSITION=n<br>FORMAT=START \| CENTER \| END<br>TEXT=descriptive-text<br>TEXTLOC=BEFORE \| AFTER<br>TEXTFMT=START \| CENTER \| END<br>TEXTLEN=n<br>TEXTSKIP=NO \| YES<br>NOENDATTR<br>PAD=NULLS \| USER \| char \| %varname<br>PADC=NULLS \| USER \| char \| %varname<br>OUTLINE=NONE \| L \| R \| O \| U \| BOX \| %varname<br>PAS=OFF \| ON \| %varname<br>CSRGRP=NO \| YES \| n<br>ATTRCHANGE=NO \| YES \| NEW<br>COLSPACE=n<br>COLTYPE=CUA \| ISPF \| EE \| VOI \| LID<br>COLOR=WHITE \| RED \| BLUE \| GREEN \| PINK \| YELLOW \| TURQ \| %varname<br>INTENS=HIGH \| LOW \| NON \| %varname<br>HILITE=USCORE \| BLINK \| REVERSE \| %varname<br>CAPS=OFF \| ON<br>DISPLAY=YES \| NO<br>VARDCL=YES \| NO | column-heading | COMMENT, HP, PS, RP, SOURCE, SCRFLD | LSTFLD, LSTGRP | 🟡 Partial — DATAVAR/COLWIDTH/USAGE/ALIGN/LINE/COLOR only; ~18 others ignored — #122 |
 | **LSTFLD** | List Field | Yes | RULES=NONE \| HORIZ \| VERT \| BOTH<br>ROWS=NOSCAN \| SCAN \| %varname<br>DIV=NONE \| BLANK \| SOLID \| DASH \| char<br>SCROLLVAR=scroll-variable<br>SCRVHELP=NO \| YES \| scroll-help-panel-name \|*scroll-help-message-id \| %varname \| *%varname<br>SCROLLTAB=NO \| YES<br>SCRCAPS=OFF \| ON<br>ATTRCHANGE=NO \| YES \| NEW<br>VARDCL=YES \| NO | N/A | COMMENT, LSTCOL, LSTGRP, LSTVAR, SOURCE | AREA, PANEL, REGION | 🟡 Partial — model rows/scroll not modelled — #67 |
@@ -103,8 +103,8 @@ Legend: **Name** — the tag's full name. **End tag** — whether a closing tag 
 | **VARLIST** | Variable List | Yes | — | N/A | VARDCL | — | ✅ Supported |
 | **VARSUB** | Variable Substitution | No | VAR=variable-name | N/A | — | MSG | ❌ #118 |
 | **WARNING** | Warning | Yes | — | text | DL, FIG, HP, LINES, NOTE, NOTEL, NT, OL, P, PARML, PS, RP, SL, UL, XMP | LI, LP, P | ✅ labelled block |
-| **XLATI** | Translate Item | No | VALUE=internal-value | displayed-value | LIT | XLATL | ❌ #114 |
-| **XLATL** | Translate List | Yes | FORMAT=NONE \| UPPER<br>TRUNC=n \| char<br>MSG=message-identifier | N/A | XLATI | VARCLASS | ❌ #114 |
+| **XLATI** | Translate Item | No | VALUE=internal-value | displayed-value | LIT | XLATL | 🟡 Partial — external value read (validates input); internal-value mapping not modelled — #114 |
+| **XLATL** | Translate List | Yes | FORMAT=NONE \| UPPER<br>TRUNC=n \| char<br>MSG=message-identifier | N/A | XLATI | VARCLASS | 🟡 Partial — `<xlati>` list validates typed input (FORMAT=upper honoured, MSG carried); value translation/TRUNC not yet — #114 |
 | **XMP** | Example | Yes | NOSKIP | text | DL, HP, NOTE, NOTEL, NT, OL, P, PARML, PS, RP, SL, UL | (body text tags) | ❌ #52 |
 
 ## Notes
