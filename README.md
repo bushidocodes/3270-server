@@ -105,7 +105,7 @@ Lines 1-22 of 54     PF7=Up  PF8=Down  PF3=Exit
 python server.py
 ```
 
-The server listens on port 2323 by default (no root/administrator required, unlike port 23). `python server.py --help` lists the options: `--host`, `--port`, and `--certfile`/`--keyfile` (each also settable via the `TN3270_HOST`, `TN3270_PORT`, `TN3270_CERTFILE`, `TN3270_KEYFILE` environment variables).
+The server listens on port 2323 by default (no root/administrator required, unlike port 23). `python server.py --help` lists the options: `--host`, `--port`, `--certfile`/`--keyfile`, and `--starttls` (each also settable via the `TN3270_HOST`, `TN3270_PORT`, `TN3270_CERTFILE`, `TN3270_KEYFILE`, `TN3270_STARTTLS` environment variables).
 
 ### Run over TLS (secure 3270)
 
@@ -118,6 +118,13 @@ python server.py --certfile cert.pem --keyfile key.pem
 ```
 
 Then connect with the `L:` prefix, e.g. `wc3270 L:localhost:2323` (add `-noverifycert` for a self-signed cert). Without `--certfile` the server is plaintext, exactly as before.
+
+Alternatively, add `--starttls` to use **negotiated START-TLS** (the `START_TLS` Telnet option): the session begins in the clear on the normal port and is upgraded to TLS in-band, so no separate TLS port or `L:` prefix is needed — an emulator (which enables START-TLS by default) connects plaintext and the server offers the upgrade. A client that declines still gets a plaintext session.
+
+```sh
+python server.py --certfile cert.pem --keyfile key.pem --starttls
+# connect in the clear; the upgrade is automatic:  wc3270 -noverifycert localhost:2323
+```
 
 ### Connect with wc3270 (Windows)
 
@@ -145,7 +152,7 @@ TN3270 is Telnet extended with IBM 3270 data-stream framing. The server performs
 
 **Line mode (NVT).** A client that refuses the 3270 binary framing — a plain line-mode telnet client that never negotiates `BINARY`/`EOR`, detected either by that refusal or by plain ASCII arriving mid-negotiation — can't carry a 3270 data stream. Rather than hang the negotiation, the server serves it a minimal ASCII **TSO `READY`** command loop (`run_nvt_session`): `TIME`, `HELP`, `ISPF` (which explains a full-screen 3270 terminal is required), and `LOGOFF` to disconnect; any other verb gets the authentic `IKJ56500I COMMAND xxx NOT FOUND`. So a non-3270 client gets something intelligible instead of nothing. A genuine 3270 emulator always negotiates the binary framing and so is never routed here.
 
-When a certificate is configured (`--certfile`), the accepted socket is wrapped in **implicit TLS** (`ssl.SSLContext(PROTOCOL_TLS_SERVER)`) in the per-client thread before any 3270 bytes flow — so a slow or hostile client can't stall the accept loop — after which the entire negotiation and session run over the encrypted socket unchanged (the 3270 code only ever calls `recv`/`sendall`). This matches the `L:` connect prefix used by x3270-family emulators. Plaintext remains the default.
+When a certificate is configured (`--certfile`), the accepted socket is wrapped in **implicit TLS** (`ssl.SSLContext(PROTOCOL_TLS_SERVER)`) in the per-client thread before any 3270 bytes flow — so a slow or hostile client can't stall the accept loop — after which the entire negotiation and session run over the encrypted socket unchanged (the 3270 code only ever calls `recv`/`sendall`). This matches the `L:` connect prefix used by x3270-family emulators. With `--starttls` the same context instead drives a **negotiated START-TLS** upgrade (`_offer_starttls`): the server sends `IAC DO START-TLS`, a willing client answers `WILL` + `SB START-TLS FOLLOWS SE`, the server replies in kind and runs the handshake in place — the client's plaintext replies are read one byte at a time so no TLS bytes are ever swallowed, and a `WONT` leaves a working plaintext session. Plaintext remains the default.
 
 ### 3270 data stream
 

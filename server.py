@@ -130,6 +130,11 @@ WILL, WONT, DO, DONT = 251, 252, 253, 254
 # which adds that header outbound (read_record strips it inbound), so the rest of
 # the server sends and reads plain 3270 records unchanged.
 TN3270E = 40  # Telnet option number
+# START-TLS: the negotiated (in-band) TLS upgrade Telnet option. Unlike implicit
+# TLS (the L: prefix / make_tls_context), the session begins in the clear on the
+# normal port and is upgraded to TLS mid-stream (see _offer_starttls).
+TELOPT_STARTTLS = 46
+TLS_FOLLOWS = 1   # START-TLS sub-command: the TLS handshake data follows the SE
 
 # TN3270E message sub-commands (RFC 2355 §3).
 E_ASSOCIATE = 0
@@ -2009,14 +2014,82 @@ def make_tls_context(certfile, keyfile=None):
     return ctx
 
 
-def _client_thread(client_socket, addr, tls_context=None):
+_STARTTLS_TIMEOUT = 10.0
+
+
+def _recv_byte(sock) -> int:
+    b = sock.recv(1)
+    if not b:
+        raise ConnectionError("connection closed during STARTTLS")
+    return b[0]
+
+
+def _drain_subneg(sock) -> None:
+    """Consume a Telnet subnegotiation up to and including its ``IAC SE``."""
+    prev = None
+    for _ in range(64):
+        b = _recv_byte(sock)
+        if prev == IAC and b == SE:
+            return
+        prev = b
+
+
+def _client_accepts_starttls(sock) -> bool:
+    """Read the client's reply to ``DO START-TLS`` one byte at a time. Return True
+    on ``WILL`` (after consuming its ``SB START-TLS FOLLOWS SE``), False on
+    ``WONT``. Unrelated Telnet commands the client might interleave are skipped;
+    the loop is bounded so malformed input can't spin forever."""
+    for _ in range(64):
+        if _recv_byte(sock) != IAC:
+            continue
+        cmd = _recv_byte(sock)
+        if cmd in (WILL, WONT, DO, DONT):
+            opt = _recv_byte(sock)
+            if opt != TELOPT_STARTTLS:
+                continue                      # a different option — ignore it
+            if cmd == WILL:
+                _drain_subneg(sock)           # IAC SB START-TLS FOLLOWS IAC SE
+                return True
+            return False                      # WONT → stay in the clear
+        if cmd == SB:
+            _drain_subneg(sock)               # skip any other subnegotiation
+    return False
+
+
+def _offer_starttls(client_socket, tls_context):
+    """Offer negotiated START-TLS (Telnet option 46) and, if the client accepts,
+    upgrade the connection to TLS in place; return the (possibly wrapped) socket.
+
+    We send ``DO START-TLS``; a willing client replies ``WILL START-TLS`` then
+    ``SB START-TLS FOLLOWS SE``; we answer ``SB START-TLS FOLLOWS SE`` and run the
+    TLS handshake as the server. The client begins TLS only *after* our FOLLOWS, so
+    reading its plaintext replies one byte at a time can never swallow TLS handshake
+    bytes. A refusal or any malformed/short exchange leaves the plaintext socket
+    unchanged, so a client that doesn't do START-TLS still gets a session."""
+    client_socket.settimeout(_STARTTLS_TIMEOUT)
+    client_socket.sendall(bytes([IAC, DO, TELOPT_STARTTLS]))
     try:
-        # Implicit TLS: complete the handshake here (in the per-client thread, so
-        # a slow or hostile client can't stall the accept loop) before any 3270
-        # bytes flow. handle_client then reads/writes through the TLS socket
-        # unchanged — TN3270EStream and read_record only use recv/sendall.
+        if not _client_accepts_starttls(client_socket):
+            return client_socket
+    except (OSError, ConnectionError):
+        return client_socket
+    client_socket.sendall(bytes([IAC, SB, TELOPT_STARTTLS, TLS_FOLLOWS, IAC, SE]))
+    return tls_context.wrap_socket(client_socket, server_side=True)
+
+
+def _client_thread(client_socket, addr, tls_context=None, starttls=False):
+    try:
+        # Complete the TLS handshake here (in the per-client thread, so a slow or
+        # hostile client can't stall the accept loop) before any 3270 bytes flow.
+        # handle_client then reads/writes through the TLS socket unchanged —
+        # TN3270EStream and read_record only use recv/sendall.
         if tls_context is not None:
-            client_socket = tls_context.wrap_socket(client_socket, server_side=True)
+            if starttls:
+                # Negotiated TLS: begin in the clear and offer an in-band upgrade.
+                client_socket = _offer_starttls(client_socket, tls_context)
+            else:
+                # Implicit TLS: the whole connection is TLS from the first byte.
+                client_socket = tls_context.wrap_socket(client_socket, server_side=True)
         handle_client(client_socket, addr)
     except _SessionLogoff:
         print(f"Client {addr} logged off via SYSREQ")
@@ -2030,21 +2103,30 @@ def _client_thread(client_socket, addr, tls_context=None):
         client_socket.close()
 
 
-def run_tn3270_server(host="127.0.0.1", port=2323, certfile=None, keyfile=None):
-    """Serve TN3270/TN3270E on ``host:port``. If ``certfile`` is given, every
-    connection is wrapped in implicit TLS (see :func:`make_tls_context`);
-    otherwise the server is plaintext (the default, unchanged)."""
+def run_tn3270_server(host="127.0.0.1", port=2323, certfile=None, keyfile=None,
+                      starttls=False):
+    """Serve TN3270/TN3270E on ``host:port``. If ``certfile`` is given, the
+    connection is secured with TLS: *implicit* TLS by default (encrypted from the
+    first byte, the way the ``L:`` host prefix connects), or *negotiated*
+    START-TLS when ``starttls`` is set (begins in the clear on the normal port and
+    upgrades in-band, see :func:`_offer_starttls`). Without a cert the server is
+    plaintext (the default, unchanged)."""
     tls_context = make_tls_context(certfile, keyfile) if certfile else None
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
         server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server_socket.bind((host, port))
         server_socket.listen(socket.SOMAXCONN)
-        scheme = "TN3270 over TLS" if tls_context else "TN3270"
+        if tls_context is None:
+            scheme = "TN3270"
+        elif starttls:
+            scheme = "TN3270 with negotiated START-TLS"
+        else:
+            scheme = "TN3270 over TLS"
         print(f"{scheme} server listening on {host}:{port}")
         while True:
             client_socket, addr = server_socket.accept()
             threading.Thread(target=_client_thread,
-                             args=(client_socket, addr, tls_context),
+                             args=(client_socket, addr, tls_context, starttls),
                              daemon=True).start()
 
 
@@ -2059,6 +2141,13 @@ if __name__ == "__main__":
                         help="PEM certificate; enables implicit TLS when set")
     parser.add_argument("--keyfile", default=os.environ.get("TN3270_KEYFILE"),
                         help="PEM private key (omit if the key is in --certfile)")
+    parser.add_argument("--starttls", action="store_true",
+                        default=bool(os.environ.get("TN3270_STARTTLS")),
+                        help="use negotiated START-TLS (in-band upgrade) instead of "
+                             "implicit TLS; requires --certfile")
     args = parser.parse_args()
+    if args.starttls and not args.certfile:
+        parser.error("--starttls requires --certfile")
     run_tn3270_server(host=args.host, port=args.port,
-                      certfile=args.certfile, keyfile=args.keyfile)
+                      certfile=args.certfile, keyfile=args.keyfile,
+                      starttls=args.starttls)
