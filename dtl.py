@@ -213,10 +213,17 @@ _HIGHLIGHTS = {
 # colour terminal renders it in the standard z/OS colour for that kind of element
 # unless it carries an explicit COLOR.
 
+# Admonition tags: a note/callout that flows as a labelled block within body text
+# (help panels) — the label prefixes the text. <notel> (below) is the list form.
+_ADMONITIONS = {
+    "note": "Note:", "nt": "Note:",           # note / inline note
+    "attention": "Attention:", "caution": "Caution:", "warning": "Warning:",
+}
 # Block tags whose text flows as protected lines (like <info>): paragraphs,
-# list items (<li>/<dt>/<dd>/<pt>/<pd>/<lp>), and preformatted <lines>. Their
-# list containers (<ul>/<ol>/<dl>/<parml>/<sl>) are transparent — ignored.
-_FLOW_TEXT_TAGS = ("p", "li", "dt", "dd", "pt", "pd", "lp", "lines")
+# list items (<li>/<dt>/<dd>/<pt>/<pd>/<lp>), preformatted <lines>, and the
+# admonitions above. Their list containers (<ul>/<ol>/<dl>/<parml>/<notel>) are
+# transparent — ignored (a plain container), except <notel>'s "Notes:" heading.
+_FLOW_TEXT_TAGS = ("p", "li", "dt", "dd", "pt", "pd", "lp", "lines") + tuple(_ADMONITIONS)
 # Instruction tags render as protected text like <info>: <topinst> (top),
 # <pnlinst> (panel), and <botinst> (bottom) instructions.
 _INSTRUCTION_TAGS = ("topinst", "pnlinst", "botinst")
@@ -376,6 +383,12 @@ class _DTLParser(HTMLParser):
             self._emit_current()
         if tag in ("ul", "ol"):
             self._lists.append({"type": tag, "n": 0})
+        elif tag == "notel":
+            # A note list: a "Notes:" heading, then bulleted <li> note items.
+            ctx = self._areas[-1] if self._areas else None
+            if ctx is not None:
+                self._emit_flow_lines("Notes:", ctx["row"], ctx["col"], ctx)
+            self._lists.append({"type": "ul", "n": 0})
         elif tag in ("dl", "parml"):
             # A definition/parameter list carries its term-column width (tsize)
             # and break style; <dt>/<dd> (<pt>/<pd>) entries lay out against it.
@@ -602,7 +615,7 @@ class _DTLParser(HTMLParser):
             self._emit_da()
             self._da = None
             return
-        if tag in ("ul", "ol", "dl", "parml") and self._lists:
+        if tag in ("ul", "ol", "dl", "parml", "notel") and self._lists:
             self._lists.pop()
         if tag in ("panel", "help"):
             if self._da is not None:      # a <da> with an omitted end tag
@@ -736,7 +749,7 @@ class _DTLParser(HTMLParser):
         self.handle_starttag(tag, attrs)
         if tag in _CONTENT_TAGS:
             self.handle_endtag(tag)
-        elif tag in ("ul", "ol", "dl", "parml"):  # a self-closing list is empty; pop it
+        elif tag in ("ul", "ol", "dl", "parml", "notel"):  # empty list; pop it
             self.handle_endtag(tag)
         elif tag == "dtafldd":  # empty prompt
             self.handle_endtag(tag)
@@ -1053,6 +1066,10 @@ class _DTLParser(HTMLParser):
         # concatenation is the field's plain text, so mono renders identically.
         if runs is not None and not content:
             content = "".join(t for t, _, _ in runs)
+        # An admonition (<note>/<warning>/…) flows as a labelled callout.
+        label = _ADMONITIONS.get(tag)
+        if label and content.strip():
+            content = label + " " + content.strip()
         # CUA role → default colour: a fill line is a separator rule; a top/panel
         # instruction is an instruction; a high-intensity heading is the title;
         # everything else is normal text (labels/values).
