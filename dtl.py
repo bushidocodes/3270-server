@@ -52,10 +52,12 @@ Supported tags
                                  ``<panel>`` (title text, width/depth, flow box).
 Panel title: the text after ``<panel ...>``/``<help ...>`` (before its first child)
 renders centered on row 0, with the body flowing beneath it.
-``<dtafld row col fldcol         a prompt plus an unprotected input field at
-   datavar entwidth ...>``       ``fldcol``. The prompt is the text of a nested
-                                 ``<dtafldd>`` child (authentic DTL) or, as a
-                                 shorthand, the element's own text. See attrs below.
+``<dtafld row col fldcol         a prompt plus an input field at ``fldcol``. The
+   datavar entwidth usage         prompt is the text of a nested ``<dtafldd>`` child
+   pmtloc ...>``                  (authentic DTL) or the element's own text.
+                                 ``usage=out`` makes it a protected display field
+                                 (the variable's value); ``pmtloc=above`` puts the
+                                 prompt on the line above. See attrs below.
 ``<dtafldd>prompt</dtafldd>``    data-field description: the prompt for its
                                  enclosing ``<dtafld>`` or ``<cmdarea>``.
 ``<cmdarea row col fldcol         the command area (ISPF "Option/Command ===>"
@@ -1209,16 +1211,30 @@ class _DTLParser(HTMLParser):
                                  color=spec["color"], highlight=spec["hilite"]))
 
     def _add_field(self, a, content, tag, name):
-        """Emit a prompt (if any) plus an unprotected input field; return it."""
+        """Emit a prompt (if any) plus its field: an unprotected input field, or —
+        for ``usage=out`` — the variable's value as protected display text. Returns
+        the Field, or ``None`` for a display field."""
         # A flowed field (omitted end tag) captures the newline + indentation of
         # the following line into its caption; collapse it, as <info> does, so the
         # prompt is clean. Single-line captions are untouched (byte-identical).
         if "\n" in content:
             content = re.sub(r"\s*\n\s*", " ", content).strip()
         row, col, ctx = self._resolve_pos(a, tag)
+        # PMTLOC=ABOVE puts the prompt on the line above the field (the default,
+        # BEFORE, is beside it). Emit the caption now and drop the field to the
+        # next line at the base column.
+        pmt_above = str(a.get("pmtloc", "")).strip().lower() == "above"
+        if pmt_above and content:
+            self.screen.add(Text(row, col, content, _intensity(a), role="prompt"))
+            content = ""                   # caption already placed
+            row += 1
+            if ctx is not None:
+                ctx["row"] += 1            # the field occupies a second line
         pmtwidth = ctx.get("pmtwidth") if ctx else None
         if "fldcol" in a:
             fldcol = int(a["fldcol"])
+        elif pmt_above:
+            fldcol = col                   # under the prompt, at the base column
         elif pmtwidth:
             fldcol = col + pmtwidth        # <dtacol>: entry at a fixed prompt column
         elif ctx is not None:
@@ -1241,6 +1257,13 @@ class _DTLParser(HTMLParser):
             # the field-prompt colour); DTL's COLOR on a <dtafld> colours the
             # *field*, not the caption.
             self.screen.add(Text(row, col, content, _intensity(a), role="prompt"))
+        # USAGE=OUT is a display-only (output) field: show the variable's value as
+        # protected text — like a list column — not an editable input box.
+        if str(a.get("usage", "")).strip().lower() == "out":
+            value = self._subs.get((name or "").upper()) or a.get("default", "")
+            self.screen.add(Text(row, fldcol, str(value)[:length].ljust(length),
+                                 _intensity(a), color=self._color(a), role="cell"))
+            return None
         field = Field(
             row=row,
             col=fldcol,
