@@ -36,7 +36,9 @@ EXAMPLE_FILES = sorted(glob.glob(os.path.join(_DIR, "*.dtl")))
 # end tags + text/list tags (#52); 126 with panel-title text + nested-list
 # bullets/indentation; 132 with <msg suffix> + lenient unsupported <checki>;
 # 134 with <dtacol>/<divider> + tolerating a stray <vardcl> (as ISPDTLC does);
-# 135 with implicit <pdc>/<abc> end tags (action-bar pull-downs).
+# 135 with implicit <pdc>/<abc> end tags (action-bar pull-downs). (Side-by-side
+# <region dir=horiz> columns are a layout-fidelity change, like word-wrap, so
+# they don't move this count — the affected examples already rendered stacked.)
 RENDER_BASELINE = 137
 
 

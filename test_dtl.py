@@ -1363,6 +1363,69 @@ def test_regions_lay_out_side_by_side_columns():
     assert s.items[3] == Text(3, 40, "right2", DisplayIntensity.NORMAL)
 
 
+def test_horiz_region_flows_fields_side_by_side():
+    # <region dir=horiz> lays its children left-to-right (rather than stacking
+    # them) — the guide's implicit layout for a row of related fields (City /
+    # State / Zip). The enclosing flow then resumes on the row *below* them.
+    s = load_dtl(
+        '<panel><area col="1">'
+        '<dtafld datavar="name" entwidth="10">Name'
+        '<region dir="horiz">'
+        '  <dtafld datavar="city" entwidth="8">City'
+        '  <dtafld datavar="stat" entwidth="2">State'
+        '</region>'
+        '<dtafld datavar="after" entwidth="4">After'
+        '</area></panel>'
+    )
+    prompts = {it.text.strip(): it for it in s.items if isinstance(it, Text)}
+    fields = {f.name: f for f in s.items if isinstance(f, Field)}
+    # Name flows on row 0; City and State share the next row, side by side.
+    assert prompts["Name"].row == 0
+    assert prompts["City"].row == prompts["State"].row == 1
+    assert prompts["State"].col > fields["city"].col   # State sits to City's right
+    # Flow resumes one row below the horizontal row of columns.
+    assert prompts["After"].row == 2
+    assert prompts["After"].col == 1                    # back at the box column
+
+
+def test_horiz_region_stacks_child_regions_and_resumes_below_tallest():
+    # Two vertical <region>s inside a dir=horiz box become side-by-side columns;
+    # a <divider gutter=n> between them is a vertical gutter (no rule). The flow
+    # resumes below whichever column is taller.
+    s = load_dtl(
+        '<panel><area col="1">'
+        '<region dir="horiz">'
+        '  <region><info>a1</info><info>a2</info></region>'
+        '  <divider gutter="6">'
+        '  <region><info>b1</info><info>b2</info><info>b3</info></region>'
+        '</region>'
+        '<info>tail</info>'
+        '</area></panel>'
+    )
+    by_text = {it.text: it for it in s.items if isinstance(it, Text)}
+    assert by_text["a1"].row == 0 and by_text["a1"].col == 1
+    assert by_text["b1"].row == 0 and by_text["b1"].col > by_text["a1"].col
+    # No divider rule was drawn (gutter is spacing only).
+    assert not any(isinstance(it, Text) and set(it.text) == {"-"} for it in s.items)
+    # The right column is 3 rows tall (b1..b3 on rows 0..2), so the flow resumes
+    # on row 3 — below the taller of the two columns.
+    assert by_text["tail"].row == 3 and by_text["tail"].col == 1
+
+
+def test_horiz_region_default_vert_is_unchanged():
+    # Without dir=horiz a region still stacks its children vertically (default).
+    s = load_dtl(
+        '<panel><area col="1">'
+        '<region><info>x1</info><info>x2</info></region>'
+        '<info>y</info>'
+        '</area></panel>'
+    )
+    N = DisplayIntensity.NORMAL
+    assert s.items[0] == Text(0, 1, "x1", N)
+    assert s.items[1] == Text(1, 1, "x2", N)
+    assert s.items[2] == Text(2, 1, "y", N)
+
+
 def test_region_indent_shifts_content_right_and_nests():
     # <region indent=n> flows its content n columns right of the origin; nested
     # indents stack, and the parent flow resumes at its own column afterwards.
