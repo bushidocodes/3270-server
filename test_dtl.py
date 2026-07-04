@@ -1263,6 +1263,24 @@ def test_regions_lay_out_side_by_side_columns():
     assert s.items[3] == Text(3, 40, "right2", DisplayIntensity.NORMAL)
 
 
+def test_region_indent_shifts_content_right_and_nests():
+    # <region indent=n> flows its content n columns right of the origin; nested
+    # indents stack, and the parent flow resumes at its own column afterwards.
+    s = load_dtl(
+        '<panel><area col="1">'
+        '<info>flush</info>'
+        '<region indent="4"><info>indented</info>'
+        '<region indent="3"><info>deeper</info></region></region>'
+        '<info>after</info>'
+        '</area></panel>'
+    )
+    N = DisplayIntensity.NORMAL
+    assert s.items[0] == Text(0, 1, "flush", N)
+    assert s.items[1] == Text(1, 5, "indented", N)     # col 1 + 4
+    assert s.items[2] == Text(2, 8, "deeper", N)       # col 1 + 4 + 3
+    assert s.items[3] == Text(3, 1, "after", N)        # parent flow resumes at col 1
+
+
 def test_missing_row_outside_any_flow_context_raises():
     # With no <panel> (hence no implicit flow box) and no <area>, an <info>
     # without a row has nowhere to flow, so it still raises.

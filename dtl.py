@@ -574,9 +574,12 @@ class _DTLParser(HTMLParser):
             # content flows after the parent's, and the parent resumes after it).
             parent = self._areas[-1] if self._areas else None
             explicit = "row" in a
+            # INDENT shifts the box's content that many columns to the right of its
+            # origin (a <region indent=n>), nesting cumulatively.
+            base_col = int(a["col"]) if "col" in a else (parent["col"] if parent else 1)
             self._areas.append({
                 "row": int(a["row"]) if "row" in a else (parent["row"] if parent else 0),
-                "col": int(a["col"]) if "col" in a else (parent["col"] if parent else 1),
+                "col": base_col + (int(a["indent"]) if "indent" in a else 0),
                 "fldgap": int(a["fldgap"]) if "fldgap" in a
                           else (parent["fldgap"] if parent else 1),
                 "explicit": explicit,
