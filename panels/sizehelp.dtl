@@ -1,0 +1,24 @@
+<!DOCTYPE DM SYSTEM>
+<!-- Field-level help for the TSO/E LOGON "Size" field. Shown when the cursor is
+     in the Size field and HELP (PF1) is pressed, instead of the panel's general
+     help (tsohelp) — DTL <dtafld help="sizehelp">. PF3 returns to the logon panel. -->
+<panel name="sizehelp" title="TSO/E LOGON - Size Field HELP">
+  <info row="0" col="0" intensity="high">---------------------- TSO/E LOGON - Size Field HELP --------------------------</info>
+
+  <info row="2" col="1">The <hp>Size</hp> field sets the region size, in kilobytes, for your TSO</info>
+  <info row="3" col="1">address space - the amount of virtual storage your session may use.</info>
+
+  <info row="5" col="1" intensity="high">Rules:</info>
+  <info row="6" col="3">- Numeric only.</info>
+  <info row="7" col="3">- Range 0 to 32768 (a larger value is rejected with message TSO001).</info>
+  <info row="8" col="3">- The default is 00150. Leave it unless your work needs more storage.</info>
+
+  <info row="10" col="1">Press ENTER or PF3 to return to the LOGON panel and continue.</info>
+
+  <info row="22" col="1">PF3=Return</info>
+
+  <keyl name="HELPKEYS">
+    <keyi key="PF3"  cmd="EXIT">Return</keyi>
+    <keyi key="PF15" cmd="EXIT">Return</keyi>
+  </keyl>
+</panel>

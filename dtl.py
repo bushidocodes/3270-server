@@ -1278,10 +1278,21 @@ class _DTLParser(HTMLParser):
             color=self._color(a),
             role="field",
             highlight=self._hilite(a),
+            help=self._field_help(a),
         )
         self.screen.add(field)
         self._attach_validation(name)
         return field
+
+    @staticmethod
+    def _field_help(a):
+        """The field-level help *panel name* from HELP=, or None. HELP can also be
+        NO/YES, a *message id, or a %varname — none of which name a help panel, so
+        those aren't field help here."""
+        h = str(a.get("help", "")).strip()
+        if not h or h.lower() in ("no", "yes") or h.startswith(("*", "%")):
+            return None
+        return h
 
     def _attach_validation(self, name):
         """Attach a field's variable-class <checkl> validation to the Screen."""

@@ -934,9 +934,12 @@ def _await_action(client_socket, screen):
         aid_str = aid_to_string(aid)
         if screen.command_for(aid_str) in _LEAVE_COMMANDS:
             return _LEAVE
-        if aid_str == "PF1" and screen.help:
-            _show_overlay(client_socket, screen.help)
-            continue  # redisplay this panel after help
+        if aid_str == "PF1":
+            # Context-sensitive HELP: the field the cursor is on, else the panel.
+            help_panel = screen.help_for(cursor) or screen.help
+            if help_panel:
+                _show_overlay(client_socket, help_panel)
+                continue  # redisplay this panel after help
         return aid_str, fields, cursor
 
 
@@ -972,6 +975,7 @@ def _library_members():
         "dlgtest": "Dialog Test - Variables",
         "memlist": "Library - Member List",
         "tsohelp": "Logon help",
+        "sizehelp": "Logon Size field help",
         "ispfhelp": "ISPF menu help",
         "viewentry": "View entry panel",
         "editentry": "Edit entry panel",
@@ -1866,7 +1870,7 @@ def handle_client(client_socket, addr):
             result = read_client_input(client_socket)
             if result is None:
                 return
-            aid, fields, _ = result
+            aid, fields, cursor = result
             print(f"AID={hex(aid)}, fields={redact_fields(fields)}")
 
             aid_str = aid_to_string(aid)
@@ -1874,9 +1878,13 @@ def handle_client(client_socket, addr):
             if cmd in _LEAVE_COMMANDS:
                 # Keylist bound this key (PF3/PF15) to EXIT — log off.
                 return
-            if cmd == "HELP" and screen.help:
-                _show_overlay(client_socket, screen.help)
-                continue
+            if cmd == "HELP":
+                # Field-level help (cursor on a field with its own help) wins over
+                # the panel's general help.
+                help_panel = screen.help_for(cursor) or screen.help
+                if help_panel:
+                    _show_overlay(client_socket, help_panel)
+                    continue
 
             # Validate fields against their <varclass> checks (e.g. SIZE range)
             # before processing the logon, as ISPF validates panel fields.
@@ -1938,9 +1946,11 @@ def handle_client(client_socket, addr):
             if option == "X" or cmd in _LEAVE_COMMANDS:
                 # X, or a keylist key (PF3/PF15) bound to EXIT — back to logon
                 break
-            if cmd == "HELP" and screen.help:
-                _show_overlay(client_socket, screen.help)
-                continue
+            if cmd == "HELP":
+                help_panel = screen.help_for(cursor) or screen.help
+                if help_panel:
+                    _show_overlay(client_socket, help_panel)
+                    continue
 
             # A typed value is a menu selection, a command from the panel's
             # <cmdtbl>, or invalid. (The "X" exit choice is handled above.)
