@@ -197,12 +197,28 @@ _INTENSITY = {
 _REQUIRED_DEFAULT_MSG = "Enter required field"
 
 # ISPF option routing in a )PROC: `&ZSEL = TRANS( TRUNC(&ZCMD,'.') 0,'PANEL(x)' …)`.
-# _ZSEL_TRANS_RE grabs the TRANS(...) body (greedy to the final ')'); _ZSEL_PAIR_RE
-# picks each `option,'selection-string'` pair. The option is a digit run or a single
-# word-boundaried letter, which skips the source expression (TRUNC(&ZCMD,'.')) and
-# the `*,'?'` default without matching them.
-_ZSEL_TRANS_RE = re.compile(r"ZSEL\s*=\s*TRANS\s*\((.*)\)", re.IGNORECASE | re.DOTALL)
+# _ZSEL_TRANS_OPEN_RE finds the `TRANS(`; _balanced_parens then takes exactly its
+# body (so anything after the TRANS — a second statement/assignment — can't leak in).
+# _ZSEL_PAIR_RE picks each `option,'selection-string'` pair; the option is a digit run
+# or a single word-boundaried letter, which skips the source expression
+# (TRUNC(&ZCMD,'.')) and the `*,'?'` default without matching them.
+_ZSEL_TRANS_OPEN_RE = re.compile(r"ZSEL\s*=\s*TRANS\s*\(", re.IGNORECASE)
 _ZSEL_PAIR_RE = re.compile(r"\b(\d+|[A-Z])\s*,\s*'([^']*)'")
+
+
+def _balanced_parens(s, open_idx):
+    """The text inside the balanced parentheses whose opening ``(`` is at
+    ``s[open_idx]`` (the opener excluded). Falls back to the rest of the string if
+    the parentheses never close."""
+    depth = 0
+    for i in range(open_idx, len(s)):
+        if s[i] == "(":
+            depth += 1
+        elif s[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return s[open_idx + 1:i]
+    return s[open_idx + 1:]
 
 # DTL COLOR / HILITE attribute values → the screen model's enums. These are real
 # DTL attributes (COLOR=WHITE|RED|BLUE|GREEN|PINK|YELLOW|TURQ|%var, HILITE=USCORE|
@@ -781,6 +797,16 @@ class _DTLParser(HTMLParser):
             self._cur_cmd = None
             return
         if tag == "varclass":
+            # An <xlatl format=upper> marks the whole class case-insensitive, even
+            # when it is written after the <xlatl> that lists the translations — so
+            # apply the class's upper flag to every xlati check now that all its
+            # <xlatl>s are closed (order-independent matching).
+            vc = self._varclasses.get(self._cur_varclass)
+            if vc and vc.get("upper"):
+                for c in vc["checks"]:
+                    if c.get("type") == "xlati" and not c["upper"]:
+                        c["upper"] = True
+                        c["values"] = [v.upper() for v in c["values"]]
             self._cur_varclass = None
             return
         if tag == "checkl":
@@ -1657,14 +1683,16 @@ class _DTLParser(HTMLParser):
         idiom is recognised; any other proc content is ignored."""
         if "ZSEL" not in content.upper():
             return
-        m = _ZSEL_TRANS_RE.search(content)
+        m = _ZSEL_TRANS_OPEN_RE.search(content)
         if not m:
             return
+        body = _balanced_parens(content, m.end() - 1)  # from the TRANS '('
         # Each `option,'selection-string'` pair. The option is a run of digits or a
         # single (word-boundaried) letter — which skips the TRANS source expression
         # (e.g. TRUNC(&ZCMD,'.')) and the `*,'?'` default without matching them.
-        for opt, target in _ZSEL_PAIR_RE.findall(m.group(1)):
-            self.screen.selection_targets[opt.upper()] = target.strip()
+        # ISPF's TRANS returns the first match, so the first declaration wins.
+        for opt, target in _ZSEL_PAIR_RE.findall(body):
+            self.screen.selection_targets.setdefault(opt.upper(), target.strip())
 
     def _emit_vardcl(self, a):
         # A <vardcl> belongs in a <varlist>, but tolerate a stray one (some guide

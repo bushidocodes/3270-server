@@ -1175,8 +1175,11 @@ def _show_submenu(client_socket, panel_name: str, initial=None, userid=None,
                 continue
         head = opt.split(".", 1)[0]
         tail = opt.split(".", 1)[1] if "." in opt else None
+        # Only route an option the user can actually see and pick: a HIDE/HIDEX or
+        # UNAVAIL choice is absent from `selections`, so its )PROC target must not
+        # be reachable by typing it either.
         target = screen.selection_targets.get(head)
-        if target is not None:
+        if target is not None and head in screen.selections:
             # A leaf runs its behaviour; EXIT (or a nested return) falls back to
             # this menu, and a declared-but-unhandled leaf reports via &SELMSG.
             leaving = _run_selection(client_socket, target, tail, userid, model)
@@ -2055,8 +2058,11 @@ def handle_client(client_socket, addr):
             # option's selection string (e.g. "1" -> "PGM(view)") names the
             # behaviour, and _run_selection runs the handler registered for it.
             # ISPF's TRUNC(&ZCMD,'.') routes on the head; the tail flows through.
+            # Only route a visible, selectable option: a HIDE/HIDEX or UNAVAIL
+            # choice is absent from `selections`, so its )PROC target must not be
+            # reachable by typing it either.
             target = screen.selection_targets.get(head)
-            if target is not None:
+            if target is not None and head in screen.selections:
                 leaving = _run_selection(client_socket, target, tail, userid, model)
                 if leaving:
                     break

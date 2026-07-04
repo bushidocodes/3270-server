@@ -46,6 +46,30 @@ def test_source_proc_zsel_parses_selection_targets():
     assert [it for it in s.items if isinstance(it, Text) and "ZSEL" in it.text] == []
 
 
+def _zsel_targets(proc):
+    s = load_dtl(f'<panel>M<area><info>x</info><source type=proc>{proc}</source>'
+                 '</area></panel>')
+    return dict(s.selection_targets)
+
+
+def test_zsel_ignores_content_after_the_trans_body():
+    # The TRANS(...) body is taken by balanced parens, so a second statement after
+    # it (e.g. another assignment) can't leak a spurious option in.
+    assert _zsel_targets(
+        "&ZSEL = TRANS(&ZCMD 1,'PGM(a)') &X = TRANS(&Y 2,'BOGUS')"
+    ) == {"1": "PGM(a)"}
+
+
+def test_zsel_first_declaration_of_an_option_wins():
+    # ISPF's TRANS returns the first match, so a duplicated option keeps the first.
+    assert _zsel_targets("&ZSEL = TRANS(&ZCMD 1,'PGM(a)' 1,'PGM(b)')") == {"1": "PGM(a)"}
+
+
+def test_zsel_selection_string_keeps_a_comma_inside_parm():
+    assert _zsel_targets("&ZSEL = TRANS(&ZCMD 2,'PGM(x) PARM(A,B)')") == {
+        "2": "PGM(x) PARM(A,B)"}
+
+
 def test_ispf_menu_routing_is_declared_in_the_panel():
     # PR 1 of #55: the ISPF primary menu's option->target routing now lives in
     # ispf.dtl's )PROC. This asserts the declared map equals the routing the server
@@ -437,6 +461,25 @@ def test_choice_hide_removes_it_when_variable_true():
     s2 = load_dtl(src, vh="0", vs="1")
     assert [it.text for it in s2.items if it.col == 4] == ["A", "B", "C"]
     assert set(s2.selections) == {"A", "B", "C"}
+
+
+def test_hidden_choice_stays_out_of_selections_even_when_proc_routes_it():
+    # A HIDE choice is dropped from `selections`; if the panel's )PROC still lists
+    # its option, that target remains in selection_targets — so the server must
+    # route only options that are in `selections` (it checks `head in selections`).
+    # This asserts the data precondition that lets the gate block a hidden option.
+    s = load_dtl(
+        '<panel><selfld row="4" numcol="1" namecol="4" desccol="21">'
+        '<choice num="1" name="Open">Open'
+        '<choice num="7" name="Secret" hide="secret">Secret op</choice>'
+        '</selfld>'
+        "<source type=proc>&ZSEL = TRANS(&ZCMD 1,'PANEL(a)' 7,'PGM(secret)')</source>"
+        '</panel>',
+        secret="1",                                    # choice 7 hidden
+    )
+    assert "7" not in s.selections                     # hidden -> not selectable
+    assert "7" in s.selection_targets                  # but its )PROC target lingers
+    assert "1" in s.selections and "1" in s.selection_targets
 
 
 def test_choice_bare_hide_always_removes_it():
@@ -2031,6 +2074,37 @@ def test_xlati_lit_external_preserves_literal_and_uses_own_message():
     assert s.first_validation_error({addr: "V I S T A"}) is None              # literal external
     assert s.first_validation_error({addr: "CASH"}) is None
     assert s.first_validation_error({addr: "OTHER"}) == ("XLMSG", {"VALUE": "OTHER"})  # xlatl MSG, not CLASSMSG
+
+
+def test_xlatl_format_upper_is_order_independent():
+    # <xlatl format=upper> makes the class case-insensitive even when it appears
+    # AFTER the <xlatl> that lists the translations (the flag is applied to every
+    # xlati check once the <varclass> closes).
+    s = load_dtl(
+        '<varclass name="CC">'
+        '<xlatl msg="BADM"><xlati value="1">List<xlati value="2">Edit</xlatl>'
+        '<xlatl format=upper></xlatl>'
+        '</varclass>'
+        '<varlist><vardcl name="cmd" varclass="CC"/></varlist>'
+        '<panel><dtafld row="2" col="2" fldcol="20" datavar="cmd" entwidth="6">C</dtafld></panel>'
+    )
+    addr = s.field_addr("cmd")
+    assert s.first_validation_error({addr: "list"}) is None          # case-insensitive
+    assert s.first_validation_error({addr: "EDIT"}) is None
+    assert s.first_validation_error({addr: "nope"}) == ("BADM", {"VALUE": "nope"})
+
+
+def test_render_drops_items_past_the_panel_depth():
+    # Flowed content that overruns the panel depth is dropped, not wrapped onto row
+    # 0: the render buffer is depth*width and 3270 addressing wraps, so a row >=
+    # depth would otherwise corrupt the top of the screen.
+    from screen import Screen, _display
+    s = Screen(width=30, depth=6)
+    s.add(Text(0, 0, "TOPLINE"))
+    s.add(Text(6, 0, "OFFPANEL"))            # row 6 is off a depth-6 panel (0-5)
+    out = s.render()
+    assert _display("TOPLINE") in out
+    assert _display("OFFPANEL") not in out   # dropped, not wrapped to row 0
 
 
 def test_checki_unsupported_type_is_still_lenient():
