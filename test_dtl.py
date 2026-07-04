@@ -433,23 +433,6 @@ def test_choice_explicit_match_overrides_num():
     assert s.selections == {"V": "View"}        # MATCH wins over num
 
 
-def test_choice_matchval_alias_is_honoured():
-    # The older non-IBM `matchval` still registers the selectable value (kept as
-    # an alias alongside IBM's MATCH), rather than falling back to the number.
-    s = load_dtl(
-        '<panel><selfld row="4" numcol="1" namecol="4" desccol="21">'
-        '<choice num="1" name="Civil" matchval="CIV">  desc</choice>'
-        '</selfld></panel>'
-    )
-    assert s.selections == {"CIV": "Civil"}
-    # MATCH still wins when both are present.
-    s2 = load_dtl(
-        '<panel><selfld row="4"><choice num="1" name="X" match="M" matchval="V">d'
-        '</choice></selfld></panel>'
-    )
-    assert s2.selections == {"M": "X"}
-
-
 def test_choice_checkvar_lands_cursor_on_the_current_choice():
     # <choice checkvar=var match=val>: when the variable equals a choice's MATCH,
     # that choice is current — the cursor is placed on it.

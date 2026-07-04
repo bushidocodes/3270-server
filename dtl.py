@@ -1609,10 +1609,9 @@ class _DTLParser(HTMLParser):
         rnum, rname, rdesc = ("unavail", "unavail", "unavail") if unavail \
             else ("num", "name", "desc")
         num_int = DisplayIntensity.NORMAL if unavail else sf["numintensity"]
-        # The value that selects this choice. IBM's attribute is MATCH; we also
-        # accept the older non-IBM ``matchval`` as an alias, and otherwise default
+        # The value that selects this choice: IBM's MATCH attribute, defaulting
         # to the displayed number.
-        match = a.get("match", a.get("matchval", a.get("num", ""))).strip().upper()
+        match = a.get("match", a.get("num", "")).strip().upper()
         mark = None
         if sf.get("multi") and not unavail:
             # Multiple-selection: a 1-char input field the user marks, in place of
