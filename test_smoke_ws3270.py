@@ -662,3 +662,24 @@ def test_ws3270_logon_error_sounds_the_alarm():
     ])
     assert "PASSWORD NOT CORRECT" in out, out[-1200:]
     assert "alarm" in trace, trace[-2000:]     # WCC sound-alarm bit on the error write
+
+
+def test_ws3270_field_level_help_on_the_size_field():
+    """Context-sensitive HELP: with the cursor in the logon Size field, PF1 shows
+    that field's own help (sizehelp), not the panel's general help (tsohelp) —
+    <dtafld help="sizehelp">. The server resolves the inbound cursor address to the
+    field."""
+    _require_emulator()
+    port = _serve_one_client()
+    out = _drive(port, [
+        "Wait(20,InputField)",
+        "MoveCursor(8,17)",     # into the Size field (row 8, data col 17)
+        "PF(1)",                # HELP
+        "Wait(10,Output)",
+        "Ascii()",              # the field-help panel
+        "PF(3)",                # return to logon
+        "Wait(5,Output)",
+        "Quit()",
+    ])
+    assert "Size Field HELP" in out, out[-1500:]     # sizehelp, not tsohelp
+    assert "region size" in out                       # its body text

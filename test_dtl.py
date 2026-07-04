@@ -703,9 +703,42 @@ def test_main_panels_reference_their_help_panels():
 
 
 def test_help_panels_load_and_return_on_pf3():
-    for name in ("tsohelp", "ispfhelp"):
+    for name in ("tsohelp", "ispfhelp", "sizehelp"):
         s = load_panel(name)
         assert s.command_for("PF3") == "EXIT"   # PF3 returns from help
+
+
+def test_field_help_is_recorded_and_resolved_by_cursor():
+    # <dtafld help=panel> records a field-level help panel; Screen.help_for maps a
+    # cursor within the field's span to it, and to None elsewhere.
+    s = load_dtl(
+        '<panel><area row="3" col="1">'
+        '<dtafld datavar="size" fldcol="16" entwidth="5" help="sizehelp">Size</dtafld>'
+        '<dtafld datavar="name" fldcol="16" entwidth="8">Name</dtafld>'
+        '</area></panel>'
+    )
+    size = s.field_addr("size")
+    assert s.help_for(size) == "sizehelp"          # cursor at the field start
+    assert s.help_for(size + 4) == "sizehelp"      # within the field span
+    assert s.help_for(size + 40) is None           # outside it
+    assert s.help_for(s.field_addr("name")) is None  # a field with no help
+    assert s.help_for(None) is None
+
+
+def test_field_help_non_panel_values_are_not_field_help():
+    # HELP=NO/YES, a *message id, or a %varname don't name a help panel.
+    for val in ("no", "yes", "*ISRZ001", "%dynhelp"):
+        s = load_dtl(f'<panel><area row="1" col="1">'
+                     f'<dtafld datavar="f" fldcol="10" entwidth="4" help="{val}">F</dtafld>'
+                     f'</area></panel>')
+        assert s.help_for(s.field_addr("f")) is None
+
+
+def test_logon_size_field_has_context_help_bytes_unchanged():
+    lg = load_panel("logon")
+    assert lg.help_for(lg.field_addr("size")) == "sizehelp"   # field help
+    assert lg.help_for(lg.field_addr("userid")) is None       # falls back to panel help
+    assert lg.render() == build_tso_logon().render()          # help= is metadata
 
 
 def test_help_attribute_does_not_change_rendered_bytes():

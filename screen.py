@@ -427,6 +427,9 @@ class Field:
     color: Optional[Color] = None
     highlight: Optional[Highlight] = None
     role: Optional[str] = _dc_field(default=None, compare=False)
+    # Field-level help panel (DTL <dtafld help=...>): shown when the cursor is on
+    # this field and HELP is pressed. Metadata — not rendered, not part of identity.
+    help: Optional[str] = _dc_field(default=None, compare=False)
 
     @property
     def data_addr(self) -> int:
@@ -599,6 +602,22 @@ class Screen:
         if not key:
             return None
         return self.keylist.get(key.upper())
+
+    def help_for(self, cursor_addr: Optional[int]) -> Optional[str]:
+        """The field-level help panel for the field the cursor is on, or ``None``.
+
+        ISPF's HELP key is context-sensitive: with the cursor in a field that has
+        its own ``<dtafld help=...>`` panel, HELP shows that instead of the panel's
+        general help. ``cursor_addr`` is the linear buffer address from the reply;
+        it's "on" a field when it falls within the field's data span.
+        """
+        if cursor_addr is None:
+            return None
+        for f in self.items:
+            if isinstance(f, Field) and f.help and \
+                    f.data_addr <= cursor_addr < f.data_addr + f.length:
+                return f.help
+        return None
 
     def text(self, row, col, s, intensity=DisplayIntensity.NORMAL) -> "Screen":
         return self.add(Text(row, col, s, intensity))
