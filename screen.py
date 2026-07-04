@@ -512,6 +512,11 @@ class Screen:
     # dialog resolve a cursor position to a menu choice (point-and-shoot: put
     # the cursor on a choice and press Enter). Metadata: not rendered.
     selection_rows: Dict[int, str] = _dc_field(default_factory=dict)
+    # Typed option → its selection string (e.g. "1" → "PGM(view)"), from the
+    # panel's )PROC `&ZSEL = TRANS(&ZCMD ...)`. Lets the server dispatch a menu
+    # option declaratively (as ISPF does) instead of hard-coding the routing.
+    # Metadata: not rendered. See docs/dtl-action-routing-plan.md (#55).
+    selection_targets: Dict[str, str] = _dc_field(default_factory=dict)
     # Multi-select mark fields (DTL <selfld type=multi>): each choice has its own
     # 1-char input field the user marks (any non-blank char selects it), so more
     # than one choice can be chosen. [{"value": match, "name": choice, "addr": n}].

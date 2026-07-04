@@ -196,6 +196,14 @@ _INTENSITY = {
 # variable class names a MSG — a stand-in for ISPF's own system message.
 _REQUIRED_DEFAULT_MSG = "Enter required field"
 
+# ISPF option routing in a )PROC: `&ZSEL = TRANS( TRUNC(&ZCMD,'.') 0,'PANEL(x)' …)`.
+# _ZSEL_TRANS_RE grabs the TRANS(...) body (greedy to the final ')'); _ZSEL_PAIR_RE
+# picks each `option,'selection-string'` pair. The option is a digit run or a single
+# word-boundaried letter, which skips the source expression (TRUNC(&ZCMD,'.')) and
+# the `*,'?'` default without matching them.
+_ZSEL_TRANS_RE = re.compile(r"ZSEL\s*=\s*TRANS\s*\((.*)\)", re.IGNORECASE | re.DOTALL)
+_ZSEL_PAIR_RE = re.compile(r"\b(\d+|[A-Z])\s*,\s*'([^']*)'")
+
 # DTL COLOR / HILITE attribute values → the screen model's enums. These are real
 # DTL attributes (COLOR=WHITE|RED|BLUE|GREEN|PINK|YELLOW|TURQ|%var, HILITE=USCORE|
 # BLINK|REVERSE) carried by the CUA element tags that accept them (<dtafld>,
@@ -562,6 +570,10 @@ class _DTLParser(HTMLParser):
             if self._xlatl is None:
                 raise DTLError("<xlati> outside of an <xlatl>")
             self._tag, self._attrs, self._chars = "xlati", a, []
+        elif tag == "source":
+            # A )PROC/)INIT source block. Its text is captured but renders nothing;
+            # a <source type=proc> is scanned for the ZSEL selection routing.
+            self._tag, self._attrs, self._chars = "source", a, []
         elif tag == "varlist":
             self._in_varlist = True
         elif tag == "vardcl":
@@ -894,6 +906,8 @@ class _DTLParser(HTMLParser):
             self._emit_checki(a, content)
         elif tag == "xlati":
             self._emit_xlati(a, content)
+        elif tag == "source":
+            self._emit_source(a, content)
         if horiz:
             self._flow_horiz(box, start_idx)
         self._tag, self._attrs, self._chars = None, None, []
@@ -918,6 +932,8 @@ class _DTLParser(HTMLParser):
         elif tag == "checki":  # a self-closing checki carries params in attrs
             self.handle_endtag(tag)
         elif tag == "xlati":  # a self-closing xlati (no external text)
+            self.handle_endtag(tag)
+        elif tag == "source":  # a self-closing/empty source declares nothing
             self.handle_endtag(tag)
         elif tag == "varclass":  # a self-closing varclass has no checks; close it
             self.handle_endtag(tag)
@@ -1629,6 +1645,23 @@ class _DTLParser(HTMLParser):
                 "upper": upper,
                 "msg": xl["msg"] or vc.get("msg"),
             })
+
+    def _emit_source(self, a, content):
+        """A )PROC/)INIT source block. It renders nothing. When it assigns the
+        selection variable ``&ZSEL = TRANS(&ZCMD n,'target' ...)`` — ISPF's option
+        routing — record each option's selection string in ``selection_targets`` so
+        the server can dispatch a menu choice declaratively (see #55). Only this one
+        idiom is recognised; any other proc content is ignored."""
+        if "ZSEL" not in content.upper():
+            return
+        m = _ZSEL_TRANS_RE.search(content)
+        if not m:
+            return
+        # Each `option,'selection-string'` pair. The option is a run of digits or a
+        # single (word-boundaried) letter — which skips the TRANS source expression
+        # (e.g. TRUNC(&ZCMD,'.')) and the `*,'?'` default without matching them.
+        for opt, target in _ZSEL_PAIR_RE.findall(m.group(1)):
+            self.screen.selection_targets[opt.upper()] = target.strip()
 
     def _emit_vardcl(self, a):
         # A <vardcl> belongs in a <varlist>, but tolerate a stray one (some guide
