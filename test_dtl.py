@@ -249,6 +249,34 @@ def test_hp_highlight_via_type_attribute():
     ]
 
 
+def test_hp_flow_wrapped_keeps_highlight_across_lines():
+    # #208: an <hp> inside flowed (word-wrapped) <p> text keeps its highlight on
+    # every line the phrase spans — previously the flow path dropped the runs and
+    # rendered plain text. Spaces *inside* the phrase stay highlighted too.
+    s = load_dtl('<panel name="p" width="20">'
+                 '<p>Please read the <hp hilite="reverse">important safety notice</hp>'
+                 ' before use.</panel>')
+    N = DisplayIntensity.NORMAL
+    R = Highlight.REVERSE
+    # r0: plain; r1: whole phrase span REVERSE (incl. interior space); r2: tail.
+    assert s.items[0] == Text(0, 1, "Please read the", N)
+    assert s.items[1].runs == [("important safety", None, R)]
+    assert s.items[2].runs == [("notice", None, R), (" before use.", None, None)]
+
+
+def test_hp_flow_wrapped_mono_is_byte_identical_to_plain_wrap():
+    # Mono renders each wrapped line as its plain text, so adding <hp> to flowed
+    # body text does not change the mono data stream.
+    src_hp = ('<panel name="p" width="20">'
+              '<p>Please read the <hp hilite="reverse">important safety notice</hp>'
+              ' before use.</panel>')
+    src_plain = ('<panel name="p" width="20">'
+                 '<p>Please read the important safety notice before use.</panel>')
+    hp = load_dtl(src_hp).render(color=False)
+    plain = load_dtl(src_plain).render(color=False)
+    assert hp == plain
+
+
 def test_hp_surrounding_text_keeps_the_element_role():
     # The field's role colour still applies to the non-<hp> text: an <info> line is
     # role "text" (green), so only the phrase overrides to its own colour.
