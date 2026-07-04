@@ -178,6 +178,24 @@ def test_typed_option_opens_command_shell(session):
     assert "ISPF Command Shell" in _text(_recv_screen(sock))
 
 
+def test_typed_option_opens_view_entry(session):
+    # Option 1 routes via ispf.dtl's )PROC ("1" -> PGM(view)) to the View entry
+    # panel — exercises the PGM(view) -> _show_view handler in the #55 registry.
+    sock, _ = session
+    _login(sock)
+    sock.sendall(_reply(fields={ZCMD_ADDR: "1"}))
+    assert "View - Entry Panel" in _text(_recv_screen(sock))
+
+
+def test_typed_option_opens_a_plain_submenu(session):
+    # Option 4 ("4" -> PANEL(foreground)) exercises the PANEL(x) -> _show_submenu
+    # path (the plain nested sub-menus 4/5/9/10/12/13).
+    sock, _ = session
+    _login(sock)
+    sock.sendall(_reply(fields={ZCMD_ADDR: "4"}))
+    assert "Foreground Selection Panel" in _text(_recv_screen(sock))
+
+
 def test_point_and_shoot_opens_utilities(session):
     sock, _ = session
     _login(sock)
