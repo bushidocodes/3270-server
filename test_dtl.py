@@ -105,6 +105,31 @@ def test_instruction_tags_flow_in_area():
     assert s.items[1] == Text(4, 1, "line two", DisplayIntensity.NORMAL)
 
 
+def test_botinst_anchors_at_the_panel_foot():
+    # A <botinst> is a *bottom* instruction: it renders near the foot of the panel
+    # (leaving the last row free), not inline after the body like <topinst>.
+    s = load_dtl(
+        '<panel><area>'
+        '<topinst>near the top</topinst>'
+        '<botinst>To exit, press F3.</botinst>'
+        '</area></panel>'
+    )
+    top = next(it for it in s.items if isinstance(it, Text) and "top" in it.text)
+    bot = next(it for it in s.items if isinstance(it, Text) and "F3" in it.text)
+    assert bot.row == s.depth - 2          # one line, anchored above the last row
+    assert bot.row > top.row + 1           # pushed to the foot, not stacked below top
+
+
+def test_botinst_drops_below_a_body_that_reaches_the_foot():
+    # If the body already flows past the anchor row, the bottom instruction sits
+    # below it rather than overlapping.
+    body = "".join(f"<info>body line {r}</info>" for r in range(23))
+    s = load_dtl(f"<panel><area>{body}<botinst>foot</botinst></area></panel>")
+    bot = next(it for it in s.items if isinstance(it, Text) and it.text == "foot")
+    last_body = max(it.row for it in s.items if isinstance(it, Text) and it.text != "foot")
+    assert bot.row >= last_body            # below the body, no overlap
+
+
 def test_logon_instruction_tags_byte_identical():
     # The logon panel uses <topinst>/<pnlinst> for some lines; bytes unchanged.
     assert load_panel("logon").render() == build_tso_logon().render()
