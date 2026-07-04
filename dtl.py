@@ -463,6 +463,17 @@ class _DTLParser(HTMLParser):
                 "multi": str(a.get("type", "single")).strip().lower() == "multi",
                 "name": (a.get("name") or "").strip(),
                 "count": 0,
+                # The field-prompt text (between <selfld ...> and the first
+                # <choice>) — a caption above the list (PMTLOC=ABOVE, default) or
+                # beside it (PMTLOC=BEFORE). Captured here, emitted before the first
+                # choice. Empty (the bundled numbered menus) → nothing rendered.
+                "origin": origin,
+                "pmtloc": str(a.get("pmtloc", "above")).strip().lower(),
+                "pmtwidth": int(a["pmtwidth"]) if "pmtwidth" in a else None,
+                "selwidth": int(a["selwidth"]) if "selwidth" in a
+                            and str(a["selwidth"]).strip().isdigit() else None,
+                "prompt_chars": [],
+                "prompt_done": False,
             }
         elif tag == "dtafldd":
             # The authentic data-field description (prompt) child of a field.
@@ -658,6 +669,9 @@ class _DTLParser(HTMLParser):
             self._da["body"].append(data)
         elif self._tag is not None:
             self._chars.append(data)
+        elif (self._selfld is not None and not self._selfld["prompt_done"]):
+            # Text between <selfld ...> and its first <choice> is the field prompt.
+            self._selfld["prompt_chars"].append(data)
 
     def handle_endtag(self, tag):
         if self._panel_title is not None:
@@ -687,6 +701,8 @@ class _DTLParser(HTMLParser):
         if tag == "selfld":
             # Advance the enclosing flow past the choices just laid out.
             sf = self._selfld
+            if sf:
+                self._emit_selfld_prompt(sf)   # a prompt-only selfld still shows it
             if sf and sf.get("ctx") is not None:
                 ctx = sf["ctx"]
                 if ctx.get("dir") == "horiz":
@@ -1514,10 +1530,44 @@ class _DTLParser(HTMLParser):
         field = self._add_field(a, content, "cmdarea", a.get("datavar", "ZCMD"))
         self.screen.command_field = field
 
+    def _emit_selfld_prompt(self, sf):
+        """Emit the selection field's caption (the text before its first
+        ``<choice>``), once, before the choices are laid out. PMTLOC=ABOVE (the
+        default) puts it on the line(s) above the list; PMTLOC=BEFORE puts it to
+        the list's left, shifting the choice columns right past it. An empty prompt
+        (the bundled numbered menus) renders nothing, so they stay byte-identical."""
+        if sf["prompt_done"]:
+            return
+        sf["prompt_done"] = True
+        text = re.sub(r"\s+", " ", "".join(sf["prompt_chars"])).strip()
+        if not text:
+            return
+        col = sf["origin"]
+        if sf["pmtloc"] == "before":
+            # Caption to the left, wrapped into its PMTWIDTH column; the choices
+            # start past it on the same first row.
+            width = sf["pmtwidth"] or (len(text) + 1)
+            for i, line in enumerate(self._wrap(text, max(1, width))):
+                self.screen.add(Text(sf["row"] + i, col, line, role="prompt"))
+            shift = col + width - sf["numcol"]
+            if shift > 0:
+                sf["numcol"] += shift
+                sf["namecol"] += shift
+                sf["desccol"] += shift
+        else:
+            # Caption above the list, wrapped to the selection width; the choices
+            # then flow below it.
+            width = sf["selwidth"] or sf["pmtwidth"] or (self.screen.width - col - 1)
+            lines = self._wrap(text, max(1, width))
+            for i, line in enumerate(lines):
+                self.screen.add(Text(sf["row"] + i, col, line, role="prompt"))
+            sf["row"] += len(lines)
+
     def _emit_choice(self, a, content):
         sf = self._selfld
         if sf is None:
             raise DTLError("<choice> outside of a <selfld>")
+        self._emit_selfld_prompt(sf)
         row = sf["row"]
         # UNAVAIL: the choice is shown but can't be selected. 3270 has intensity
         # (normal / intensified-high / non-display) but no *sub-normal* dim level,

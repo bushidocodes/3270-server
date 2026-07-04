@@ -313,6 +313,52 @@ def test_selfld_type_single_is_unchanged():
     assert s.selection_rows == {4: "1"}
 
 
+def test_selfld_prompt_renders_above_list_by_default():
+    # The text between <selfld ...> and the first <choice> is the field prompt.
+    # PMTLOC defaults to ABOVE: the caption sits on the line above the choices,
+    # which then flow below it.
+    N, H = DisplayIntensity.NORMAL, DisplayIntensity.HIGH
+    s = load_dtl(
+        '<panel><selfld name="day" selwidth="20">Weekdays:'
+        '<choice num="1" name="Mon">day1</choice>'
+        '<choice num="2" name="Tue">day2</choice>'
+        '</selfld></panel>'
+    )
+    assert s.items[0] == Text(0, 1, "Weekdays:", N)   # caption on the first row
+    assert s.items[1] == Text(1, 1, "1 ", H)          # choices pushed down one row
+    assert s.items[4] == Text(2, 1, "2 ", H)
+
+
+def test_selfld_prompt_before_wraps_and_shifts_choices():
+    # PMTLOC=BEFORE puts the caption to the list's left, wrapped into its PMTWIDTH
+    # column; the choice columns shift right past it and the first choice shares
+    # the caption's top row.
+    N, H = DisplayIntensity.NORMAL, DisplayIntensity.HIGH
+    s = load_dtl(
+        '<panel><selfld name="cs" pmtwidth="11" pmtloc="before" '
+        'numcol="1" namecol="4" desccol="21">Choose one of the following'
+        '<choice num="1" name="Civ">Civil</choice></selfld></panel>'
+    )
+    # caption wrapped to <= 11 columns, each on its own row from the top
+    assert s.items[0] == Text(0, 1, "Choose one", N)
+    assert s.items[1] == Text(1, 1, "of the", N)
+    assert s.items[2] == Text(2, 1, "following", N)
+    # first choice on the top row, its columns shifted right of the 11-col prompt
+    assert s.items[3] == Text(0, 12, "1 ", H)         # numcol 1 -> 1 + 11
+    assert s.items[4] == Text(0, 15, "Civ", N)        # namecol 4 -> 4 + 11
+
+
+def test_selfld_empty_prompt_renders_nothing():
+    # The bundled numbered menus have only whitespace between <selfld> and the
+    # first <choice> — that must render nothing so they stay byte-identical.
+    s = load_dtl(
+        '<panel><selfld row="4" numcol="1" namecol="4" desccol="21">\n  '
+        '<choice num="1" name="A">desc</choice></selfld></panel>'
+    )
+    assert s.items[0] == Text(4, 1, "1 ", DisplayIntensity.HIGH)   # no prompt item
+    assert s.items[1] == Text(4, 4, "A", DisplayIntensity.NORMAL)
+
+
 def test_choice_records_selection_rows_for_point_and_shoot():
     # Each choice also records the row it renders on, so the cursor can select
     # it (point-and-shoot). selection_at(cursor) resolves a cursor address.
