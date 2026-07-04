@@ -51,4 +51,27 @@
     <cmd name="KEYLIST" trunc="3">Edit keylist<cmdact action="passthru"></cmd>
     <cmd name="BYE">Leave ISPF<cmdact action="alias exit"></cmd>
   </cmdtbl>
+
+  <!-- )PROC: route the typed option (ZCMD) to a selection string, ISPF-style.
+       PANEL(x) enters panel x; PGM(x) runs a program; EXIT leaves ISPF. The
+       server reads Screen.selection_targets to dispatch (see #55). Renders
+       nothing. -->
+  <source type="proc">
+    &ZSEL = TRANS( TRUNC(&ZCMD,'.')
+        0,'PANEL(settings)'
+        1,'PGM(view)'
+        2,'PGM(edit)'
+        3,'PANEL(utility)'
+        4,'PANEL(foreground)'
+        5,'PANEL(batch)'
+        6,'PGM(cmdshell)'
+        7,'PGM(dlgtest)'
+        9,'PANEL(ibmprod)'
+        10,'PANEL(sclm)'
+        11,'PANEL(workplace)'
+        12,'PANEL(zsystem)'
+        13,'PANEL(zuser)'
+        X,'EXIT'
+        *,'?' )
+  </source>
 </panel>

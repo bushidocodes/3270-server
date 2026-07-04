@@ -25,6 +25,41 @@ def test_ispf_dtl_matches_builder():
     assert got == build_ispf_menu(userid, time_str).render()
 
 
+def test_source_proc_zsel_parses_selection_targets():
+    # A )PROC `&ZSEL = TRANS(&ZCMD n,'target' ...)` records each option's selection
+    # string; the source expression, the blank pair and the `*` default are skipped,
+    # and the block renders nothing.
+    s = load_dtl(
+        "<panel>Menu<area><info>body</info>"
+        "<source type=proc>"
+        "  &ZSEL = TRANS( TRUNC(&ZCMD,'.')"
+        "      0,'PANEL(settings)'"
+        "      6,'PGM(cmdshell)'"
+        "      X,'EXIT'"
+        "      ' ',' '"
+        "      *,'?' )"
+        "</source></area></panel>"
+    )
+    assert s.selection_targets == {
+        "0": "PANEL(settings)", "6": "PGM(cmdshell)", "X": "EXIT",
+    }
+    assert [it for it in s.items if isinstance(it, Text) and "ZSEL" in it.text] == []
+
+
+def test_ispf_menu_routing_is_declared_in_the_panel():
+    # PR 1 of #55: the ISPF primary menu's option->target routing now lives in
+    # ispf.dtl's )PROC. This asserts the declared map equals the routing the server
+    # currently hard-codes, so the later dispatch switch is provably equivalent.
+    s = load_panel("ispf")
+    assert s.selection_targets == {
+        "0": "PANEL(settings)",   "1": "PGM(view)",       "2": "PGM(edit)",
+        "3": "PANEL(utility)",    "4": "PANEL(foreground)", "5": "PANEL(batch)",
+        "6": "PGM(cmdshell)",     "7": "PGM(dlgtest)",    "9": "PANEL(ibmprod)",
+        "10": "PANEL(sclm)",      "11": "PANEL(workplace)", "12": "PANEL(zsystem)",
+        "13": "PANEL(zuser)",     "X": "EXIT",
+    }
+
+
 def test_ispf_dtl_other_userid_and_time():
     userid, time_str = "TESTUSER", "09:02"
     got = load_panel("ispf", ZUSER=userid.ljust(8), ZTIME=time_str).render()
