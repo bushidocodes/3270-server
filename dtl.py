@@ -724,6 +724,17 @@ class _DTLParser(HTMLParser):
             return
         self._emit_current()
 
+    def close(self):
+        """Flush at end-of-input. DTL routinely omits end tags, so a panel can
+        reach EOF with its title still being captured (a title-only panel, e.g.
+        ``<panel>Widgets`` with no body or ``</panel>``) or with an open content
+        element — finalise them exactly as the matching end tag would have."""
+        super().close()
+        if self._panel_title is not None:
+            self._finalize_panel_title()
+        if self._tag is not None:
+            self._emit_current()
+
     def _emit_current(self):
         """Emit the open content element (``self._tag``) and reset capture state.
 
