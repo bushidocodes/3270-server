@@ -9,7 +9,7 @@
        input with message TSO001 before processing the logon. -->
   <varclass name="NUMFLD" type="numeric"/>
   <varclass name="SIZEFLD" type="numeric">
-    <checkl checkmsg="TSO001">
+    <checkl msg="TSO001">
       <checki type="range">0 32768</checki>
     </checkl>
   </varclass>

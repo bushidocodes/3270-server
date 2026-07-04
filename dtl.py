@@ -80,10 +80,12 @@ renders centered on row 0, with the body flowing beneath it.
 ``<abc>label</abc>``             laid out across ``row``. Each ``<abc>`` holds
 ``<pdc action>label</pdc>``      ``<pdc>`` pull-down choices (kept in
                                  ``Screen.action_bar`` for future interaction).
-``<varclass name type>``         a variable class: ``type="numeric"`` makes its
-                                 variables numeric-only. May contain a ``<checkl>``.
-``<checkl checkmsg>``            a validity-check list; ``checkmsg`` names the
-                                 message shown when a check fails.
+``<varclass name type msg>``     a variable class: ``type="char N"`` caps input
+                                 length, ``type="numeric N"`` makes fields numeric
+                                 (capping digits). May contain a ``<checkl>``.
+``<checkl msg>``                 a validity-check list; ``msg`` names the message
+                                 shown when a check fails (falls back to the
+                                 ``<varclass>``'s ``msg``).
 ``<checki type>min max``         a check item: ``type="range"`` (``min max`` text),
 ``<checki type>v1 v2 ...``       ``type="values"`` (allowed values, as text or via
 ``<checki type parm1 parm2>``    ``parm1=EQ|NE parm2='v1 v2'``), ``type="alpha"``
@@ -276,10 +278,10 @@ class _DTLParser(HTMLParser):
         self._in_dtafldd = False  # capturing a <dtafldd> prompt child?
         self._dtafldd = None      # captured <dtafldd> prompt text, or None
         self._keylist = None      # active <keyl> bindings dict, or None
-        self._varclasses = {}     # <varclass> name (upper) → {"numeric", "checks", "checkmsg"}
+        self._varclasses = {}     # <varclass> name (upper) → {"numeric", "checks", "msg"}
         self._vardcls = {}        # <vardcl> name (upper) → {"varclass": name}
         self._cur_varclass = None # name of the <varclass> currently being defined
-        self._checkl = None       # active <checkl> {"checkmsg", "checks"} or None
+        self._checkl = None       # active <checkl> {"msg", "checks"} or None
         self._in_varlist = False  # inside a <varlist>?
         self._in_msgmbr = False   # inside a <msgmbr>?
         self._msgmbr_name = ""    # current <msgmbr name=...> (for <msg suffix>)
@@ -458,7 +460,7 @@ class _DTLParser(HTMLParser):
         elif tag == "checkl":
             if self._cur_varclass is None:
                 raise DTLError("<checkl> outside of a <varclass>")
-            self._checkl = {"checkmsg": a.get("checkmsg"), "checks": []}
+            self._checkl = {"msg": a.get("msg"), "checks": []}
         elif tag == "checki":
             if self._checkl is None:
                 raise DTLError("<checki> outside of a <checkl>")
@@ -655,7 +657,9 @@ class _DTLParser(HTMLParser):
             if self._checkl is not None and self._cur_varclass in self._varclasses:
                 vc = self._varclasses[self._cur_varclass]
                 vc["checks"].extend(self._checkl["checks"])
-                vc["checkmsg"] = self._checkl["checkmsg"]
+                # The <checkl>'s own MSG names the failure message; fall back to the
+                # class-level <varclass msg=> (which also covers TYPE-derived checks).
+                vc["msg"] = self._checkl["msg"] or vc.get("msg")
             self._checkl = None
             return
         if tag == "lstgrp":
@@ -1230,7 +1234,7 @@ class _DTLParser(HTMLParser):
         vc = self._varclasses.get(str(decl.get("varclass", "")).upper())
         if vc and vc.get("checks"):
             self.screen.validations[name.upper()] = {
-                "checkmsg": vc.get("checkmsg"),
+                "checkmsg": vc.get("msg"),
                 "checks": vc["checks"],
             }
 
@@ -1254,14 +1258,25 @@ class _DTLParser(HTMLParser):
         name = a.get("name")
         if not name:
             raise DTLError("<varclass> missing required attribute 'name'")
-        # Authentic DTL types include CHAR/HEX/BIN/NUMERIC/…; the subset only
-        # needs to know whether the class makes its fields numeric-only.
-        vtype = str(a.get("type", "char")).strip().lower()
+        # DTL TYPE is a kind plus (for CHAR/NUMERIC) a size, e.g. "char 8" or
+        # "numeric 5". We derive numeric-vs-not and enforce the size: CHAR caps the
+        # input length, NUMERIC caps the number of digits. Other kinds (DBCS, date
+        # /time, VMASK, …) are recognised but not enforced (#129).
+        parts = str(a.get("type", "char")).strip().lower().split()
+        kind = parts[0] if parts else "char"
+        size = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
+        numeric = kind in ("numeric", "num")
+        checks = []
+        if size is not None:
+            if numeric:
+                checks.append({"type": "maxdigits", "max": size})
+            elif kind == "char":
+                checks.append({"type": "maxlen", "max": size})
         self._cur_varclass = name.upper()
         self._varclasses[self._cur_varclass] = {
-            "numeric": vtype in ("numeric", "num"),
-            "checks": [],
-            "checkmsg": None,
+            "numeric": numeric,
+            "checks": checks,
+            "msg": a.get("msg"),          # class-level MSG (IBM's attribute name)
         }
 
     def _emit_checki(self, a, content):
