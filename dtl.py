@@ -29,12 +29,14 @@ Supported tags
                                  give the presentation-space size (default 80x24)
                                  and bound element positions at load time.
 ``<area row col fldgap>``        a flow box: contained elements that omit ``row``
-``<region row col fldgap>``      flow down from this origin (one line each), and
+``<region row col fldgap dir>``  flow down from this origin (one line each), and
                                  those that omit ``col`` use it. A field that omits
                                  ``fldcol`` gets its entry after the prompt
-                                 (``col + len(prompt) + fldgap``). Explicit
-                                 positions always win, so non-flowed panels are
-                                 unaffected.
+                                 (``col + len(prompt) + fldgap``). ``dir=horiz`` lays
+                                 the box's children side by side instead of stacking
+                                 them, and the enclosing flow resumes below the
+                                 tallest column. Explicit positions always win, so
+                                 non-flowed panels are unaffected.
 ``<info row col intensity>``     protected text (label / instruction / rule).
                                  ``fill`` + ``width`` repeats a character (rules).
 ``<topinst row col>``            top / panel / bottom instruction text. Render like
@@ -446,6 +448,7 @@ class _DTLParser(HTMLParser):
                 # override with its own COLOR.
                 "color": self._color(a),
                 "ctx": ctx,
+                "start_idx": len(self.screen.items),
             }
         elif tag == "dtafldd":
             # The authentic data-field description (prompt) child of a field.
@@ -555,11 +558,14 @@ class _DTLParser(HTMLParser):
             # prompt/entry widths (PMTWIDTH/ENTWIDTH) that its <dtafld>s inherit
             # so their captions and entries line up in a column.
             parent = self._areas[-1] if self._areas else None
+            row = int(a["row"]) if "row" in a else (parent["row"] if parent else 0)
             self._areas.append({
-                "row": int(a["row"]) if "row" in a else (parent["row"] if parent else 0),
+                "row": row, "row0": row, "maxbottom": row,
                 "col": int(a["col"]) if "col" in a else (parent["col"] if parent else 1),
                 "fldgap": int(a["fldgap"]) if "fldgap" in a
                           else (parent["fldgap"] if parent else 1),
+                "dir": str(a.get("dir", "vert")).strip().lower(),
+                "start_idx": len(self.screen.items),
                 "explicit": "row" in a,
                 "parent": parent,
                 "pmtwidth": int(a["pmtwidth"]) if "pmtwidth" in a
@@ -568,9 +574,14 @@ class _DTLParser(HTMLParser):
                             else (parent.get("entwidth") if parent else None),
             })
         elif tag == "divider":
-            # A horizontal rule spanning the rest of the flow box's width.
             ctx = self._areas[-1] if self._areas else None
-            if ctx is not None or "row" in a:
+            if ctx is not None and ctx.get("dir") == "horiz" and "row" not in a:
+                # Inside a horizontal flow box a divider is a vertical gutter
+                # between the columns either side of it: advance the column cursor
+                # (by GUTTER, else the default gap) and draw no rule.
+                ctx["col"] += int(a["gutter"]) if "gutter" in a else self._HGAP
+            elif ctx is not None or "row" in a:
+                # A horizontal rule spanning the rest of the flow box's width.
                 row = int(a["row"]) if "row" in a else ctx["row"]
                 col = int(a["col"]) if "col" in a else (ctx["col"] if ctx else 1)
                 if ctx is not None:
@@ -581,16 +592,21 @@ class _DTLParser(HTMLParser):
             # A flow box. With explicit row/col it is a positioned sub-box; with
             # neither it transparently continues the enclosing flow (so its
             # content flows after the parent's, and the parent resumes after it).
+            # DIR=HORIZ lays the box's children left-to-right instead of stacking
+            # them top-to-bottom (side-by-side region columns).
             parent = self._areas[-1] if self._areas else None
             explicit = "row" in a
             # INDENT shifts the box's content that many columns to the right of its
             # origin (a <region indent=n>), nesting cumulatively.
             base_col = int(a["col"]) if "col" in a else (parent["col"] if parent else 1)
+            row = int(a["row"]) if "row" in a else (parent["row"] if parent else 0)
             self._areas.append({
-                "row": int(a["row"]) if "row" in a else (parent["row"] if parent else 0),
+                "row": row, "row0": row, "maxbottom": row,
                 "col": base_col + (int(a["indent"]) if "indent" in a else 0),
                 "fldgap": int(a["fldgap"]) if "fldgap" in a
                           else (parent["fldgap"] if parent else 1),
+                "dir": str(a.get("dir", "vert")).strip().lower(),
+                "start_idx": len(self.screen.items),
                 "explicit": explicit,
                 "parent": parent,
             })
@@ -656,8 +672,13 @@ class _DTLParser(HTMLParser):
             return
         if tag == "selfld":
             # Advance the enclosing flow past the choices just laid out.
-            if self._selfld and self._selfld.get("ctx") is not None:
-                self._selfld["ctx"]["row"] = self._selfld["row"]
+            sf = self._selfld
+            if sf and sf.get("ctx") is not None:
+                ctx = sf["ctx"]
+                if ctx.get("dir") == "horiz":
+                    self._flow_horiz(ctx, sf.get("start_idx", len(self.screen.items)))
+                else:
+                    ctx["row"] = sf["row"]
             self._selfld = None
             return
         if tag == "dtafldd":
@@ -718,7 +739,21 @@ class _DTLParser(HTMLParser):
                 ctx = self._areas.pop()
                 parent = ctx.get("parent")
                 if parent is not None and not ctx.get("explicit"):
-                    parent["row"] = ctx["row"]  # resume flow after a transparent box
+                    # A horizontal child spans down to its tallest column; a
+                    # vertical one down to its row cursor.
+                    child_bottom = (ctx.get("maxbottom", ctx["row"])
+                                    if ctx.get("dir") == "horiz" else ctx["row"])
+                    if parent.get("dir") == "horiz":
+                        # Side-by-side: advance the parent's column past this child
+                        # box and keep the parent on its origin row.
+                        _, right = self._box_extent(ctx["start_idx"])
+                        if right is not None:
+                            parent["col"] = right + self._HGAP
+                        parent["maxbottom"] = max(parent.get("maxbottom", parent["row0"]),
+                                                  child_bottom)
+                        parent["row"] = parent["row0"]
+                    else:
+                        parent["row"] = child_bottom  # resume flow below the box
             return
         if tag != self._tag:
             return
@@ -744,6 +779,13 @@ class _DTLParser(HTMLParser):
         tag = self._tag
         if tag is None:
             return
+        # If the active flow box lays out horizontally, note where its next child's
+        # items begin so we can advance its column cursor past them afterwards.
+        # Choices are excluded — they belong to a <selfld>, flowed at its close.
+        box = self._areas[-1] if self._areas else None
+        horiz = (box is not None and box.get("dir") == "horiz"
+                 and self._selfld is None and "row" not in (self._attrs or {}))
+        start_idx = len(self.screen.items)
         # Inline <hp> runs (only text tags can carry them, see _begin_hp).
         runs = self._finalize_runs()
         # A <dtafldd> child, if present, supplies the prompt; otherwise the
@@ -775,6 +817,8 @@ class _DTLParser(HTMLParser):
             self._msg_attrs[mid] = self._message_attrs(a)
         elif tag == "checki":
             self._emit_checki(a, content)
+        if horiz:
+            self._flow_horiz(box, start_idx)
         self._tag, self._attrs, self._chars = None, None, []
         self._runs, self._hp = None, None
         self._dtafldd, self._in_dtafldd = None, False
@@ -856,6 +900,37 @@ class _DTLParser(HTMLParser):
     _BULLETS = ("o", "-", "--", "---")
     _LIST_INDENT = 4   # columns added per nesting level
     _DL_TSIZE = 10     # default <dl>/<parml> term-column width (chars)
+    _HGAP = 2          # default column gap between side-by-side (dir=horiz) items
+
+    def _box_extent(self, start_idx):
+        """The ``(bottom, right)`` extent of the screen items added since
+        ``start_idx`` — ``bottom`` is one past the deepest row, ``right`` one past
+        the rightmost column. Returns ``(None, None)`` if nothing was added. Used
+        to flow horizontal boxes and resume a parent below a child box."""
+        bottom = right = None
+        for it in self.screen.items[start_idx:]:
+            text = getattr(it, "text", None)
+            if text is not None:               # a Text (possibly multi-line)
+                lines = text.split("\n")
+                height, wide = len(lines), max((len(ln) for ln in lines), default=0)
+            else:                              # a Field
+                height, wide = 1, getattr(it, "length", 0)
+            b, r = it.row + height, it.col + wide
+            bottom = b if bottom is None else max(bottom, b)
+            right = r if right is None else max(right, r)
+        return bottom, right
+
+    def _flow_horiz(self, box, start_idx):
+        """After a child was laid into a horizontal flow box, advance the box's
+        column cursor past it (so the next sibling sits to its right) and reset the
+        row cursor to the box's origin. The tallest child is remembered so the
+        enclosing flow resumes below the whole row of columns."""
+        bottom, right = self._box_extent(start_idx)
+        if right is not None:
+            box["col"] = right + self._HGAP
+        if bottom is not None:
+            box["maxbottom"] = max(box.get("maxbottom", box["row0"]), bottom)
+        box["row"] = box["row0"]
 
     def _finalize_panel_title(self):
         """Emit the panel's title text (centered on row 0) and start the flow
@@ -1263,11 +1338,23 @@ class _DTLParser(HTMLParser):
         # size via the column or the variable still render.
         default_ew = (ctx.get("entwidth") if ctx else None) or 8
         length = int(a.get("entwidth", a.get("dispmaxlen", default_ew)))
+        auto = ctx is not None and "row" not in a and "fldcol" not in a
         if fldcol + length > self.screen.width:
-            raise DTLError(
-                f"<{tag}> field at col {fldcol} width {length} overflows "
-                f"panel width {self.screen.width}"
-            )
+            if auto:
+                # An auto-flowed field whose entry runs off the panel: our column
+                # math only approximates ISPDTLC's (side-by-side dir=horiz columns
+                # especially), so clamp it to the panel edge rather than abort the
+                # whole panel — an explicit position that overflows is still an
+                # author error and raises below.
+                length = max(1, self.screen.width - fldcol - 1)
+                if length < 1 or fldcol >= self.screen.width:
+                    fldcol = max(col, self.screen.width - 2)
+                    length = 1
+            else:
+                raise DTLError(
+                    f"<{tag}> field at col {fldcol} width {length} overflows "
+                    f"panel width {self.screen.width}"
+                )
         if content:
             # The prompt/caption is a CUA element with its own role colour (green,
             # the field-prompt colour); DTL's COLOR on a <dtafld> colours the

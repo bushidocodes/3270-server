@@ -294,9 +294,14 @@ elements omit positions: they flow down one line each from the box's origin, and
 omits `fldcol` gets its entry after the prompt (`col + len(prompt) + fldgap`). A **`<dtacol>`** is a
 flow box that also carries default column widths — `pmtwidth` fixes the prompt column so every
 field's entry lines up at `col + pmtwidth`, and `entwidth` supplies a default field width — and a
-**`<divider>`** draws a horizontal rule across the box. Explicit positions still win, so this is
-opt-in — the bundled panels remain byte-for-byte identical. (Authentic DTL auto-flows the whole
-document; this is a deliberate, smaller step toward that.)
+**`<divider>`** draws a horizontal rule across the box. A box with **`dir=horiz`** lays its children
+*side by side* (left-to-right) instead of stacking them, so a row of related fields (City / State /
+Zip) or two `<region>` columns sit together; the enclosing flow then resumes below the tallest
+column, and a `<divider gutter=n>` between horizontal columns is a vertical gutter (spacing, no
+rule). Explicit positions still win, so this is opt-in — the bundled panels remain byte-for-byte
+identical. (Authentic DTL auto-flows the whole document with ISPDTLC's exact column math; ours is a
+close approximation — an auto-flowed field that would run past the panel edge is clamped rather than
+rejected.)
 
 Variable declarations (`<varclass>`/`<varlist>`/`<vardcl>`) are optional, as in `ISPDTLC`: a stray
 or missing `<vardcl>` is tolerated (the converter issues a suppressible warning) rather than
