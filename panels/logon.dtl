@@ -38,10 +38,10 @@
   <area row="5" col="1" fldgap="2">
     <dtafld datavar="userid" entwidth="8" cursor="yes" color="white">Userid   ===></dtafld>
     <dtafld datavar="password" entwidth="8" display="no">Password ===></dtafld>
-    <dtafld datavar="procedure" entwidth="8" default="IKJACCNT" color="white">Procedure===></dtafld>
+    <dtafld datavar="procedure" entwidth="8" init="IKJACCNT" color="white">Procedure===></dtafld>
   </area>
   <dtafld row="7" col="42" fldcol="60" datavar="acct" entwidth="8" color="white">Acct Nmbr    ===></dtafld>
-  <dtafld row="8" col="1" fldcol="16" datavar="size" entwidth="5" default="00150" color="white" help="sizehelp">Size     ===></dtafld>
+  <dtafld row="8" col="1" fldcol="16" datavar="size" entwidth="5" init="00150" color="white" help="sizehelp">Size     ===></dtafld>
   <dtafld row="8" col="42" fldcol="60" datavar="perform" entwidth="8" color="white">Perform      ===></dtafld>
   <dtafld row="9" col="1" fldcol="16" datavar="command" entwidth="62" color="white">Command  ===></dtafld>
   <dtafld row="11" col="1" fldcol="19" datavar="dsname" entwidth="59" color="white">PDS/E Dsname ===></dtafld>
