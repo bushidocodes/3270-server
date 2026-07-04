@@ -1285,6 +1285,18 @@ def test_list_items_flow_with_bullets():
     ]
 
 
+def test_simple_list_indents_items_without_a_bullet():
+    # <sl> (simple list) flows each <li> indented one level, with NO marker
+    # (unlike <ul>'s bullet). The `compact` attribute is accepted but has no
+    # visual effect in our line-based render.
+    s = load_dtl('<panel name="p"><sl compact><li>Faith<li>Hope<li>Charity</sl></panel>')
+    assert s.items == [
+        Text(0, 5, "Faith", DisplayIntensity.NORMAL),
+        Text(1, 5, "Hope", DisplayIntensity.NORMAL),
+        Text(2, 5, "Charity", DisplayIntensity.NORMAL),
+    ]
+
+
 def test_ordered_list_numbers_items():
     s = load_dtl('<panel name="p"><ol><li>one<li>two</ol></panel>')
     assert s.items == [

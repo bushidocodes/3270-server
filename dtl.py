@@ -268,8 +268,9 @@ _ADMONITIONS = {
 }
 # Block tags whose text flows as protected lines (like <info>): paragraphs,
 # list items (<li>/<dt>/<dd>/<pt>/<pd>/<lp>), preformatted <lines>, and the
-# admonitions above. Their list containers (<ul>/<ol>/<dl>/<parml>/<notel>) are
-# transparent — ignored (a plain container), except <notel>'s "Notes:" heading.
+# admonitions above. Their list containers (<ul>/<ol>/<sl>/<dl>/<parml>/<notel>)
+# are transparent — ignored (a plain container), except <notel>'s "Notes:"
+# heading. A <sl> (simple list) marks its <li>s without a bullet (see below).
 _FLOW_TEXT_TAGS = ("p", "li", "dt", "dd", "pt", "pd", "lp", "lines") + tuple(_ADMONITIONS)
 # Instruction tags render as protected text like <info>: <topinst> (top),
 # <pnlinst> (panel), and <botinst> (bottom) instructions.
@@ -459,7 +460,9 @@ class _DTLParser(HTMLParser):
         # they are inline children that must not close their parent.
         if tag not in ("dtafldd", "lit") and self._tag is not None:
             self._emit_current()
-        if tag in ("ul", "ol"):
+        if tag in ("ul", "ol", "sl"):
+            # <ul>/<ol> mark each item with a bullet/number; <sl> (simple list)
+            # indents its items with no marker (see _emit_listitem).
             self._lists.append({"type": tag, "n": 0})
         elif tag == "notel":
             # A note list: a "Notes:" heading, then bulleted <li> note items.
@@ -795,7 +798,7 @@ class _DTLParser(HTMLParser):
             self._emit_da()
             self._da = None
             return
-        if tag in ("ul", "ol", "dl", "parml", "notel") and self._lists:
+        if tag in ("ul", "ol", "sl", "dl", "parml", "notel") and self._lists:
             self._lists.pop()
         if tag in ("panel", "help"):
             if self._da is not None:      # a <da> with an omitted end tag
@@ -999,7 +1002,7 @@ class _DTLParser(HTMLParser):
         self.handle_starttag(tag, attrs)
         if tag in _CONTENT_TAGS:
             self.handle_endtag(tag)
-        elif tag in ("ul", "ol", "dl", "parml", "notel"):  # empty list; pop it
+        elif tag in ("ul", "ol", "sl", "dl", "parml", "notel"):  # empty list; pop it
             self.handle_endtag(tag)
         elif tag == "dtafldd":  # empty prompt
             self.handle_endtag(tag)
@@ -1185,7 +1188,9 @@ class _DTLParser(HTMLParser):
         depth = max(len(self._lists), 1)
         bullet_col = base + (depth - 1) * self._LIST_INDENT
         lst = self._lists[-1] if self._lists else None
-        if lst and lst["type"] == "ol":
+        if lst and lst["type"] == "sl":
+            marker = None                       # simple list: indented, no bullet
+        elif lst and lst["type"] == "ol":
             lst["n"] += 1
             ol_depth = sum(1 for ln in self._lists if ln["type"] == "ol")
             marker = self._ol_marker(lst["n"], ol_depth)
