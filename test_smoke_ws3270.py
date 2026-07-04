@@ -53,11 +53,12 @@ def _require_emulator():
     pytest.skip("no ws3270/s3270 emulator installed")
 
 
-def _serve_one_client(tls_context=None):
+def _serve_one_client(tls_context=None, starttls=False):
     """Listen on an ephemeral port and serve exactly one client through the real
     :func:`server.handle_client` in a background thread. Returns the port. When
     ``tls_context`` is given, the connection is served through
-    :func:`server._client_thread`, which does the server-side TLS handshake."""
+    :func:`server._client_thread`, which does the server-side TLS handshake
+    (implicit TLS, or a negotiated START-TLS upgrade when ``starttls`` is set)."""
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("127.0.0.1", 0))
@@ -68,7 +69,8 @@ def _serve_one_client(tls_context=None):
         try:
             conn, addr = srv.accept()
             if tls_context is not None:
-                server._client_thread(conn, addr, tls_context=tls_context)
+                server._client_thread(conn, addr, tls_context=tls_context,
+                                      starttls=starttls)
             else:
                 server.handle_client(conn, addr)
         except Exception:
@@ -88,15 +90,16 @@ def _host_arg(port, tls=False, basic=False):
     return f"{prefix}127.0.0.1:{port}"
 
 
-def _drive(port, actions, model="2", tls=False):
+def _drive(port, actions, model="2", tls=False, noverify=False):
     """Run the emulator (as the given ``model``) against 127.0.0.1:port with a
     list of action commands, returning its combined output. A 60s hang (the #87
     bug) can't wedge the run: the per-action Wait() timeouts bound it, and
-    subprocess timeout is the backstop. ``tls`` connects via ``L:`` and accepts
-    the self-signed test cert (``-noverifycert``)."""
+    subprocess timeout is the backstop. ``tls`` connects via ``L:`` (implicit TLS)
+    and accepts the self-signed test cert; ``noverify`` accepts the cert without
+    the ``L:`` prefix — a plaintext connect that upgrades via negotiated START-TLS."""
     script = "\n".join(actions) + "\n"
     cmd = [EMULATOR, "-model", model]
-    if tls:
+    if tls or noverify:
         cmd.append("-noverifycert")
     cmd.append(_host_arg(port, tls))
     try:
@@ -621,3 +624,23 @@ def test_ws3270_ispf_menu_emphasises_keywords_via_hp():
 
     assert "SetAttribute" in trace, trace[-2000:]                 # SA on the wire
     assert "Enter X or PF3 to terminate ISPF." in out, out[-1500:]  # line intact
+
+
+def test_ws3270_starttls_upgrades_a_plaintext_connection(tls_cert):
+    """A real ws3270 connecting in the clear accepts the negotiated START-TLS
+    upgrade and runs the whole session over TLS — logging in and reaching the ISPF
+    menu — proving the in-band upgrade interoperates with a real emulator (which
+    enables START-TLS by default). Contrast test_tls.py's implicit-TLS `L:` path."""
+    _require_emulator()
+    certfile, keyfile = tls_cert
+    ctx = server.make_tls_context(certfile, keyfile)
+    port = _serve_one_client(tls_context=ctx, starttls=True)
+    out = _drive(port, [
+        "Wait(20,InputField)",
+        "String(IBMUSER)", "Tab()", "String(SYS1)", "Enter()",
+        "Wait(20,Output)",
+        "Ascii()",
+        "Quit()",
+    ], noverify=True)     # plaintext connect (no L:), accept the self-signed cert
+
+    assert "ISPF Primary Option Menu" in out, out[-1500:]
