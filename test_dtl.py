@@ -1682,7 +1682,20 @@ def test_list_field_display_column_and_data_rows():
         Text(0, 1, "Time", H), Text(0, 6, "Who", H),
         Text(1, 1, "8:00", N),  Field(row=1, col=6, length=6, name="who", default="Acme", terminator=True),
         Text(2, 1, "9:00", N),  Field(row=2, col=6, length=6, name="who", default="Globex", terminator=True),
+        Text(3, 1, "*" * 31 + " BOTTOM OF DATA " + "*" * 31, H, role="heading"),
     ]
+
+
+def test_list_field_bottom_of_data_only_when_not_clipped():
+    # #220: "BOTTOM OF DATA" is drawn when the end of the table is on screen; when
+    # the rows are clipped by the panel depth (more data on the next page) it is
+    # suppressed, so a paginated table doesn't claim a false end.
+    src = ('<panel name="p" depth="8"><area><lstfld>'
+           '<lstcol datavar=a colwidth=4>A</lstfld></area></panel>')
+    fits = load_dtl(src, rows=[{"a": "1"}, {"a": "2"}])
+    assert any("BOTTOM OF DATA" in getattr(t, "text", "") for t in fits.items)
+    clipped = load_dtl(src, rows=[{"a": str(i)} for i in range(20)])  # > depth
+    assert not any("BOTTOM OF DATA" in getattr(t, "text", "") for t in clipped.items)
 
 
 def test_list_field_line_attribute_stacks_columns():
@@ -2024,12 +2037,13 @@ def test_notel_reference_figure_snapshot():
 def test_lstfld_reference_figure_snapshot():
     """LSTFLD/LSTCOL reference Figure 1 (Subscriber List): a grouped table — the
     HEADLINE=yes group is a dashed rule around its heading, other groups show
-    plain, column headings are not truncated to COLWIDTH, then the data/model rows.
+    plain, column headings are not truncated to COLWIDTH, the data/model rows, then
+    a "BOTTOM OF DATA" line spanning the table.
 
-    Deltas from the IBM figure (documented): no "BOTTOM OF DATA" footer (#220);
-    the column gutter is 1 (the figure reserves 2-3 for CUA attribute bytes, #221);
-    input/BOTH cells show as blank fields here (the snapshot renders fields as
-    underscores); the runtime "ROW x TO y OF z" status + F-keys are ISPF chrome."""
+    Deltas from the IBM figure (documented): the column gutter is 1 (the figure
+    reserves 2-3 for CUA attribute bytes, #221); input/BOTH cells show as blank
+    fields here (the snapshot renders fields as underscores); the runtime
+    "ROW x TO y OF z" status + F-keys are ISPF chrome."""
     src = ("<PANEL NAME=lstcola WIDTH=76>Subscriber List\n"
            "<TOPINST>Enter phone number and approved indicator for each person.\n"
            "<AREA>\n  <LSTFLD>\n"
@@ -2055,6 +2069,7 @@ def test_lstfld_reference_figure_snapshot():
         " Pete            Moss            P   ____________ _",
         " Sally           Forth           N   ____________ _",
         " Melba           Toast           T   ____________ _",
+        " " + "*" * 29 + " BOTTOM OF DATA " + "*" * 29,   # table end reached
         "   ________",
     ])
 
