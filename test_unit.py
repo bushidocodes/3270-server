@@ -364,8 +364,8 @@ def test_run_pdc_action_leaves_on_exit_family():
     from server import _run_pdc_action
     from screen import Screen
     scr = Screen()
-    # A bare DTL command (<action run=exit>) and the alias form both leave.
-    for act in ("exit", "end", "return", "cancel", "alias exit", "ALIAS Return"):
+    # A bare DTL command (<action run=exit>) from the exit family leaves.
+    for act in ("exit", "end", "return", "cancel"):
         assert _run_pdc_action(None, scr, act) is True, act
     # passthru / unknown / empty stay on the panel.
     for act in ("passthru", "add", "", None):
@@ -383,7 +383,6 @@ def test_run_pdc_action_help_shows_overlay_and_stays():
     server._show_overlay = lambda sock, name, **kw: shown.append(name)
     try:
         assert _run_pdc_action(MagicMock(), scr, "help") is False        # bare
-        assert _run_pdc_action(MagicMock(), scr, "alias help") is False  # aliased
     finally:
         server._show_overlay = orig
-    assert shown == ["tsohelp", "tsohelp"]
+    assert shown == ["tsohelp"]

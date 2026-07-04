@@ -88,7 +88,7 @@ renders centered on row 0, with the body flowing beneath it.
                                  ``passthru``). Recorded in ``Screen.commands``.
 ``<ab row col gap>``             an action bar; its ``<abc>`` choice labels are
 ``<abc>label</abc>``             laid out across ``row``. Each ``<abc>`` holds
-``<pdc action>label</pdc>``      ``<pdc>`` pull-down choices (kept in
+``<pdc>label<action run>``       ``<pdc>`` pull-down choices (kept in
 ``<pdsep>``                      ``Screen.action_bar`` for future interaction); a
                                  ``<pdsep>`` is a divider row between them.
 ``<varclass name type msg>``     a variable class: ``type="char N"`` caps input
@@ -582,14 +582,13 @@ class _DTLParser(HTMLParser):
             if self._cur_abc is None:
                 raise DTLError("<pdc> outside of an <abc>")
             self._end_pdc()                     # implicit end of a previous <pdc>
-            self._cur_pdc = {"chars": [], "action": a.get("action", ""),
+            self._cur_pdc = {"chars": [], "action": "",
                              "help": self._field_help(a)}
         elif tag == "action":
-            # A pull-down choice's action (alternative to <pdc action=...>).
+            # A pull-down choice's command: <pdc>label<action run=cmd>. RUN= is
+            # the standard DTL attribute naming the command the choice runs.
             if self._cur_pdc is not None:
-                self._cur_pdc["action"] = (
-                    a.get("action") or a.get("run") or a.get("cmd") or self._cur_pdc["action"]
-                )
+                self._cur_pdc["action"] = a.get("run") or self._cur_pdc["action"]
         elif tag == "pdsep":
             # A separator line within an action-bar pull-down: close the choice
             # above it (DTL omits end tags) and record a divider row between the
