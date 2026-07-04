@@ -1426,6 +1426,57 @@ def test_horiz_region_default_vert_is_unchanged():
     assert s.items[2] == Text(2, 1, "y", N)
 
 
+def test_selfld_choice_columns_relative_to_enclosing_box():
+    # NUMCOL/NAMECOL/DESCCOL are columns *within* the selection field, so a
+    # <selfld> flowed inside a box at column C lays its choices relative to C —
+    # which is what lets a <selfld> work as a dir=horiz column (#161). At the base
+    # column 1 the offset is 0, so panel-level selection fields are unchanged.
+    N, H = DisplayIntensity.NORMAL, DisplayIntensity.HIGH
+    base = load_dtl(
+        '<panel><selfld row="4"><choice num="1" name="Aaa">desc</choice></selfld></panel>'
+    )
+    assert base.items[0] == Text(4, 1, "1 ", H)     # classic absolute columns:
+    assert base.items[1] == Text(4, 4, "Aaa", N)    #   num@1, name@4, desc@21
+    assert base.items[2] == Text(4, 21, "desc", N)
+
+    shifted = load_dtl(
+        '<panel><region col="30">'
+        '<selfld row="4"><choice num="1" name="Aaa">desc</choice></selfld>'
+        '</region></panel>'
+    )
+    assert shifted.items[0] == Text(4, 30, "1 ", H)   # each shifted by (30 - 1)
+    assert shifted.items[1] == Text(4, 33, "Aaa", N)
+    assert shifted.items[2] == Text(4, 50, "desc", N)
+
+
+def test_selfld_explicit_col_shifts_choice_columns():
+    # An explicit COL on the <selfld> itself is the origin the choice columns
+    # offset from (previously COL was ignored and the columns were absolute).
+    N, H = DisplayIntensity.NORMAL, DisplayIntensity.HIGH
+    s = load_dtl(
+        '<panel><selfld row="4" col="30" namecol="4" desccol="21">'
+        '<choice num="1" name="Aaa">desc</choice></selfld></panel>'
+    )
+    assert s.items[0] == Text(4, 30, "1 ", H)
+    assert s.items[1] == Text(4, 33, "Aaa", N)
+    assert s.items[2] == Text(4, 50, "desc", N)
+
+
+def test_selfld_as_horiz_column_shifts_right():
+    # Two <selfld>s in side-by-side dir=horiz regions no longer overlap: the
+    # right one's choices shift to its column instead of pinning to column 1.
+    s = load_dtl(
+        '<panel><area col="1"><region dir="horiz">'
+        '<region><selfld row="1"><choice num="1" name="Mon">day</choice></selfld></region>'
+        '<region><selfld row="1"><choice num="1" name="Nine">am</choice></selfld></region>'
+        '</region></area></panel>'
+    )
+    left = [it for it in s.items if isinstance(it, Text) and it.text.strip() == "Mon"][0]
+    right = [it for it in s.items if isinstance(it, Text) and it.text.strip() == "Nine"][0]
+    assert left.col == 4                 # left column at the base namecol
+    assert right.col > left.col          # right column sits to its right
+
+
 def test_region_indent_shifts_content_right_and_nests():
     # <region indent=n> flows its content n columns right of the origin; nested
     # indents stack, and the parent flow resumes at its own column afterwards.
