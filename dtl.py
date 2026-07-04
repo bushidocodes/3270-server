@@ -280,7 +280,7 @@ _FLOW_TEXT_TAGS = ("p", "li", "dt", "dd", "pt", "pd", "lp", "lines", "xmp") + tu
 # <pnlinst> (panel), and <botinst> (bottom) instructions.
 _INSTRUCTION_TAGS = ("topinst", "pnlinst", "botinst")
 _TEXT_TAGS = ("info",) + _INSTRUCTION_TAGS + _FLOW_TEXT_TAGS
-_CONTENT_TAGS = _TEXT_TAGS + ("dtafld", "cmdarea", "choice")
+_CONTENT_TAGS = _TEXT_TAGS + ("dtafld", "cmdarea", "choice", "figcap")
 _FIELD_TAGS = ("dtafld", "cmdarea")
 
 
@@ -746,6 +746,26 @@ class _DTLParser(HTMLParser):
                 "explicit": explicit,
                 "parent": parent,
             })
+        elif tag == "fig":
+            # A figure: a flow sub-box, optionally framed by a horizontal rule
+            # (FRAME=RULE, the default) above and below its content, with a
+            # <figcap> caption line beneath. Its children (<p>, lists, <xmp>, …)
+            # flow through the box like an <area>.
+            parent = self._areas[-1] if self._areas else None
+            col = int(a["col"]) if "col" in a else (parent["col"] if parent else 1)
+            row = int(a["row"]) if "row" in a else (parent["row"] if parent else 0)
+            frame = str(a.get("frame", "rule")).strip().lower() != "none"
+            width = max(1, self.screen.width - col - 1)
+            if frame:                                  # top rule
+                self.screen.add(Text(row, col, "-" * width))
+                row += 1
+            self._areas.append({
+                "row": row, "row0": row, "maxbottom": row, "col": col,
+                "fldgap": parent["fldgap"] if parent else 1, "dir": "vert",
+                "start_idx": len(self.screen.items), "explicit": "row" in a,
+                "parent": parent, "fig": True, "frame": frame,
+                "fig_col": col, "fig_width": width, "caption": None,
+            })
         elif tag == "msgmbr":
             self._in_msgmbr = True
             self._msgmbr_name = a.get("name", "")
@@ -816,6 +836,8 @@ class _DTLParser(HTMLParser):
             if self._da is not None:      # a <da> with an omitted end tag
                 self._emit_da()
                 self._da = None
+            while self._areas and self._areas[-1].get("fig"):
+                self._close_fig()         # a <fig> whose </fig> was omitted
             self._retract_title_if_collision()
             self._areas.clear()  # drop the panel's implicit flow box
             return
@@ -902,6 +924,9 @@ class _DTLParser(HTMLParser):
         if tag == "msgmbr":
             self._in_msgmbr = False
             return
+        if tag == "fig":
+            self._close_fig()
+            return
         if tag in ("area", "region", "dtacol"):
             if self._areas:
                 ctx = self._areas.pop()
@@ -937,6 +962,8 @@ class _DTLParser(HTMLParser):
             self._finalize_panel_title()
         if self._tag is not None:
             self._emit_current()
+        while self._areas and self._areas[-1].get("fig"):
+            self._close_fig()             # a <fig> whose </fig> was omitted
         self._retract_title_if_collision()
 
     def _emit_current(self):
@@ -1007,6 +1034,8 @@ class _DTLParser(HTMLParser):
             self._emit_xlati(a, content)
         elif tag == "source":
             self._emit_source(a, content)
+        elif tag == "figcap":
+            self._store_figcap(content)
         if horiz:
             self._flow_horiz(box, start_idx)
         self._tag, self._attrs, self._chars = None, None, []
@@ -1167,6 +1196,34 @@ class _DTLParser(HTMLParser):
             for it in self.screen.items
         ):
             self.screen.items.remove(item)
+
+    def _store_figcap(self, content):
+        """Capture a <figcap>'s text for the enclosing <fig>; it is rendered below
+        the figure (after the bottom rule) at </fig>, not inline where it appears."""
+        text = " ".join(content.split())
+        for box in reversed(self._areas):
+            if box.get("fig"):
+                box["caption"] = text
+                return
+
+    def _close_fig(self):
+        """Close the innermost open <fig>: draw the bottom rule (FRAME=RULE), emit
+        the <figcap> caption beneath it, and resume the parent flow below both."""
+        if not self._areas or not self._areas[-1].get("fig"):
+            return
+        box = self._areas.pop()
+        row, col, width = box["row"], box["fig_col"], box["fig_width"]
+        if box["frame"]:                                # bottom rule
+            self.screen.add(Text(row, col, "-" * width))
+            row += 1
+        if box["caption"]:                              # caption line(s) beneath
+            lines = self._wrap(box["caption"], width)
+            for i, ln in enumerate(lines):
+                self.screen.add(Text(row + i, col, ln, DisplayIntensity.NORMAL))
+            row += len(lines)
+        parent = box.get("parent")
+        if parent is not None and not box.get("explicit"):
+            parent["row"] = row                         # parent resumes below the figure
 
     def _wrap(self, text, width):
         """Greedy word-wrap ``text`` into lines no wider than ``width``."""
