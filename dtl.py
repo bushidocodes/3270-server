@@ -64,10 +64,12 @@ renders centered on row 0, with the body flowing beneath it.
                                  as ``Screen.command_field``.
 ``<selfld row numcol namecol     a list of menu choices; each ``<choice>`` is laid
    desccol numwidth>``           out on its own row, auto-incrementing.
-``<choice num name                one menu row: number, name, description. The
-   matchval>desc``                selection value (``matchval``, default ``num``)
-                                 is recorded in ``Screen.selections`` so the
-                                 dialog can validate a typed option.
+``<choice num name match          one menu row: number, name, description. The
+   checkvar unavail>desc``        selection value (``match``, default ``num``) is
+                                 recorded in ``Screen.selections`` so the dialog can
+                                 validate a typed option; ``checkvar`` lands the
+                                 cursor on the current choice; ``unavail`` greys a
+                                 choice out and makes it unselectable.
 ``<keyl name>``                  a keylist: a set of function-key bindings for
                                  the panel (rendered as nothing; pure metadata).
 ``<keyi key cmd>desc``           one key binding: function key ``key`` (e.g.
@@ -1332,25 +1334,42 @@ class _DTLParser(HTMLParser):
         if sf is None:
             raise DTLError("<choice> outside of a <selfld>")
         row = sf["row"]
+        # UNAVAIL: the choice is shown but can't be selected. 3270 has intensity
+        # (normal / intensified-high / non-display) but no *sub-normal* dim level,
+        # so it's de-emphasised by dropping the number from the usual high to
+        # normal intensity (dimmer on mono too) and, on a colour terminal, the CUA
+        # "unavailable" blue.
+        unavail = _bool_attr(a, "unavail")
         # An explicit COLOR (the choice's, else the <selfld>'s) colours the whole
         # row; otherwise each part takes its CUA role colour — as on real ISPF the
         # number, keyword, and description are white, turquoise, and green.
         explicit = self._color(a) or sf.get("color")
+        rnum, rname, rdesc = ("unavail", "unavail", "unavail") if unavail \
+            else ("num", "name", "desc")
+        num_int = DisplayIntensity.NORMAL if unavail else sf["numintensity"]
         self.screen.add(Text(row, sf["numcol"], a.get("num", "").ljust(sf["numwidth"]),
-                             sf["numintensity"], color=explicit, role="num"))
+                             num_int, color=explicit, role=rnum))
         self.screen.add(Text(row, sf["namecol"], a.get("name", ""),
-                             color=explicit, role="name"))
+                             color=explicit, role=rname))
         self.screen.add(Text(row, sf["desccol"], content,
-                             color=explicit, role="desc"))
+                             color=explicit, role=rdesc))
         sf["row"] = row + 1
-        # Record the selection value the user types to pick this choice. It
-        # defaults to the displayed number; an explicit ``matchval`` overrides.
-        matchval = a.get("matchval", a.get("num", "")).strip().upper()
-        if matchval:
-            self.screen.selections[matchval] = a.get("name", "").strip()
-            # Remember which row this choice renders on, so the cursor can
-            # select it (point-and-shoot).
-            self.screen.selection_rows[row] = matchval
+        if unavail:
+            return                          # not selectable → no routing/point-and-shoot
+        # The value that selects this choice. IBM's attribute is MATCH; it defaults
+        # to the displayed number.
+        match = a.get("match", a.get("num", "")).strip().upper()
+        if match:
+            self.screen.selections[match] = a.get("name", "").strip()
+            # Remember which row this choice renders on, so the cursor can select it
+            # (point-and-shoot).
+            self.screen.selection_rows[row] = match
+            # CHECKVAR names the variable holding the current selection; when its
+            # value equals this choice's MATCH, the choice is current — land the
+            # cursor on it so the user sees (and can re-select) the current choice.
+            checkvar = a.get("checkvar")
+            if checkvar and self._subs.get(checkvar.strip().upper(), "").strip().upper() == match:
+                self.screen.cursor_at = (row, sf["namecol"])
 
     def _emit_action_bar(self, ab):
         """Lay the action-bar choice labels out across the bar's row (high

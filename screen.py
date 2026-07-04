@@ -137,6 +137,7 @@ _CUA_COLORS = {
     "desc":    Color.GREEN,      # choice description
     "heading": Color.TURQUOISE,  # list column heading
     "cell":    Color.TURQUOISE,  # list data cell
+    "unavail": Color.BLUE,       # an unavailable (non-selectable) menu choice
 }
 
 

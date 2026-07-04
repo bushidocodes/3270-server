@@ -261,7 +261,7 @@ def test_ispf_menu_selection_rows_map_options():
     assert s.selection_at(18 * 80 + 5) == "X"
 
 
-def test_choice_matchval_defaults_to_num_and_records_selections():
+def test_choice_match_defaults_to_num_and_records_selections():
     s = load_dtl(
         '<panel><selfld row="4" numcol="1" namecol="4" desccol="21">'
         '<choice num="0" name="Settings">  desc</choice>'
@@ -271,13 +271,44 @@ def test_choice_matchval_defaults_to_num_and_records_selections():
     assert s.selections == {"0": "Settings", "X": "Exit"}
 
 
-def test_choice_explicit_matchval_overrides_num():
+def test_choice_explicit_match_overrides_num():
     s = load_dtl(
         '<panel><selfld row="4" numcol="1" namecol="4" desccol="21">'
-        '<choice num="1" name="View" matchval="V">  desc</choice>'
+        '<choice num="1" name="View" match="V">  desc</choice>'
         '</selfld></panel>'
     )
-    assert s.selections == {"V": "View"}        # matchval wins over num
+    assert s.selections == {"V": "View"}        # MATCH wins over num
+
+
+def test_choice_checkvar_lands_cursor_on_the_current_choice():
+    # <choice checkvar=var match=val>: when the variable equals a choice's MATCH,
+    # that choice is current — the cursor is placed on it.
+    s = load_dtl(
+        '<panel><selfld row="4" numcol="1" namecol="4" desccol="21">'
+        '<choice num="1" name="New" checkvar="card" match="NEW">create'
+        '<choice num="2" name="Old" checkvar="card" match="OLD">existing'
+        '</selfld></panel>',
+        CARD="OLD",
+    )
+    assert s.cursor_at == (5, 4)                 # second choice's row, namecol
+    assert s.selections == {"NEW": "New", "OLD": "Old"}
+
+
+def test_choice_unavail_is_dimmed_and_unselectable():
+    # <choice unavail>: shown but not selectable (no routing / point-and-shoot),
+    # and coloured with the CUA "unavailable" role.
+    from screen import Color, _role_colour
+    s = load_dtl(
+        '<panel><selfld row="4" numcol="1" namecol="4" desccol="21">'
+        '<choice num="1" name="Ok" match="A">available'
+        '<choice num="2" name="No" match="B" unavail>disabled'
+        '</selfld></panel>'
+    )
+    assert "A" in s.selections and "B" not in s.selections     # unavailable can't be picked
+    assert 5 not in s.selection_rows                            # …nor point-and-shot
+    dimmed = [it for it in s.items if getattr(it, "role", None) == "unavail"]
+    assert len(dimmed) == 3                                     # num/name/desc of the row
+    assert all(_role_colour(it.color, it.role) is Color.BLUE for it in dimmed)
 
 
 def test_ispf_panel_selections_drive_validation():
