@@ -1889,6 +1889,50 @@ def test_checki_unsupported_type_is_still_lenient():
     assert s.first_validation_error({addr: "anything!"}) is None   # no check enforced
 
 
+def test_required_field_rejects_empty_input():
+    # IBM REQUIRED=YES: the field must be non-empty on submit; MSG names the error.
+    s = load_dtl(
+        '<panel>'
+        '<dtafld row="6" col="1" fldcol="16" datavar="name" entwidth="8"'
+        ' required="yes" msg="ORDB000">Name</dtafld>'
+        '</panel>'
+    )
+    addr = s.field_addr("name")
+    assert s.first_validation_error({addr: ""}) == ("ORDB000", {})    # blank rejected
+    assert s.first_validation_error({addr: "  "}) == ("ORDB000", {})  # whitespace = blank
+    assert s.first_validation_error({addr: "SMITH"}) is None          # supplied -> ok
+
+
+def test_required_without_msg_uses_default_message():
+    # REQUIRED (minimized) with no field/class MSG falls back to a system stand-in.
+    s = load_dtl(
+        '<panel>'
+        '<dtafld row="6" col="1" fldcol="16" datavar="pw" entwidth="8"'
+        ' required display="no">Password</dtafld>'
+        '</panel>'
+    )
+    addr = s.field_addr("pw")
+    assert s.first_validation_error({addr: ""}) == ("Enter required field", {})
+
+
+def test_required_combines_with_varclass_checks():
+    # A field that is both REQUIRED and range-checked: blank -> the class MSG (no
+    # field MSG given), out-of-range -> the same MSG, a valid value -> ok.
+    s = load_dtl(
+        '<panel>'
+        '<varclass name="SZ" type="numeric">'
+        '  <checkl msg="M001"><checki type="range">0 100</checki></checkl>'
+        '</varclass>'
+        '<varlist><vardcl name="sz" varclass="SZ"/></varlist>'
+        '<dtafld row="8" col="1" fldcol="16" datavar="sz" entwidth="5" required="yes">Size</dtafld>'
+        '</panel>'
+    )
+    addr = s.field_addr("sz")
+    assert s.first_validation_error({addr: ""})[0] == "M001"      # required -> class MSG
+    assert s.first_validation_error({addr: "999"})[0] == "M001"   # range still enforced
+    assert s.first_validation_error({addr: "50"}) is None         # valid
+
+
 def test_msg_suffix_forms_id_from_member_name():
     cat = load_messages(
         '<msgmbr name="ABCD00">'

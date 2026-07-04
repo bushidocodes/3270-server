@@ -585,7 +585,8 @@ class Screen:
 
         Returns ``(msgid, subs)`` for the first field whose value fails a check
         (``subs`` are substitution values for the message, e.g. MIN/MAX/VALUE),
-        or ``None`` if everything validates. Empty fields are not checked.
+        or ``None`` if everything validates. An empty field fails only if it is
+        REQUIRED (DTL ``<dtafld required=yes>``); otherwise it is not checked.
         """
         addr_by_name = {
             f.name.upper(): f.data_addr
@@ -598,6 +599,9 @@ class Screen:
                 continue
             value = (fields_by_addr.get(addr) or "").strip()
             if not value:
+                required_msg = spec.get("required_msg")
+                if required_msg:
+                    return required_msg, {}
                 continue
             for check in spec["checks"]:
                 subs = _check_failure(check, value)
