@@ -437,11 +437,18 @@ class _DTLParser(HTMLParser):
             self._panel_title = []  # capture the title text that follows
         elif tag == "selfld":
             ctx = self._areas[-1] if self._areas else None
+            # NUMCOL/NAMECOL/DESCCOL are columns *within* the selection field, so
+            # they are offsets from its origin column: an explicit COL, else the
+            # enclosing flow box's column (so a flowed <selfld> — e.g. a dir=horiz
+            # column — shifts with the box). At the base column 1 the offset is 0,
+            # so panel-level selection fields render byte-for-byte as before.
+            origin = int(a["col"]) if "col" in a else (ctx["col"] if ctx else 1)
+            base = origin - 1
             self._selfld = {
                 "row": int(a["row"]) if "row" in a else (ctx["row"] if ctx else 0),
-                "numcol": int(a.get("numcol", 1)),
-                "namecol": int(a.get("namecol", 4)),
-                "desccol": int(a.get("desccol", 21)),
+                "numcol": base + int(a.get("numcol", 1)),
+                "namecol": base + int(a.get("namecol", 4)),
+                "desccol": base + int(a.get("desccol", 21)),
                 "numwidth": int(a.get("numwidth", 2)),
                 "numintensity": _intensity(a, "numintensity", DisplayIntensity.HIGH),
                 # DTL COLOR on a <selfld> colours its choices; a <choice> may
