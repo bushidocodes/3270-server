@@ -57,6 +57,22 @@ def test_info_basic():
     assert s.items == [Text(1, 2, "hello", DisplayIntensity.NORMAL)]
 
 
+def test_non_cp037_text_renders_without_crashing():
+    # #150: a character the code page can't encode must degrade to the substitute
+    # (?), not raise UnicodeEncodeError and take down the whole render/session.
+    s = load_dtl('<panel><info row="1" col="1">Cost 5€ (— x)</info></panel>')
+    data = s.render()                                   # must not raise
+    shown = data.decode("cp037", errors="replace")
+    assert "Cost 5? (? x)" in shown                     # euro / em-dash -> ?
+
+
+def test_non_cp037_field_default_renders_without_crashing():
+    from screen import Field
+    buf = bytearray()
+    Field(0, 0, 5, default="a€b").render(buf)      # must not raise
+    assert b"\x6f" in bytes(buf)                         # '?' (cp037 substitute)
+
+
 def test_instruction_tags_render_like_info():
     # <pnlinst> (panel instruction) and <botinst> (bottom instruction) are the IBM
     # spec tags; both render as positioned protected text, like <topinst>/<info>.
