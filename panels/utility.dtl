@@ -4,7 +4,7 @@
      (<cmdarea>, ZCMD) and a <selfld> of choices. The server reads the option
      with Screen.command_value() and validates it against Screen.selections;
      an unimplemented leaf reports back via &SELMSG. PF3 returns to the menu. -->
-<panel name="utility" title="Utility Selection Panel" help="ispfhelp">
+<panel name="utility" help="ispfhelp">Utility Selection Panel
   <info row="0" col="0" intensity="high">------------------------------ Utility Selection Panel -------------------------</info>
 
   <cmdarea row="2" col="1" fldcol="13" entwidth="6" cursor="yes">Option ===></cmdarea>

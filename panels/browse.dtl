@@ -5,7 +5,7 @@
      footer rule on the last row, sized to the terminal's screen (a taller/wider
      alternate screen shows more lines), and pages them with PF7/PF8; PF3 exits
      back to the entry panel. -->
-<panel name="browse" title="Browse" help="ispfhelp">
+<panel name="browse" help="ispfhelp">Browse
   <info row="0" col="0" intensity="high">&BRTITLE</info>
 
   <keyl name="BRKEYS">

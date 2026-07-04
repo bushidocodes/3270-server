@@ -2,7 +2,7 @@
 <!-- ISPF Batch Selection Panel (a demo selection sub-menu). Its choices are
      authentic ISPF sub-functions; each leaf reports back via &SELMSG
      (not yet implemented). Driven by server._show_submenu; PF3 returns. -->
-<panel name="batch" title="Batch Selection Panel" help="ispfhelp">
+<panel name="batch" help="ispfhelp">Batch Selection Panel
   <info row="0" col="0" intensity="high">---------------------------- Batch Selection Panel ----------------------------</info>
 
   <cmdarea row="2" col="1" fldcol="13" entwidth="6" cursor="yes">Option ===></cmdarea>

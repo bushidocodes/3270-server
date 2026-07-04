@@ -1531,6 +1531,26 @@ def test_panel_title_text_centered():
     assert s.items[1] == Text(1, 1, "body", DisplayIntensity.NORMAL)   # flows below title
 
 
+def test_panel_title_retracted_when_row0_is_occupied():
+    # #188: a content title normally renders centered on row 0, but the bundled
+    # panels draw their own title rule / action bar there. When an explicit
+    # element already occupies row 0, the auto centered title is retracted so the
+    # standard content form is byte-identical to the old metadata-only title=.
+    s = load_dtl('<panel name="p" width="79">ISPF Settings'
+                 '<info row="0" col="0">----- ISPF Settings -----</info></panel>')
+    assert s.title == "ISPF Settings"                      # metadata kept
+    assert s.items == [Text(0, 0, "----- ISPF Settings -----", DisplayIntensity.NORMAL)]
+    assert all(it.text != "ISPF Settings" for it in s.items)   # no centered title item
+
+
+def test_panel_title_kept_when_row0_is_free():
+    # With nothing else on row 0, the centered content title still renders.
+    s = load_dtl('<panel name="p" width="20">My Title'
+                 '<info row="2" col="1">body</info></panel>')
+    assert s.items[0] == Text(0, (20 - len("My Title")) // 2, "My Title",
+                              DisplayIntensity.NORMAL)
+
+
 def test_title_only_panel_renders_its_title_at_eof():
     # DTL omits end tags: a panel whose only content is its title, with no <body>
     # and no </panel> (as in guide examples ex004/ex078), still renders the title.

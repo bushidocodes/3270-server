@@ -1,7 +1,7 @@
 <!DOCTYPE DM SYSTEM>
 <!-- Help panel for the TSO/E LOGON panel. Shown when the user presses PF1
      (the logon keylist binds PF1 to HELP). PF3 returns to the logon panel. -->
-<panel name="tsohelp" title="TSO/E LOGON - HELP">
+<panel name="tsohelp">TSO/E LOGON - HELP
   <info row="0" col="0" intensity="high">------------------------- TSO/E LOGON  -  HELP --------------------------------</info>
 
   <info row="2" col="1">The TSO/E LOGON panel signs you on to TSO under the z/OS system.</info>

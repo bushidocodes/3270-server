@@ -4,7 +4,7 @@
      values. The rows are supplied at runtime via load_panel(..., rows=[...])
      from the live session (see server._dialog_vars); the <lstfld> lays them
      out as a read-only (usage=out) two-column table. PF3 returns to the menu. -->
-<panel name="dlgtvars" title="Dialog Test - Variables" help="ispfhelp">
+<panel name="dlgtvars" help="ispfhelp">Dialog Test - Variables
   <info row="0" col="0" intensity="high">--------------------------- Dialog Test - Variables ----------------------------</info>
   <topinst row="2" col="1">ISPF dialog variables and their current values for this session.</topinst>
 

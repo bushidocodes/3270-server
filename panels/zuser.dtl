@@ -2,7 +2,7 @@
 <!-- ISPF z/OS User Applications (a demo selection sub-menu). Its choices are
      authentic ISPF sub-functions; each leaf reports back via &SELMSG
      (not yet implemented). Driven by server._show_submenu; PF3 returns. -->
-<panel name="zuser" title="z/OS User Applications" help="ispfhelp">
+<panel name="zuser" help="ispfhelp">z/OS User Applications
   <info row="0" col="0" intensity="high">--------------------------- z/OS User Applications ----------------------------</info>
 
   <cmdarea row="2" col="1" fldcol="13" entwidth="6" cursor="yes">Option ===></cmdarea>

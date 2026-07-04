@@ -3,7 +3,7 @@
      menu. Demonstrates an action bar (<ab>/<abc>/<pdc>): F10/F11 move along the
      choices, Enter opens a pull-down, and PF1 on an item shows its <pdc help=>
      panel (Log/List -> loglisthelp). PF3 returns to the menu. -->
-<panel name="settings" title="ISPF Settings" help="ispfhelp">
+<panel name="settings" help="ispfhelp">ISPF Settings
   <ab row="0" col="1" gap="3">
     <abc><M>Log/List<pdc help="loglisthelp">Log Data Set defaults<action run="passthru"></pdc></abc>
     <abc><M>Function keys<pdc>Keylist settings<action run="passthru"></pdc></abc>

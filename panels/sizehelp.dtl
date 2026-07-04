@@ -2,7 +2,7 @@
 <!-- Field-level help for the TSO/E LOGON "Size" field. Shown when the cursor is
      in the Size field and HELP (PF1) is pressed, instead of the panel's general
      help (tsohelp) — DTL <dtafld help="sizehelp">. PF3 returns to the logon panel. -->
-<panel name="sizehelp" title="TSO/E LOGON - Size Field HELP">
+<panel name="sizehelp">TSO/E LOGON - Size Field HELP
   <info row="0" col="0" intensity="high">---------------------- TSO/E LOGON - Size Field HELP --------------------------</info>
 
   <info row="2" col="1">The <hp>Size</hp> field sets the region size, in kilobytes, for your TSO</info>

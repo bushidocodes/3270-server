@@ -2,7 +2,7 @@
 <!-- ISPF SCLM Main Menu (a demo selection sub-menu). Its choices are
      authentic ISPF sub-functions; each leaf reports back via &SELMSG
      (not yet implemented). Driven by server._show_submenu; PF3 returns. -->
-<panel name="sclm" title="SCLM Main Menu" help="ispfhelp">
+<panel name="sclm" help="ispfhelp">SCLM Main Menu
   <info row="0" col="0" intensity="high">------------------------------- SCLM Main Menu --------------------------------</info>
 
   <cmdarea row="2" col="1" fldcol="13" entwidth="6" cursor="yes">Option ===></cmdarea>

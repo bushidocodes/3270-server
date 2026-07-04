@@ -3,7 +3,7 @@
      choice. Shown when the Log/List pull-down is open, the cursor is on that item
      and HELP (PF1) is pressed - DTL <pdc help="loglisthelp">. PF3 returns to the
      open pull-down. -->
-<panel name="loglisthelp" title="Log Data Set Defaults HELP">
+<panel name="loglisthelp">Log Data Set Defaults HELP
   <info row="0" col="0" intensity="high">--------------------- Log Data Set Defaults HELP ------------------------------</info>
 
   <info row="2" col="1">The <hp>Log Data Set defaults</hp> choice controls how ISPF disposes of the</info>
