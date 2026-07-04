@@ -225,6 +225,14 @@ def _check_failure(check: dict, value: str):
         ok = (1 <= len(value) <= 8 and value[0] in _NAME_FIRST
               and all(c in _NAME_REST for c in value))
         return None if ok else {"VALUE": value}
+    if check["type"] == "maxlen":                     # <varclass type='char N'>
+        if len(value) > check["max"]:
+            return {"VALUE": value, "MAX": check["max"]}
+        return None
+    if check["type"] == "maxdigits":                  # <varclass type='numeric N'>
+        if sum(c.isdigit() for c in value) > check["max"]:
+            return {"VALUE": value, "MAX": check["max"]}
+        return None
     return None  # unknown check type: treat as passing
 
 

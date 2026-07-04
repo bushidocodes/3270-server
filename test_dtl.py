@@ -1137,7 +1137,7 @@ def _range_panel():
     return load_dtl(
         '<panel>'
         '<varclass name="SZ" type="numeric">'
-        '  <checkl checkmsg="M001"><checki type="range">0 100</checki></checkl>'
+        '  <checkl msg="M001"><checki type="range">0 100</checki></checkl>'
         '</varclass>'
         '<varlist><vardcl name="sz" varclass="SZ"/></varlist>'
         '<dtafld row="8" col="1" fldcol="16" datavar="sz" entwidth="5">Size</dtafld>'
@@ -1169,7 +1169,7 @@ def test_values_check():
     s = load_dtl(
         '<panel>'
         '<varclass name="YN" type="char">'
-        '  <checkl checkmsg="M2"><checki type="values">YES NO</checki></checkl>'
+        '  <checkl msg="M2"><checki type="values">YES NO</checki></checkl>'
         '</varclass>'
         '<varlist><vardcl name="flag" varclass="YN"/></varlist>'
         '<dtafld row="1" col="1" fldcol="10" datavar="flag" entwidth="3">F</dtafld>'
@@ -1183,7 +1183,7 @@ def test_values_check():
 def _check_panel(checki):
     s = load_dtl(
         '<panel>'
-        '<varclass name="C"><checkl checkmsg="M">' + checki + '</checkl></varclass>'
+        '<varclass name="C"><checkl msg="M">' + checki + '</checkl></varclass>'
         '<varlist><vardcl name="f" varclass="C"/></varlist>'
         '<dtafld row="1" col="1" fldcol="10" datavar="f" entwidth="20">F</dtafld>'
         '</panel>'
@@ -1233,6 +1233,57 @@ def test_name_check_requires_a_valid_symbol():
 def test_checkl_outside_varclass_raises():
     with pytest.raises(DTLError):
         load_dtl('<panel><checkl><checki type="range">0 1</checki></checkl></panel>')
+
+
+# ── <varclass> TYPE forms + the IBM MSG attribute (#129) ─────────────────────
+
+def _varclass_panel(vc):
+    s = load_dtl(
+        '<panel>' + vc +
+        '<varlist><vardcl name="f" varclass="C"/></varlist>'
+        '<area><dtafld datavar="f" row="1" col="1" entwidth="30">F</dtafld></area>'
+        '</panel>'
+    )
+    return s, s.field_addr("f")
+
+
+def test_varclass_char_length_is_enforced():
+    # type="char N" caps the input length (previously the N was parsed and ignored).
+    s, addr = _varclass_panel('<varclass name="C" type="char 8" msg="M1">')
+    assert s.first_validation_error({addr: "SHORT"}) is None
+    msgid, subs = s.first_validation_error({addr: "TOOLONGVALUE"})
+    assert msgid == "M1" and subs == {"VALUE": "TOOLONGVALUE", "MAX": 8}
+
+
+def test_varclass_numeric_precision_is_enforced():
+    # type="numeric N" makes the field numeric and caps the digit count.
+    s, addr = _varclass_panel('<varclass name="C" type="numeric 3" msg="M2">')
+    fld = next(i for i in s.items if isinstance(i, Field))
+    assert fld.numeric is True
+    assert s.first_validation_error({addr: "12"}) is None
+    assert s.first_validation_error({addr: "12345"})[0] == "M2"
+
+
+def test_checkl_reads_ibm_msg_attribute():
+    # IBM's attribute is MSG (we used to read a non-IBM "checkmsg").
+    s, addr = _varclass_panel(
+        '<varclass name="C"><checkl msg="TSO7">'
+        '<checki type="range">0 9</checki></checkl></varclass>')
+    assert s.validations["F"]["checkmsg"] == "TSO7"
+    assert s.first_validation_error({addr: "99"})[0] == "TSO7"
+
+
+def test_class_msg_is_the_fallback_for_type_checks():
+    # A <varclass msg=> with no <checkl> still carries a message for its TYPE check;
+    # a <checkl msg=> overrides it for the combined checks.
+    s, addr = _varclass_panel('<varclass name="C" type="char 3" msg="CLS">')
+    assert s.first_validation_error({addr: "TOOLONG"})[0] == "CLS"
+    s2, addr2 = _varclass_panel(
+        '<varclass name="C" type="char 4" msg="CLS">'
+        '<checkl msg="CHK"><checki type="alpha"></checkl></varclass>')
+    assert s2.validations["F"]["checkmsg"] == "CHK"                  # checkl MSG wins
+    assert s2.first_validation_error({addr2: "ABCDE"})[0] == "CHK"   # TYPE maxlen(4)
+    assert s2.first_validation_error({addr2: "AB12"})[0] == "CHK"    # checkl alpha
 
 
 def test_checki_unsupported_type_is_still_lenient():
