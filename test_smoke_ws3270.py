@@ -644,3 +644,21 @@ def test_ws3270_starttls_upgrades_a_plaintext_connection(tls_cert):
     ], noverify=True)     # plaintext connect (no L:), accept the self-signed cert
 
     assert "ISPF Primary Option Menu" in out, out[-1500:]
+
+
+def test_ws3270_logon_error_sounds_the_alarm():
+    """A bad logon (wrong password) shows the error AND sounds the terminal alarm
+    — real TSO/ISPF beeps on a logon error. tsomsgs marks those messages
+    msgtype=WARNING, which sets the WCC sound-alarm bit; the emulator's trace
+    records it. A *successful* logon panel carries no alarm."""
+    _require_emulator()
+    port = _serve_one_client()
+    out, trace = _drive_traced(port, [
+        "Wait(20,InputField)",
+        "String(IBMUSER)", "Tab()", "String(WRONGPW)", "Enter()",
+        "Wait(20,Output)",
+        "Ascii()",
+        "Quit()",
+    ])
+    assert "PASSWORD NOT CORRECT" in out, out[-1200:]
+    assert "alarm" in trace, trace[-2000:]     # WCC sound-alarm bit on the error write

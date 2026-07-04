@@ -4,9 +4,11 @@
      in ISPPLIB. Each <msg> is referenced by id; &USERID is substituted at
      display time. The displayed text is "<msgid> <text>". -->
 <msgmbr name="IKJ564">
-  <msg msgid="IKJ56425I">PASSWORD NOT CORRECT FOR &USERID</msg>
-  <msg msgid="IKJ56700I">USERID MUST BE SPECIFIED</msg>
+  <!-- msgtype=WARNING sounds the terminal alarm on display (as real TSO/ISPF
+       beeps on a logon error); an explicit alarm=yes|no would override it. -->
+  <msg msgid="IKJ56425I" msgtype="WARNING">PASSWORD NOT CORRECT FOR &USERID</msg>
+  <msg msgid="IKJ56700I" msgtype="WARNING">USERID MUST BE SPECIFIED</msg>
   <!-- Application-defined message referenced by the SIZE field's <checkl>.
        &VALUE, &MIN, &MAX are supplied by the range check at display time. -->
-  <msg msgid="TSO001">SIZE &VALUE IS NOT IN THE RANGE &MIN TO &MAX</msg>
+  <msg msgid="TSO001" msgtype="WARNING">SIZE &VALUE IS NOT IN THE RANGE &MIN TO &MAX</msg>
 </msgmbr>
