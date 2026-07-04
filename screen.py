@@ -686,6 +686,11 @@ class Screen:
             )
         )
         for item in self.items:
+            # Drop anything that flowed off the bottom of the panel: the buffer is
+            # depth*width cells and 3270 addressing wraps, so a row >= depth would
+            # otherwise reappear on row 0 and corrupt the top of the screen.
+            if not (0 <= getattr(item, "row", 0) < self.depth):
+                continue
             item.render(buf, color=color, cols=self.width, rows=self.depth)
         if self.cursor_at is not None:
             _emit_sba(buf, self.cursor_at[0], self.cursor_at[1], self.width)
