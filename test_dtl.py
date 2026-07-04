@@ -1110,6 +1110,23 @@ def test_panel_title_text_centered():
     assert s.items[1] == Text(1, 1, "body", DisplayIntensity.NORMAL)   # flows below title
 
 
+def test_title_only_panel_renders_its_title_at_eof():
+    # DTL omits end tags: a panel whose only content is its title, with no <body>
+    # and no </panel> (as in guide examples ex004/ex078), still renders the title.
+    # It was previously lost because the title was finalised only by a following
+    # child tag or an end tag, neither of which a title-only panel has.
+    s = load_dtl('<panel name="widget22" width="40">Widgets')
+    assert s.title == "Widgets"
+    assert s.items == [Text(0, (40 - len("Widgets")) // 2, "Widgets",
+                            DisplayIntensity.NORMAL)]
+
+
+def test_open_content_element_is_flushed_at_eof():
+    # An open content element with no end tag and no </panel> is flushed at EOF.
+    s = load_dtl('<panel name="p">Title<info row="3" col="1">Trailing')
+    assert [i.text for i in s.items] == ["Title", "Trailing"]
+
+
 def test_nested_unordered_lists_matches_guide_figure():
     # IBM DTL Guide "Nested Unordered Lists" figure: a centered title, then o/-/--
     # bullets by depth with increasing indentation. (Verbatim guide source.)

@@ -37,7 +37,7 @@ EXAMPLE_FILES = sorted(glob.glob(os.path.join(_DIR, "*.dtl")))
 # bullets/indentation; 132 with <msg suffix> + lenient unsupported <checki>;
 # 134 with <dtacol>/<divider> + tolerating a stray <vardcl> (as ISPDTLC does);
 # 135 with implicit <pdc>/<abc> end tags (action-bar pull-downs).
-RENDER_BASELINE = 135
+RENDER_BASELINE = 137
 
 
 def _load(path):
