@@ -2106,6 +2106,19 @@ def test_dtafld_pmtfmt_ispf_and_none():
     assert any(t.text == "Name" for t in none.items if isinstance(t, Text))
 
 
+def test_size_attributes_tolerate_star_and_list_forms():
+    # Hardening sweep: size attributes the docs allow as * / ** / quoted-list were
+    # parsed with a bare int() and crashed. They must now fall back gracefully
+    # (INFO fill WIDTH, MSGMBR WIDTH, LSTCOL COLWIDTH, SELFLD ENTWIDTH).
+    load_dtl('<panel><info row="1" col="1" fill="-" width="*"/></panel>')
+    load_dtl('<msgmbr name="m" width="*"><msg msgid="X1">hi</msg></msgmbr>')
+    load_dtl('<panel><selfld row="1" col="1" entwidth="2 2"><choice>A</selfld></panel>')
+    # a LSTCOL with COLWIDTH=* falls back to the heading width (no crash)
+    hdr = load_dtl('<panel><lstfld row="1" col="1">'
+                   '<lstcol colwidth="*" datavar="x">Heading</lstcol></lstfld></panel>')
+    assert any(getattr(t, "text", "") == "Heading" for t in hdr.items)
+
+
 def test_dtafld_star_widths_do_not_crash():
     # PMTWIDTH=n|*|** and DESWIDTH=n|* are valid DTL; the '*'/'**' forms must not
     # raise (they were parsed with a bare int() before).

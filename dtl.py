@@ -569,7 +569,9 @@ class _DTLParser(HTMLParser):
             sf["single_eligible"] = (sf["auto_cols"] and not sf["multi"]
                                      and str(a.get("type", "single")).strip().lower()
                                      == "single")
-            sf["entwidth"] = int(a.get("entwidth", 2))
+            # ENTWIDTH is 2 | n | 'e1 e2...en'; we take a single width (the list
+            # form falls back to the default 2).
+            sf["entwidth"] = self._opt_int(a.get("entwidth"), 2)
             sf["auto_single"] = False
             sf["period"] = False
         elif tag == "dtafldd":
@@ -793,7 +795,7 @@ class _DTLParser(HTMLParser):
         elif tag == "msgmbr":
             self._in_msgmbr = True
             self._msgmbr_name = a.get("name", "")
-            self._msgmbr_width = int(a["width"]) if "width" in a else None
+            self._msgmbr_width = self._opt_int(a.get("width"))
         elif tag == "msg":
             if not self._in_msgmbr:
                 raise DTLError("<msg> outside of a <msgmbr>")
@@ -1174,13 +1176,14 @@ class _DTLParser(HTMLParser):
         return n if lo <= n <= hi else None
 
     @staticmethod
-    def _opt_int(value):
-        """``int(value)`` or ``None`` when absent / non-numeric (e.g. a ``*`` / ``**``
-        / ``%varname`` PMTWIDTH on a container, which each field then resolves)."""
+    def _opt_int(value, default=None):
+        """``int(value)`` or ``default`` when absent / non-numeric — e.g. a size
+        attribute's ``*`` / ``**`` / ``FIT`` / ``%varname`` / quoted-list form,
+        which the docs allow but we do not compute (fall back rather than crash)."""
         try:
             return int(str(value).strip())
         except (ValueError, TypeError):
-            return None
+            return default
 
     @staticmethod
     def _prompt_width(value, prompt_len, avail):
@@ -1525,9 +1528,8 @@ class _DTLParser(HTMLParser):
         if self._lstfld is None:
             return
         heading = " ".join(content.split())
-        if "colwidth" in a:
-            width = int(a["colwidth"])
-        else:
+        width = self._opt_int(a.get("colwidth"))
+        if width is None:                      # absent / '*' → as wide as the heading
             width = max(len(heading), 1)
         self._lstfld["cols"].append({
             "heading": heading,
@@ -1642,7 +1644,7 @@ class _DTLParser(HTMLParser):
         else:
             role = "text"
         if "fill" in a:
-            content = a["fill"] * int(a.get("width", 0))
+            content = a["fill"] * self._opt_int(a.get("width"), 0)
             row, col, _ = self._resolve_pos(a, "info")
             self.screen.add(Text(row, col, content, _intensity(a), role=role))
             return
