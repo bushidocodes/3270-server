@@ -1541,38 +1541,76 @@ def test_note_renders_as_a_labelled_callout():
 
 
 @pytest.mark.parametrize("tag,label", [
-    ("warning", "Warning:"), ("caution", "Caution:"),
-    ("attention", "Attention:"), ("nt", "Note:"),
+    ("warning", "Warning:"), ("attention", "Attention:"),
 ])
 def test_admonition_labels(tag, label):
+    # ATTENTION / WARNING prefix the body inline (the reference figures).
     s = load_dtl(f'<panel width="50"><area><info><{tag}>Mind the gap.'
                  f'</info></area></panel>')
     texts = [t.text for t in s.items if isinstance(t, Text)]
     assert any(t.startswith(label) and "Mind the gap." in t for t in texts)
 
 
+def test_note_wraps_to_margin_and_nt_hangs_and_text_overrides_heading():
+    # #116: <note> is a single paragraph, "Note:" inline, wrapping to the margin.
+    s = load_dtl('<panel width="50"><area><info>'
+                 '<note>Mind the gap between the platform and the train.</note>'
+                 '</info></area></panel>')
+    assert any(t.text.startswith("Note: Mind the gap") for t in s.items
+               if isinstance(t, Text))
+    # <nt> hangs its body under the text: heading and body are separate Texts.
+    nt = load_dtl('<panel width="30"><area><info>'
+                  '<nt>Mind the gap here please.</nt></info></area></panel>')
+    head = next(t for t in nt.items if getattr(t, "text", "") == "Note:")
+    body = [t for t in nt.items if t.col == head.col + 6]      # hung past "Note: "
+    assert body and body[0].row == head.row                    # first line shares the row
+    # TEXT= replaces the heading.
+    tip = load_dtl('<panel width="40"><area><info>'
+                   '<note text="Tip:">Save often.</note></info></area></panel>')
+    assert any(t.text.startswith("Tip: Save often") for t in tip.items
+               if isinstance(t, Text))
+
+
+def test_caution_heading_on_own_line_and_emphasized():
+    # Unlike ATTENTION/WARNING, the CAUTION reference puts "CAUTION:" (uppercase)
+    # on its own line with the emphasised (high-intensity) body beneath it.
+    s = load_dtl('<panel width="50"><area><info>'
+                 '<p>The DELETE command erases the file.'
+                 '<p><caution>Issuing DELETE permanently removes the file.</caution>'
+                 '</info></area></panel>')
+    heading = next(t for t in s.items if getattr(t, "text", "") == "CAUTION:")
+    assert heading.intensity == DisplayIntensity.HIGH
+    body = [t for t in s.items if t.row > heading.row
+            and getattr(t, "text", "").startswith("Issuing")]
+    assert body and all(t.intensity == DisplayIntensity.HIGH for t in body)
+
+
 def test_inline_note_keeps_following_paragraph():
-    # <nt>text<p>more</nt>: the note flows labelled, the nested <p> flows after it.
+    # <nt>text<p>more</nt>: the note flows labelled (heading + hung body), the
+    # nested <p> flows after it, and the trailing <p> renders too.
     s = load_dtl(
         '<panel width="50"><area><info>'
         '<nt>Out of stock.<p>Arrives in three days.</nt>'
         '<p>Order below.</info></area></panel>'
     )
     texts = [t.text for t in s.items if isinstance(t, Text)]
-    assert any(t.startswith("Note: Out of stock.") for t in texts)
+    assert "Note:" in texts and any("Out of stock." in t for t in texts)
     assert any("three days" in t for t in texts)
     assert any("Order below." in t for t in texts)
 
 
-def test_note_list_renders_heading_and_bulleted_items():
+def test_note_list_renders_heading_and_numbered_items():
+    # #116: NOTEL is a "Notes:" heading, a blank line, then NUMBERED items (1. 2.)
+    # — the reference figure, not the bulleted form we had before.
     s = load_dtl(
         '<panel width="50"><area><info><notel>'
         '<li>First note.<li>Second note.</notel></info></area></panel>'
     )
     texts = [t.text for t in s.items if isinstance(t, Text)]
     assert "Notes:" in texts
+    assert "1." in texts and "2." in texts               # numbered, not bulleted
+    assert "o" not in texts                              # no ul bullet
     assert any("First note." in t for t in texts)
-    assert any("Second note." in t for t in texts)
 
 
 # ── list/table fields (<lstfld>/<lstcol>/<lstgrp>) ───────────────────────────
@@ -1893,6 +1931,77 @@ def test_panel_reference_figure_snapshot():
         "   ________",
     ])
     assert _ascii_snapshot(s) == expected
+
+
+# Admonition reference figures (ATTENTION/CAUTION/WARNING, NOTE/NT/NOTEL). These
+# help panels omit WIDTH, so we render at the DTL default (76) — the reference
+# figures were displayed narrower, so the wrap points differ but the admonition
+# *format* matches. The runtime F-key area is ISPF chrome, not markup.
+
+def test_caution_reference_figure_snapshot():
+    """CAUTION-reference Figure 1: "CAUTION:" on its own line, emphasised body."""
+    src = ("<!DOCTYPE DM SYSTEM>\n<HELP NAME=caution DEPTH=20>Help for DELETE Command\n"
+           "<AREA>\n<INFO>\n"
+           "<P>The DELETE command erases the specified file from storage.\n"
+           "<P><CAUTION>Issuing the DELETE command permanently removes the file "
+           "from storage. There is no possibility of recovery.</CAUTION>\n"
+           "<P>You can exit from the DELETE operation by pressing F12.\n"
+           "</INFO>\n</AREA>\n</HELP>")
+    assert _ascii_snapshot(load_dtl(src)) == "\n".join([
+        "                            Help for DELETE Command",
+        " The DELETE command erases the specified file from storage.",
+        " CAUTION:",
+        " Issuing the DELETE command permanently removes the file from storage. There is",
+        " no possibility of recovery.",
+        " You can exit from the DELETE operation by pressing F12.",
+    ])
+
+
+def test_nt_reference_figure_snapshot():
+    """NT-reference Figure 1: "Note:" then the body hung indented under the text.
+
+    Delta: the nested <p> ("If the librarian ...") flows at the left margin; the
+    figure hangs it under the note too (tracked separately)."""
+    src = ("<!DOCTYPE DM SYSTEM>\n<HELP NAME=nt DEPTH=20>Book / Periodical Search Help\n"
+           "<AREA>\n<INFO>\n"
+           "<P>This entry screen allows you to locate a desired book or periodical "
+           "by entering the title in the entry field.\n"
+           "<NT>If the item you are trying to locate is not in stock and you would "
+           "like to reserve it, please see the librarian at the front desk.\n"
+           "<P>If the librarian is not there, please do not yell for help.  "
+           "This is a library!\n</NT>\n</INFO>\n</AREA>\n</HELP>")
+    assert _ascii_snapshot(load_dtl(src)) == "\n".join([
+        "                         Book / Periodical Search Help",
+        " This entry screen allows you to locate a desired book or periodical by",
+        " entering the title in the entry field.",
+        " Note: If the item you are trying to locate is not in stock and you would like",
+        "       to reserve it, please see the librarian at the front desk.",
+        " If the librarian is not there, please do not yell for help. This is a library!",
+    ])
+
+
+def test_notel_reference_figure_snapshot():
+    """NOTEL-reference Figure 1: "Notes:" + a blank line + numbered items."""
+    src = ("<!DOCTYPE DM SYSTEM>\n<HELP NAME=notel DEPTH=20>Book / Periodical Search Help\n"
+           "<AREA>\n<INFO>\n"
+           "<P>This entry screen allows you to locate a desired book or periodical "
+           "by entering the title in the entry field.\n"
+           "<NOTEL>\n"
+           "<LI>If the item you are trying to locate is not in stock and you would "
+           "like to reserve it, please see the librarian at the front desk.\n"
+           "<LI>If the librarian is not there, please do not yell for help.\n"
+           "<P>This is a library!\n</NOTEL>\n</INFO>\n</AREA>\n</HELP>")
+    assert _ascii_snapshot(load_dtl(src)) == "\n".join([
+        "                         Book / Periodical Search Help",
+        " This entry screen allows you to locate a desired book or periodical by",
+        " entering the title in the entry field.",
+        " Notes:",
+        "",
+        " 1.  If the item you are trying to locate is not in stock and you would like to",
+        "     reserve it, please see the librarian at the front desk.",
+        " 2.  If the librarian is not there, please do not yell for help.",
+        "     This is a library!",
+    ])
 
 
 def test_nested_unordered_lists_matches_guide_figure():

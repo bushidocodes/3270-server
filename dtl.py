@@ -265,10 +265,12 @@ _HIGHLIGHTS = {
 # unless it carries an explicit COLOR.
 
 # Admonition tags: a note/callout that flows as a labelled block within body text
-# (help panels) — the label prefixes the text. <notel> (below) is the list form.
+# (help panels). ATTENTION/WARNING/NOTE prefix the text inline; CAUTION puts its
+# uppercase heading on its own line with the emphasised body beneath (see
+# _emit_info). <notel> (below) is the list form.
 _ADMONITIONS = {
     "note": "Note:", "nt": "Note:",           # note / inline note
-    "attention": "Attention:", "caution": "Caution:", "warning": "Warning:",
+    "attention": "Attention:", "caution": "CAUTION:", "warning": "Warning:",
 }
 # Block tags whose text flows as protected lines (like <info>): paragraphs,
 # list items (<li>/<dt>/<dd>/<pt>/<pd>/<lp>), preformatted <lines>/<xmp>, and the
@@ -473,11 +475,17 @@ class _DTLParser(HTMLParser):
             # indents its items with no marker (see _emit_listitem).
             self._lists.append({"type": tag, "n": 0})
         elif tag == "notel":
-            # A note list: a "Notes:" heading, then bulleted <li> note items.
+            # A note list: a "Notes:" heading (TEXT= override, INTENS/COLOR/HILITE
+            # style it), a blank line, then NUMBERED <li> items (1. 2. …).
             ctx = self._areas[-1] if self._areas else None
             if ctx is not None:
-                self._emit_flow_lines("Notes:", ctx["row"], ctx["col"], ctx)
-            self._lists.append({"type": "ul", "n": 0})
+                heading = (a.get("text") or "Notes:").strip()
+                indent = self._opt_int(a.get("indent"), 0)
+                self.screen.add(Text(ctx["row"], ctx["col"] + indent, heading,
+                                     _intensity(a, "intens"), color=self._color(a),
+                                     highlight=self._hilite(a), role="text"))
+                ctx["row"] += 2               # heading + blank line before the items
+            self._lists.append({"type": "ol", "n": 0})
         elif tag in ("dl", "parml"):
             # A definition/parameter list carries its term-column width (tsize)
             # and break style; <dt>/<dd> (<pt>/<pd>) entries lay out against it.
@@ -1032,6 +1040,8 @@ class _DTLParser(HTMLParser):
                 self._lstgrp["heading"] = " ".join(content.split())
         elif tag == "lstcol":
             self._add_lstcol(a, content)
+        elif tag in ("note", "nt"):
+            self._emit_note(tag, a, content)
         elif tag in _TEXT_TAGS:
             self._emit_info(a, content, tag, runs=runs)
         elif tag == "dtafld":
@@ -1363,7 +1373,7 @@ class _DTLParser(HTMLParser):
         return f"{n}."
 
     def _emit_flow_lines(self, text, row, col, ctx, marker=None, marker_col=None,
-                         role=None):
+                         role=None, intensity=DisplayIntensity.NORMAL):
         """Word-wrap ``text`` and emit it as protected lines from ``row`` at
         ``col`` (hanging indent for continuations). Optionally place a ``marker``
         (bullet/number) on the first line. Advances the flow cursor."""
@@ -1371,7 +1381,7 @@ class _DTLParser(HTMLParser):
         if marker is not None:
             self.screen.add(Text(row, marker_col, marker, DisplayIntensity.NORMAL))
         for i, ln in enumerate(lines):
-            self.screen.add(Text(row + i, col, ln, DisplayIntensity.NORMAL, role=role))
+            self.screen.add(Text(row + i, col, ln, intensity, role=role))
         if ctx is not None:
             ctx["row"] = row + len(lines)
 
@@ -1628,9 +1638,11 @@ class _DTLParser(HTMLParser):
         # concatenation is the field's plain text, so mono renders identically.
         if runs is not None and not content:
             content = "".join(t for t, _, _ in runs)
-        # An admonition (<note>/<warning>/…) flows as a labelled callout.
+        # An admonition (<note>/<warning>/…) flows as a labelled callout. CAUTION
+        # is special: heading on its own line + emphasised body (handled below).
         label = _ADMONITIONS.get(tag)
-        if label and content.strip():
+        caution = tag == "caution"
+        if label and content.strip() and not caution:
             content = label + " " + content.strip()
         # CUA role → default colour: a fill line is a separator rule; a top/panel
         # instruction is an instruction; a high-intensity heading is the title;
@@ -1685,12 +1697,63 @@ class _DTLParser(HTMLParser):
                                      role=role))
             ctx["row"] = row + len(lines)
             return
+        if caution:
+            # CAUTION: uppercase heading on its own line, then the emphasised
+            # (high-intensity) body beneath it (per the CAUTION reference).
+            self.screen.add(Text(row, col, label, DisplayIntensity.HIGH, role=role))
+            if ctx is not None:
+                ctx["row"] = row + 1
+            self._emit_flow_lines(text, row + 1, col, ctx, role=role,
+                                  intensity=DisplayIntensity.HIGH)
+            return
         if runs is not None:
             # Flowed text with inline <hp>: keep each phrase's colour/highlight
             # across the word-wrap (SA runs per line), instead of dropping to plain.
             self._emit_flow_runs(runs, row, col, ctx, role)
             return
         self._emit_flow_lines(text, row, col, ctx, role=role)
+
+    def _emit_note(self, tag, a, content):
+        """Render a <note>/<nt>. The heading (``TEXT=`` override, else ``Note:``)
+        begins the note; ``INDENT`` shifts the block; ``INTENS``/``COLOR``/
+        ``HILITE`` style the heading. ``<note>`` is a single paragraph wrapped to
+        the left margin; ``<nt>`` hangs its body indented under the text (aligned
+        past the heading), and may carry nested paragraphs."""
+        text = " ".join(content.split())
+        row, col, ctx = self._resolve_pos(a, tag)
+        if self._lists:
+            col += len(self._lists) * self._LIST_INDENT
+        col += self._opt_int(a.get("indent"), 0)
+        heading = (a.get("text") or "Note:").strip()
+        h_int = _intensity(a, "intens")
+        h_col, h_hil = self._color(a), self._hilite(a)
+        head = heading + " "
+        if tag == "nt":
+            # Heading on the first line; body wrapped and hung under the text.
+            self.screen.add(Text(row, col, heading, h_int, color=h_col,
+                                 highlight=h_hil, role="text"))
+            body_col = col + len(head)
+            lines = self._wrap(text, max(1, self.screen.width - body_col - 1)) \
+                if text else []
+            for i, ln in enumerate(lines):
+                self.screen.add(Text(row + i, body_col, ln, DisplayIntensity.NORMAL,
+                                     role="text"))
+            if ctx is not None:
+                ctx["row"] = row + max(len(lines), 1)
+            return
+        # <note>: heading inline, body wrapped to the left margin.
+        lines = self._wrap((head + text).strip(),
+                           max(1, self.screen.width - col - 1))
+        for i, ln in enumerate(lines):
+            if i == 0 and (h_col or h_hil):   # colour just the heading run
+                runs = [(ln[:len(head)], h_col, h_hil), (ln[len(head):], None, None)]
+                self.screen.add(Text.rich(row, col, [r for r in runs if r[0]],
+                                          intensity=h_int, role="text"))
+            else:
+                self.screen.add(Text(row + i, col, ln, DisplayIntensity.NORMAL,
+                                     role="text"))
+        if ctx is not None:
+            ctx["row"] = row + len(lines)
 
     # ── data area (<da> / <attr>) ────────────────────────────────────────────
 
