@@ -1631,9 +1631,9 @@ def test_list_field_columns_laid_out_with_headings():
     ]
 
 
-def test_list_field_group_heading_centered_over_columns():
-    # A <lstgrp headline=yes> heading is centered over its columns' span, on the
-    # row above the column headings.
+def test_list_field_group_headline_dashes_over_columns():
+    # A <lstgrp headline=yes> heading is centered over its columns' span and padded
+    # with a dashed rule ("--- Wk ----"), on the row above the column headings.
     s = load_dtl(
         '<panel name="p"><area>'
         '<lstfld><lstgrp headline=yes>Wk'
@@ -1643,11 +1643,28 @@ def test_list_field_group_heading_centered_over_columns():
     )
     H = DisplayIntensity.HIGH
     assert s.items == [
-        Text(0, 5, "Wk", H),                       # centered over cols 1..12
+        Text(0, 1, "--- Wk ----", H),              # dashed rule over cols 1..11
         Text(1, 1, "Mon", H), Text(1, 7, "Tue", H),
         Field(row=2, col=1, length=5, name="a", terminator=False),
         Field(row=2, col=7, length=5, name="b", terminator=True),
     ]
+
+
+def test_list_column_heading_not_truncated_and_all_groups_shown():
+    # #53: a heading wider than COLWIDTH sets the column formatting width (so "MI"
+    # over a 1-wide column isn't clipped to "M"); every group with a heading shows
+    # on the group row, not only HEADLINE=yes ones.
+    s = load_dtl(
+        '<panel name="p" width="60"><area><lstfld>'
+        '<lstgrp headline=yes>Subscriber'
+        '<lstcol datavar=n colwidth=1>MI<lstcol datavar=l colwidth=12>Last</lstgrp>'
+        '<lstgrp>Phone<lstcol datavar=p colwidth=12>Number</lstgrp>'
+        '</lstfld></area></panel>'
+    )
+    texts = [t.text for t in s.items if isinstance(t, Text)]
+    assert "MI" in texts                              # heading kept full (colwidth 1)
+    assert any(t.startswith("-") and "Subscriber" in t for t in texts)  # headline dashes
+    assert "Phone" in texts                           # headline=no group still shown
 
 
 def test_list_field_display_column_and_data_rows():
@@ -2001,6 +2018,44 @@ def test_notel_reference_figure_snapshot():
         "     reserve it, please see the librarian at the front desk.",
         " 2.  If the librarian is not there, please do not yell for help.",
         "     This is a library!",
+    ])
+
+
+def test_lstfld_reference_figure_snapshot():
+    """LSTFLD/LSTCOL reference Figure 1 (Subscriber List): a grouped table — the
+    HEADLINE=yes group is a dashed rule around its heading, other groups show
+    plain, column headings are not truncated to COLWIDTH, then the data/model rows.
+
+    Deltas from the IBM figure (documented): no "BOTTOM OF DATA" footer (#220);
+    the column gutter is 1 (the figure reserves 2-3 for CUA attribute bytes, #221);
+    input/BOTH cells show as blank fields here (the snapshot renders fields as
+    underscores); the runtime "ROW x TO y OF z" status + F-keys are ISPF chrome."""
+    src = ("<PANEL NAME=lstcola WIDTH=76>Subscriber List\n"
+           "<TOPINST>Enter phone number and approved indicator for each person.\n"
+           "<AREA>\n  <LSTFLD>\n"
+           "    <LSTGRP HEADLINE=yes>Subscriber Name\n"
+           "      <LSTCOL DATAVAR=xfname USAGE=out COLWIDTH=15>First Name\n"
+           "      <LSTCOL DATAVAR=xlname USAGE=out COLWIDTH=15>Last Name\n"
+           "      <LSTCOL DATAVAR=xmid   USAGE=out COLWIDTH=1>MI\n"
+           "    </LSTGRP>\n"
+           "    <LSTGRP>Phone\n"
+           "      <LSTCOL DATAVAR=xphone COLWIDTH=12>Number\n"
+           "    </LSTGRP>\n"
+           "    <LSTGRP>Approved\n"
+           "      <LSTCOL DATAVAR=xapp USAGE=in REQUIRED=yes COLWIDTH=1>(Y or N)\n"
+           "    </LSTGRP>\n  </LSTFLD>\n</AREA>\n<CMDAREA>\n</PANEL>")
+    rows = [{"xfname": "Pete", "xlname": "Moss", "xmid": "P"},
+            {"xfname": "Sally", "xlname": "Forth", "xmid": "N"},
+            {"xfname": "Melba", "xlname": "Toast", "xmid": "T"}]
+    assert _ascii_snapshot(load_dtl(src, rows=rows)) == "\n".join([
+        "                              Subscriber List",
+        " Enter phone number and approved indicator for each person.",
+        " -------- Subscriber Name ---------    Phone     Approved",
+        " First Name      Last Name       MI Number       (Y or N)",
+        " Pete            Moss            P   ____________ _",
+        " Sally           Forth           N   ____________ _",
+        " Melba           Toast           T   ____________ _",
+        "   ________",
     ])
 
 
