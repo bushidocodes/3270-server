@@ -211,6 +211,17 @@ def test_dotted_jump_opens_member_list(session):
     assert "Member List" in _text(_recv_screen(sock))
 
 
+def test_utility_library_leaf_routes_via_submenu_proc(session):
+    # Option 3 opens the Utility menu; typing 1 there routes through utility.dtl's
+    # own )PROC ("1" -> PGM(memberlist)) to the Library member list (#55 PR 3).
+    sock, _ = session
+    _login(sock)
+    sock.sendall(_reply(fields={ZCMD_ADDR: "3"}))
+    assert "Utility Selection Panel" in _text(_recv_screen(sock))
+    sock.sendall(_reply(fields={ZCMD_ADDR: "1"}))      # option 1 on the sub-menu
+    assert "Member List" in _text(_recv_screen(sock))
+
+
 def test_settings_pulldown_item_help(session):
     sock, _ = session
     _login(sock)
