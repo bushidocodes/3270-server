@@ -20,7 +20,7 @@ explicitly, while the conformance corpus (``tests/dtl_examples/``) exercises flo
 Like real DTL the source is SGML: files may begin with a ``<!DOCTYPE DM SYSTEM>``
 prolog (tolerated and ignored), tag and attribute names are case-insensitive
 (``<PANEL>`` == ``<panel>``), and boolean attributes may be minimized
-(``<dtafld hidden>`` means ``hidden="yes"``).
+(``<dtafld numeric>`` means ``numeric="yes"``).
 
 Supported tags
 --------------
@@ -108,7 +108,7 @@ renders centered on row 0, with the body flowing beneath it.
                                  substituted at display time. See `MessageCatalog`.
 
 ``<dtafld>`` attributes: ``datavar`` (field name sent back), ``entwidth`` (field
-length), ``hidden`` (non-display, e.g. password), ``numeric``, ``default``,
+length), ``display`` (``display=no`` is non-display, e.g. password), ``numeric``, ``default``,
 ``cursor`` (place the cursor here), ``mdt`` (default yes), ``intensity`` (prompt).
 
 Variable substitution: dialog-variable references are written ISPF-style with a
@@ -245,8 +245,8 @@ def _truthy(value, default=False):
 def _bool_attr(attrs, key, default=False):
     """Read a boolean DTL attribute, honouring SGML attribute minimization.
 
-    ``<dtafld hidden>`` (the attribute present with no value, ``html.parser``
-    reports ``None``) and ``hidden="hidden"`` both mean true, as does any of
+    ``<dtafld numeric>`` (the attribute present with no value, ``html.parser``
+    reports ``None``) and ``numeric="numeric"`` both mean true, as does any of
     yes/true/1/on. An absent attribute yields ``default``.
     """
     if key not in attrs:
@@ -1404,7 +1404,9 @@ class _DTLParser(HTMLParser):
             name=name,
             default=a.get("default", ""),
             numeric=self._resolve_numeric(a, name),
-            hidden=_bool_attr(a, "hidden"),
+            # IBM's DISPLAY=NO is a non-display field (e.g. a password); DISPLAY
+            # defaults to YES (shown).
+            hidden=str(a.get("display", "yes")).strip().lower() == "no",
             cursor=_bool_attr(a, "cursor"),
             mdt=_bool_attr(a, "mdt", default=True),
             # DTL COLOR= colours the entry field; else its CUA role (turquoise).
