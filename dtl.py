@@ -1271,6 +1271,74 @@ class _DTLParser(HTMLParser):
         if ctx is not None:
             ctx["row"] = row + len(lines)
 
+    @staticmethod
+    def _wrap_runs(runs, width):
+        """Word-wrap mixed-emphasis <hp> ``runs`` [(text, color, hilite)] into
+        lines, each a list of runs. Whitespace is collapsed to single spaces (as
+        the plain flow path does); each character — including the spaces inside a
+        highlighted phrase — keeps its run's emphasis, so a phrase survives a wrap
+        boundary with its highlight/colour intact."""
+        chars, prev_space = [], True         # (char, color, hilite), ws-collapsed;
+        for text, color, hilite in runs:     # a collapsed space keeps its run's emph
+            for ch in text:
+                if ch.isspace():
+                    if not prev_space:
+                        chars.append((" ", color, hilite))
+                    prev_space = True
+                else:
+                    chars.append((ch, color, hilite))
+                    prev_space = False
+        while chars and chars[-1][0] == " ":
+            chars.pop()
+        # Split into words, each with the emphasis of the space that followed it
+        # (that space becomes the joiner if the next word stays on the same line).
+        words, cur = [], []                  # each: (word_chars, (color, hilite)|None)
+        for ch, color, hilite in chars:
+            if ch == " ":
+                words.append((cur, (color, hilite))); cur = []
+            else:
+                cur.append((ch, color, hilite))
+        if cur:
+            words.append((cur, None))
+        lines, line, w, prev_sp = [], [], 0, None   # greedy pack words into width
+        for word, sp in words:
+            if not line:
+                line, w = list(word), len(word)
+            elif w + 1 + len(word) <= width:
+                sc, sh = prev_sp if prev_sp else (None, None)
+                line.append((" ", sc, sh)); line.extend(word); w += 1 + len(word)
+            else:
+                lines.append(line); line, w = list(word), len(word)
+            prev_sp = sp
+        if line:
+            lines.append(line)
+        out = []                             # coalesce each line's chars into runs
+        for ln in lines:
+            packed = []
+            for ch, color, hilite in ln:
+                if packed and packed[-1][1] == color and packed[-1][2] == hilite:
+                    packed[-1] = (packed[-1][0] + ch, color, hilite)
+                else:
+                    packed.append((ch, color, hilite))
+            out.append(packed)
+        return out
+
+    def _emit_flow_runs(self, runs, row, col, ctx, role):
+        """Emit word-wrapped <hp> runs as protected lines: a line carrying any
+        emphasis becomes a Text.rich (SA colour/highlight per phrase), otherwise a
+        plain Text. Mono renders either as the plain text, so it is byte-identical
+        to the non-<hp> flow path."""
+        lines = self._wrap_runs(runs, max(1, self.screen.width - (col + 1)))
+        for i, line_runs in enumerate(lines):
+            if any(c is not None or h is not None for _, c, h in line_runs):
+                self.screen.add(Text.rich(row + i, col, line_runs,
+                                          intensity=DisplayIntensity.NORMAL, role=role))
+            else:
+                self.screen.add(Text(row + i, col, "".join(t for t, _, _ in line_runs),
+                                     DisplayIntensity.NORMAL, role=role))
+        if ctx is not None:
+            ctx["row"] = row + len(lines)
+
     def _emit_listitem(self, a, content):
         """Emit one <li>: a depth-based bullet/number plus the item text, flowed,
         word-wrapped with a hanging indent, one level deeper per nested list."""
@@ -1513,6 +1581,11 @@ class _DTLParser(HTMLParser):
                 self.screen.add(Text(row + i, col, ln, DisplayIntensity.NORMAL,
                                      role=role))
             ctx["row"] = row + len(lines)
+            return
+        if runs is not None:
+            # Flowed text with inline <hp>: keep each phrase's colour/highlight
+            # across the word-wrap (SA runs per line), instead of dropping to plain.
+            self._emit_flow_runs(runs, row, col, ctx, role)
             return
         self._emit_flow_lines(text, row, col, ctx, role=role)
 
