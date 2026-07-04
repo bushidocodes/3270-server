@@ -870,6 +870,118 @@ def test_pdc_outside_abc_raises():
         load_dtl('<panel><ab row="0" col="1"><pdc>x</pdc></ab></panel>')
 
 
+# ── small structural tags: <pdsep>, <rp>, <t>, <varsub> (#118) ───────────────
+
+def test_pdsep_records_separator_between_pulldown_choices():
+    # <PDSEP> is a divider row within an action-bar pull-down: it closes the
+    # choice above it (DTL omits end tags) and lands a separator marker between
+    # the pull-down choices, without itself being a selectable choice.
+    s = load_dtl(
+        '<panel><ab row="0" col="1">'
+        '<abc>File'
+        '<pdc action=add>Add<pdsep>'
+        '<pdc action=exit>Exit'
+        '</abc></ab></panel>'
+    )
+    assert s.action_bar[0]["pdc"] == [
+        {"label": "Add", "action": "add", "mnemonic": None, "help": None},
+        {"separator": True},
+        {"label": "Exit", "action": "exit", "mnemonic": None, "help": None},
+    ]
+
+
+def test_pdsep_outside_abc_raises():
+    with pytest.raises(DTLError):
+        load_dtl('<panel><ab row="0" col="1"><pdsep></ab></panel>')
+
+
+def test_pdsep_renders_as_divider_row_in_open_pulldown():
+    # When the pull-down opens, the separator is a non-selectable divider row; the
+    # real choices keep a continuous 1..N numbering across it (and the renderer
+    # does not KeyError on the label-less separator entry).
+    import server
+    from screen import Screen
+    choice = {"label": "File", "row": 0, "col": 1, "pdc": [
+        {"label": "Add", "action": "add", "mnemonic": None, "help": None},
+        {"separator": True},
+        {"label": "Exit", "action": "exit", "mnemonic": None, "help": None},
+    ]}
+    scr = Screen()
+    # A PF3 reply closes the pull-down after it is laid out and sent once.
+    server._show_pulldown(_Sock2([bytes([0xF3, 0xFF, 0xEF])]), scr, choice)
+    by_row = {it.row: it.text for it in scr.items if it.col == 1}
+    # top border (0+1), items and the divider between them, bottom border.
+    assert by_row[2] == "| 1. Add  |"   # first choice numbered 1
+    assert by_row[3] == "|---------|"   # separator: a divider row, not a choice
+    assert by_row[4] == "| 2. Exit |"   # numbering continues past the separator
+
+
+class _Sock2:
+    """A fake client socket: replies with canned inbound records, then EOF."""
+    def __init__(self, replies):
+        self.sent = []
+        self._replies = iter(replies)
+    def sendall(self, data): self.sent.append(data)
+    def recv(self, _n): return next(self._replies, b"")
+    def settimeout(self, _t): pass
+    def close(self): pass
+
+
+def test_rp_reference_phrase_is_inline_underlined_link():
+    # <rp> (reference phrase — a link to another help panel) emphasises a phrase
+    # in place, like <hp>: one Text.rich whose phrase run is underlined.
+    s = load_dtl(
+        '<panel><info row="2" col="1">see <rp help=glospan>the glossary</rp> now</info></panel>'
+    )
+    assert len(s.items) == 1
+    assert s.items[0].runs == [
+        ("see ", None, None),
+        ("the glossary", None, Highlight.UNDERSCORE),
+        (" now", None, None),
+    ]
+
+
+def test_rp_mono_is_byte_identical_to_plain_text():
+    # A reference phrase is safe on a mono terminal: the underline is colour-only,
+    # so the data stream matches the plain concatenated line byte-for-byte.
+    s = load_dtl(
+        '<panel><info row="2" col="1">see <rp help=g>the glossary</rp> now</info></panel>'
+    )
+    it = s.items[0]
+    rich = bytearray(); it.render(rich, color=False)
+    plain = bytearray(); Text(2, 1, it.text).render(plain, color=False)
+    assert bytes(rich) == bytes(plain)
+    assert SA not in bytes(rich)
+
+
+def test_cmd_t_marks_truncation_point():
+    # <t> inside a <cmd> external name marks where truncation is allowed: the
+    # characters before it are the minimum abbreviation the user must type.
+    s = load_dtl(
+        '<panel><cmdtbl>'
+        '<cmd name=CANCEL>CANC<t>EL<cmdact action=cancel></cmd>'
+        '<cmd name=FIND>FIND<cmdact action=find></cmd>'
+        '</cmdtbl></panel>'
+    )
+    assert s.commands["CANCEL"]["trunc"] == 4
+    assert s.commands["FIND"]["trunc"] == 0        # no <t> -> not truncatable
+    assert sorted(s.commands["CANCEL"]) == ["action", "trunc"]  # no capture leaks
+    assert s.lookup_command("CANC") == "cancel"    # abbreviation matches
+    assert s.lookup_command("CAN") is None         # below the truncation point
+
+
+def test_varsub_substitutes_variable_in_message_text():
+    # <varsub var=NAME> inside <msg> text emits an &NAME. reference, resolved at
+    # display time by MessageCatalog.format — exactly like a literal &NAME.
+    cat = load_messages(
+        '<msgmbr name=LIB00>'
+        '<msg msgid=LIB001>Found <varsub var=count> entries in <varsub var=lib>.</msg>'
+        '</msgmbr>'
+    )
+    assert cat.format("LIB001", COUNT="7", LIB="SYS1") == \
+        "LIB001 Found 7 entries in SYS1."
+
+
 def test_settings_panel_has_action_bar():
     s = load_panel("settings")
     labels = [c["label"] for c in s.action_bar]
