@@ -40,8 +40,8 @@ Supported tags
 ``<info row col intensity>``     protected text (label / instruction / rule).
                                  ``fill`` + ``width`` repeats a character (rules).
 ``<topinst row col>``            top / panel / bottom instruction text. Render like
-``<pnlinst row col>``            ``<info>`` (protected text); semantic DTL tags.
-``<botinst row col>``
+``<pnlinst row col>``            ``<info>`` (protected text); semantic DTL tags. A
+``<botinst row col>``            flowed ``<botinst>`` anchors at the panel foot.
 ``<p>`` ``<lines>`` ``<dt>`` ``<dd>``  flowed text: paragraphs and items each render
 ``<pt>`` ``<pd>``                as protected lines, word-wrapped to the panel
                                  width with a hanging indent. DTL omits end tags,
@@ -1307,6 +1307,17 @@ class _DTLParser(HTMLParser):
         if self._lists:
             # A paragraph inside a list aligns with the list's item text.
             col += len(self._lists) * self._LIST_INDENT
+        if tag == "botinst" and ctx is not None:
+            # A bottom instruction anchors near the foot of the panel (leaving the
+            # last row free, as ISPF keeps for the key area), dropping below the
+            # body if the flow already reaches that far.
+            lines = self._wrap(text, max(1, self.screen.width - col - 1))
+            row = max(row, self.screen.depth - 1 - len(lines))
+            for i, ln in enumerate(lines):
+                self.screen.add(Text(row + i, col, ln, DisplayIntensity.NORMAL,
+                                     role=role))
+            ctx["row"] = row + len(lines)
+            return
         self._emit_flow_lines(text, row, col, ctx, role=role)
 
     # ── data area (<da> / <attr>) ────────────────────────────────────────────
