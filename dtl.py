@@ -84,9 +84,12 @@ renders centered on row 0, with the body flowing beneath it.
                                  variables numeric-only. May contain a ``<checkl>``.
 ``<checkl checkmsg>``            a validity-check list; ``checkmsg`` names the
                                  message shown when a check fails.
-``<checki type>min max``         a check item: ``type="range"`` (``min max`` text)
-``<checki type>v1 v2 ...``       or ``type="values"`` (allowed values). A field's
-                                 input is validated against its class's checks.
+``<checki type>min max``         a check item: ``type="range"`` (``min max`` text),
+``<checki type>v1 v2 ...``       ``type="values"`` (allowed values, as text or via
+``<checki type parm1 parm2>``    ``parm1=EQ|NE parm2='v1 v2'``), ``type="alpha"``
+                                 (letters), or ``type="name"`` (a valid symbol). A
+                                 field's input is validated against its class's
+                                 checks. Other types (``picture`` …) stay lenient.
 ``<varlist>``                    container for ``<vardcl>`` declarations.
 ``<vardcl name varclass>``       declares variable ``name`` to be of class
                                  ``varclass``; a field's ``numeric`` is inherited
@@ -1262,22 +1265,34 @@ class _DTLParser(HTMLParser):
         }
 
     def _emit_checki(self, a, content):
-        """A <checki> validity-check item: ``type="range"`` with ``min max`` text,
-        or ``type="values"`` with a space-separated list of allowed values."""
+        """A <checki> validity-check item. The value list / range may be given as
+        element text (``v1 v2 …`` / ``min max``) or — the form the guide uses — via
+        attributes: ``type=values parm1=EQ|NE parm2='v1 v2'`` (EQ = must be one of;
+        NE = must not be). ``alpha`` / ``name`` are character-class checks. Other
+        authentic types (``picture`` …) stay lenient (recognised but unenforced),
+        so a panel using them still loads and renders."""
         ctype = str(a.get("type", "")).strip().lower()
         words = content.split()
+        parm2 = a.get("parm2")
         if ctype == "range":
-            if len(words) != 2:
-                raise DTLError('<checki type="range"> needs "min max"')
-            self._checkl["checks"].append(
-                {"type": "range", "min": int(words[0]), "max": int(words[1])}
-            )
+            if parm2 is not None:                     # parm1=low-bound parm2=high
+                lo, hi = int(a.get("parm1")), int(parm2)
+            elif len(words) == 2:
+                lo, hi = int(words[0]), int(words[1])
+            else:
+                raise DTLError('<checki type="range"> needs "min max" or parm1/parm2')
+            self._checkl["checks"].append({"type": "range", "min": lo, "max": hi})
         elif ctype == "values":
+            vals = parm2.split() if parm2 is not None else words
+            negate = str(a.get("parm1", "EQ")).strip().upper() == "NE"
             self._checkl["checks"].append(
-                {"type": "values", "values": [w.upper() for w in words]}
+                {"type": "values", "values": [v.upper() for v in vals],
+                 "negate": negate}
             )
-        # Other authentic check types (alpha, picture, …) are not enforced yet;
-        # ignore them rather than failing the panel, so real DTL still loads.
+        elif ctype in ("alpha", "alphab"):
+            self._checkl["checks"].append({"type": "alpha"})
+        elif ctype == "name":
+            self._checkl["checks"].append({"type": "name"})
 
     def _emit_vardcl(self, a):
         # A <vardcl> belongs in a <varlist>, but tolerate a stray one (some guide

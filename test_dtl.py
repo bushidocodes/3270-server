@@ -1180,24 +1180,67 @@ def test_values_check():
     assert s.first_validation_error({addr: "maybe"})[0] == "M2"
 
 
+def _check_panel(checki):
+    s = load_dtl(
+        '<panel>'
+        '<varclass name="C"><checkl checkmsg="M">' + checki + '</checkl></varclass>'
+        '<varlist><vardcl name="f" varclass="C"/></varlist>'
+        '<dtafld row="1" col="1" fldcol="10" datavar="f" entwidth="20">F</dtafld>'
+        '</panel>'
+    )
+    return s, s.field_addr("f")
+
+
+def test_values_via_parm_attributes():
+    # The guide's attribute-driven form: type=values parm1=EQ parm2='v1 v2'.
+    s, addr = _check_panel('<checki type=values parm1=EQ parm2="SINGLE DOUBLE">')
+    assert s.validations["F"]["checks"] == [
+        {"type": "values", "values": ["SINGLE", "DOUBLE"], "negate": False}]
+    assert s.first_validation_error({addr: "single"}) is None      # case-insensitive
+    assert s.first_validation_error({addr: "triple"})[0] == "M"
+
+
+def test_range_via_parm_attributes():
+    # type=range parm1=low-bound parm2=high-bound (the guide's attribute form).
+    s, addr = _check_panel("<checki type=range parm1=0 parm2=100>")
+    assert s.validations["F"]["checks"] == [{"type": "range", "min": 0, "max": 100}]
+    assert s.first_validation_error({addr: "50"}) is None
+    assert s.first_validation_error({addr: "999"})[0] == "M"
+
+
+def test_values_parm1_ne_excludes_the_set():
+    # parm1=NE inverts the check: the value must NOT be one of the listed ones.
+    s, addr = _check_panel("<checki type=values parm1=NE parm2='Y N'>")
+    assert s.first_validation_error({addr: "Y"})[0] == "M"          # forbidden
+    assert s.first_validation_error({addr: "MAYBE"}) is None        # allowed
+
+
+def test_alpha_check_requires_letters():
+    s, addr = _check_panel("<checki type=alpha>")
+    assert s.first_validation_error({addr: "ABCdef"}) is None
+    assert s.first_validation_error({addr: "AB12"})[0] == "M"       # digits rejected
+    assert s.first_validation_error({addr: ""}) is None             # empty skipped
+
+
+def test_name_check_requires_a_valid_symbol():
+    s, addr = _check_panel("<checki type=name>")
+    assert s.first_validation_error({addr: "MYVAR1"}) is None
+    assert s.first_validation_error({addr: "@DD$"}) is None         # @ # $ allowed
+    assert s.first_validation_error({addr: "1BAD"})[0] == "M"       # can't start w/ digit
+    assert s.first_validation_error({addr: "TOOLONGXX"})[0] == "M"  # > 8 chars
+
+
 def test_checkl_outside_varclass_raises():
     with pytest.raises(DTLError):
         load_dtl('<panel><checkl><checki type="range">0 1</checki></checkl></panel>')
 
 
-def test_checki_unsupported_type_is_ignored():
-    # An unenforced check type (alpha, picture, …) loads without failing the
-    # panel; it simply adds no validation.
-    s = load_dtl(
-        '<panel>'
-        '<varclass name="C"><checkl checkmsg="M"><checki type="alpha">x</checki></checkl>'
-        '</varclass>'
-        '<varlist><vardcl name="f" varclass="C"/></varlist>'
-        '<dtafld row="1" col="1" fldcol="5" datavar="f" entwidth="4">F</dtafld>'
-        '</panel>'
-    )
-    addr = s.field_addr("f")
-    assert s.first_validation_error({addr: "anything"}) is None   # no check enforced
+def test_checki_unsupported_type_is_still_lenient():
+    # A type we don't enforce yet (e.g. picture) still loads without failing the
+    # panel and adds no validation — leniency preserved for the unimplemented set.
+    s, addr = _check_panel('<checki type="picture">AAA</checki>')
+    assert s.validations.get("F", {}).get("checks", []) == []
+    assert s.first_validation_error({addr: "anything!"}) is None   # no check enforced
 
 
 def test_msg_suffix_forms_id_from_member_name():
