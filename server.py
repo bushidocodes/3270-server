@@ -1762,17 +1762,64 @@ def _handle_tn3270e_sb(sock, sub: bytes, got_device: bool, got_functions: bool):
 # rather than hard-coding key numbers.
 _LEAVE_COMMANDS = {"EXIT", "END", "RETURN", "LOGOFF"}
 
-# Primary-menu options that open a nested selection sub-menu (option -> panel).
-# Driven uniformly through _show_submenu, so each supports the dotted jump
-# (e.g. "9.2") and reports an unimplemented leaf via &SELMSG.
-_SUBMENUS = {
-    "4": "foreground",   # Foreground language processing
-    "5": "batch",        # Batch language processing
-    "9": "ibmprod",      # IBM Products
-    "10": "sclm",        # SCLM
-    "12": "zsystem",     # z/OS System programmer applications
-    "13": "zuser",       # z/OS User applications
+# --- Declarative menu routing (#55) ------------------------------------------
+# The ISPF primary menu's option -> behaviour routing is declared in ispf.dtl's
+# )PROC (parsed into Screen.selection_targets, e.g. "1" -> "PGM(view)"). Each
+# selection string's target name maps here to the Python behaviour that runs it:
+# the routing decision lives in the panel, the behaviour stays in code. Nested
+# selection sub-menus (foreground/batch/…) run uniformly through _show_submenu,
+# so each supports the dotted jump (e.g. "9.2"). See docs/dtl-action-routing-plan.md.
+
+def _submenu(panel):
+    """A handler that opens a nested selection sub-menu panel (passing the dotted
+    tail through as the sub-menu's initial option)."""
+    return lambda cs, tail=None, **kw: _show_submenu(cs, panel, initial=tail)
+
+
+_SELECTION_HANDLERS = {
+    "settings":   lambda cs, **kw: _show_overlay(cs, "settings"),
+    "workplace":  lambda cs, **kw: _show_overlay(cs, "workplace"),
+    "view":       lambda cs, model=None, **kw: _show_view(cs, model=model),
+    "edit":       lambda cs, model=None, **kw: _show_view(
+                      cs, entry_panel="editentry", verb="EDIT", model=model),
+    "cmdshell":   lambda cs, **kw: _show_command_shell(cs),
+    "dlgtest":    lambda cs, userid=None, model=None, **kw: _show_overlay(
+                      cs, "dlgtest", rows=_dialog_vars(userid, model),
+                      enter_returns=False),
+    "utility":    lambda cs, tail=None, model=None, **kw: _show_submenu(
+                      cs, "utility",
+                      leaves={"1": lambda c: _show_member_list(c, model=model)},
+                      initial=tail),
+    "foreground": _submenu("foreground"),
+    "batch":      _submenu("batch"),
+    "ibmprod":    _submenu("ibmprod"),
+    "sclm":       _submenu("sclm"),
+    "zsystem":    _submenu("zsystem"),
+    "zuser":      _submenu("zuser"),
 }
+
+
+def _parse_selection(target):
+    """Split a )PROC selection string ``KIND(name) …`` into ``(kind, name)`` —
+    e.g. ``PGM(view)`` -> ``("PGM", "view")``. Anything after the first ``)``
+    (a future ``PARM(...)``) is ignored for now."""
+    kind, _, rest = target.partition("(")
+    return kind.strip().upper(), rest.partition(")")[0].strip()
+
+
+def _run_selection(client_socket, target, tail, userid, model):
+    """Run the behaviour a )PROC selection string names. ``EXIT`` leaves ISPF;
+    ``PANEL(x)``/``PGM(x)`` dispatch to the handler registered for ``x``. Returns
+    True to leave, False after running a handler, or None if the target has no
+    handler yet (the caller then shows a 'not implemented' message)."""
+    if target.strip().upper() == "EXIT":
+        return True
+    _, name = _parse_selection(target)
+    handler = _SELECTION_HANDLERS.get(name.lower()) if name else None
+    if handler is None:
+        return None
+    handler(client_socket, tail=tail, userid=userid, model=model)
+    return False
 
 _message_catalog = None
 
@@ -1996,49 +2043,20 @@ def handle_client(client_socket, addr):
             # <cmdtbl>, or invalid. (The "X" exit choice is handled above.)
             head = option.split(".", 1)[0]
             tail = option.split(".", 1)[1] if "." in option else None
-            if option == "0":
-                # Option 0 (Settings) opens a real sub-panel (with an action bar).
-                _show_overlay(client_socket, "settings")
-                short_msg = None
-            elif option == "1":
-                # Option 1 (View) prompts for a member and browses its source.
-                _show_view(client_socket, model=model)
-                short_msg = None
-            elif option == "2":
-                # Option 2 (Edit) prompts for a member and opens it (view-only).
-                _show_view(client_socket, entry_panel="editentry", verb="EDIT",
-                           model=model)
-                short_msg = None
-            elif option == "11":
-                # Option 11 (Workplace) opens an informational panel.
-                _show_overlay(client_socket, "workplace")
-                short_msg = None
-            elif head == "3":
-                # Option 3 (Utilities) opens a nested selection sub-menu; its
-                # Library leaf (3.1) lists the real panel-library members. A
-                # dotted path (e.g. "3.1") jumps straight to the sub-option,
-                # ISPF-style, without stopping at the utility menu first.
-                _show_submenu(client_socket, "utility",
-                              leaves={"1": lambda cs: _show_member_list(cs, model=model)},
-                              initial=tail)
-                short_msg = None
-            elif option == "6":
-                # Option 6 (Command) opens a TSO Command Shell sub-panel.
-                _show_command_shell(client_socket)
-                short_msg = None
-            elif option == "7":
-                # Option 7 (Dialog Test) opens the variable-display sub-panel,
-                # its <lstfld> table populated from the live session variables.
-                # It's a display panel: Enter stays, only PF3 exits.
-                _show_overlay(client_socket, "dlgtest",
-                              rows=_dialog_vars(userid, model),
-                              enter_returns=False)
-                short_msg = None
-            elif head in _SUBMENUS:
-                # Options 4/5/9/10/12/13 open their nested selection sub-menu,
-                # supporting the same dotted jump (e.g. "9.2") as Utilities.
-                _show_submenu(client_socket, _SUBMENUS[head], initial=tail)
-                short_msg = None
+            # Route the option through the panel's declared )PROC map (#55): the
+            # option's selection string (e.g. "1" -> "PGM(view)") names the
+            # behaviour, and _run_selection runs the handler registered for it.
+            # ISPF's TRUNC(&ZCMD,'.') routes on the head; the tail flows through.
+            target = screen.selection_targets.get(head)
+            if target is not None:
+                leaving = _run_selection(client_socket, target, tail, userid, model)
+                if leaving:
+                    break
+                elif leaving is False:
+                    short_msg = None
+                else:                        # declared, but no handler yet
+                    short_msg = f"OPTION {option} NOT YET IMPLEMENTED"
+                    needs_full_redraw = False
             elif option in screen.selections:
                 short_msg = f"OPTION {option} NOT YET IMPLEMENTED"
                 needs_full_redraw = False   # patch the message, keep the input

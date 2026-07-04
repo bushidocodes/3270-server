@@ -103,5 +103,8 @@ existing menu integration tests plus a manual drive of options 1/3/6/7. This fol
 - [x] **PR 1** — parse `<source type=proc>` ZSEL/TRANS → `Screen.selection_targets`; `)PROC` in
   `ispf.dtl`; equivalence test asserting declared == hard-coded. Server dispatch unchanged;
   `ispf.dtl` byte-identical.
-- [ ] PR 2 — handler registry; dispatch through `selection_targets`.
+- [x] **PR 2** — handler registry `{name → behavior}` in `server.py`; the ISPF menu now
+  dispatches through `screen.selection_targets` + `_run_selection` instead of the hardcoded
+  `if/elif`. Behaviors unchanged (registry = refactored branches). Integration tests extended to
+  cover the view (`PGM(view)`) and plain-submenu (`PANEL(foreground)`) handler paths.
 - [ ] PR 3+ — submenu `)PROC`; `PGM PARM`; `CMD`.
