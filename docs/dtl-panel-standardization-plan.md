@@ -79,7 +79,7 @@ and the `<selfld>` grid are each one issue — a single mechanism removed by a s
 | #184 | `row`, `col` | auto-flow positioning | blocked on #51 |
 | #185 | `fldcol` | auto field-entry column | blocked on #51, #122 |
 | #186 | `num`/`numcol`/`namecol`/`desccol`/`numwidth`/`numintensity` | `<selfld>` auto-layout | blocked on #183 |
-| #187 | `intensity` | `intens=HIGH \| LOW \| NON` | ready (small parser add) |
+| ~~#187~~ | ~~`intensity`~~ | ~~`intens`~~ | **closed invalid — `INTENS` is not a valid `<info>` attribute** |
 | #188 | `title` | panel content text | decision needed (byte-parity) |
 | #189 | `fill` | `<divider>` / `DIV=` | blocked on #125 |
 | #190 | `cursor` | `<panel cursor=field-name>` | blocked on #125 |
@@ -92,7 +92,16 @@ and the `<selfld>` grid are each one issue — a single mechanism removed by a s
 **Implementation blockers:** #51 (auto-flow) · #183 (`<selfld>` auto-layout — opened for this work) ·
 #125 (`CURSOR`, `DIVIDER`) · #122 (`FLDSPACE`, `PMTWIDTH`) · #126 (AB spacing/`ABSEPCHAR`).
 
-**Ready now (no external blocker):** #187, #191, #192, #193 — byte-preserving alias migrations.
+**Ready now (no external blocker):** #191, #192, #193 — byte-preserving migrations to constructs
+verified valid on their tags.
+
+> **Target validity reassessed.** Every child's proposed standard equivalent was checked against the
+> tag's DTL attribute list (IBM Table 1). All are valid on their tag **except #187**: `INTENS` is not
+> an `<info>` attribute (INFO takes only `WIDTH`/`INDENT`), so renaming `intensity`→`intens` on
+> `<info>` only swaps one non-standard attribute for another. The real need — body-text emphasis on
+> `<info>` — is a **semantic** change (`<hp>`, the CUA field/attribute model, or promoting titles/
+> instructions to their proper tags), not a per-attribute rename; it belongs with the geometry/
+> semantic work, and #187 is closed as invalid.
 
 ## Tiered plan
 
@@ -112,11 +121,10 @@ verified byte-identical across all panels.
    nothing, so bytes are unaffected). 1 use (`ispf.dtl`).
 3. **`<pdc action=x>` → `<pdc>label<action run=x>`** — the parser already reads a nested `<action>`;
    migrate the 5 uses. Pull-downs render nothing on the base panel, so this is metadata-only.
-4. **`intensity=` → `intens=`** — rename to the DTL attribute name and normalize values to
-   `HIGH | LOW | NON` (`high`→`HIGH`; `highlighted`→ decide `HIGH` vs a retained extension). Parser
-   reads the new name; the value→`DisplayIntensity` mapping must keep the exact same intensity byte,
-   so this is a rename with a pinned byte check, not a behavior change. (Note: `INTENS` on `<info>`
-   is still not strictly standard — see Tier 3 for the semantic fix.)
+4. ~~**`intensity=` → `intens=`**~~ — **not Tier 1 (closed invalid, #187).** `INTENS` is not a
+   valid `<info>` attribute (INFO takes only `WIDTH`/`INDENT`), so this would swap one non-standard
+   `<info>` attribute for another. Body-text emphasis on `<info>` is a **semantic** fix (Tier 3 /
+   the geometry-semantic work), not an attribute rename.
 
 ### Tier 2 — small parser feature, still layout-preserving
 
