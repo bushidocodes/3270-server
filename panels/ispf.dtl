@@ -48,7 +48,7 @@
        BYE is an alias for EXIT (leaves ISPF); KEYLIST matches from 3 chars. -->
   <cmdtbl applid="ISR">
     <cmd name="PANELID">Toggle panel id<cmdact action="passthru"></cmd>
-    <cmd name="KEYLIST" trunc="3">Edit keylist<cmdact action="passthru"></cmd>
+    <cmd name="KEYLIST" altdescr="Edit keylist">KEY<t>LIST<cmdact action="passthru"></cmd>
     <cmd name="BYE">Leave ISPF<cmdact action="alias exit"></cmd>
   </cmdtbl>
 

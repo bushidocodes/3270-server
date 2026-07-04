@@ -81,9 +81,9 @@ renders centered on row 0, with the body flowing beneath it.
 ``<keyi key cmd>desc``           one key binding: function key ``key`` (e.g.
                                  ``PF3``) invokes command ``cmd`` (e.g. ``EXIT``).
 ``<cmdtbl applid>``              an application command table (metadata).
-``<cmd name trunc>ext<t>ra``     a command; ``trunc`` (or a ``<t>`` truncation
-                                 point within the external name) is the min chars
-                                 to type.
+``<cmd name altdescr>ex<t>tra``  a command; a ``<t>`` truncation point within the
+                                 external name marks the min chars to type;
+                                 ``altdescr`` is the command's description (metadata).
 ``<cmdact action>``              the command's action (e.g. ``alias exit``,
                                  ``passthru``). Recorded in ``Screen.commands``.
 ``<ab row col gap>``             an action bar; its ``<abc>`` choice labels are
@@ -556,10 +556,13 @@ class _DTLParser(HTMLParser):
             if not name:
                 raise DTLError("<cmd> missing required attribute 'name'")
             self._finalize_cmd_trunc()   # close a previous <cmd> whose end tag was omitted
-            self._cur_cmd = {"action": "", "trunc": int(a.get("trunc", 0))}
+            # Truncation comes from a <t> marker in the external name (standard DTL);
+            # ALTDESCR is the command's human description (metadata). trunc starts 0
+            # and a nested <t> sets it (see _finalize_cmd_trunc).
+            self._cur_cmd = {"action": "", "trunc": 0, "descr": a.get("altdescr", "")}
             self.screen.commands[name.upper()] = self._cur_cmd
             # Capture the command's external-name text so a nested <t> can mark its
-            # truncation point (the text is otherwise only a human description).
+            # truncation point.
             self._cmd_chars, self._cmd_tpos = [], None
         elif tag == "cmdact":
             # The command action; read on start, since DTL often omits </cmdact>.
