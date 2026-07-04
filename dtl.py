@@ -121,7 +121,8 @@ Inline in body text: ``<hp>``/``<rp>`` emphasise a phrase within a text element
 (``<rp>`` — a reference phrase / help-panel link — renders underlined by default).
 
 ``<dtafld>`` attributes: ``datavar`` (field name sent back), ``entwidth`` (field
-length), ``display`` (``display=no`` is non-display, e.g. password), ``numeric``, ``default``,
+length), ``display`` (``display=no`` is non-display, e.g. password), ``numeric``,
+``init`` (initial value),
 ``required`` (``required=yes`` must be non-empty on submit; ``msg`` names the error),
 ``deswidth`` (width of a trailing ``<dtafldd>`` description),
 ``cursor`` (place the cursor here), ``mdt`` (default yes), ``intensity`` (prompt).
@@ -1573,7 +1574,7 @@ class _DTLParser(HTMLParser):
         # USAGE=OUT is a display-only (output) field: show the variable's value as
         # protected text — like a list column — not an editable input box.
         if str(a.get("usage", "")).strip().lower() == "out":
-            value = self._subs.get((name or "").upper()) or a.get("default", "")
+            value = self._subs.get((name or "").upper()) or a.get("init", "")
             self.screen.add(Text(row, fldcol, str(value)[:length].ljust(length),
                                  _intensity(a), color=self._color(a), role="cell"))
             return None
@@ -1582,7 +1583,7 @@ class _DTLParser(HTMLParser):
             col=fldcol,
             length=length,
             name=name,
-            default=a.get("default", ""),
+            default=a.get("init", ""),
             numeric=self._resolve_numeric(a, name),
             # IBM's DISPLAY=NO is a non-display field (e.g. a password); DISPLAY
             # defaults to YES (shown).

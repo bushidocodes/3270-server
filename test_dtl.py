@@ -279,19 +279,32 @@ def test_dtafld_emits_prompt_then_field():
     assert (fld.row, fld.col, fld.length, fld.name, fld.cursor) == (5, 16, 8, "userid", True)
 
 
-def test_dtafld_display_no_numeric_and_default():
+def test_dtafld_display_no_numeric_and_init():
     # IBM's DISPLAY=NO makes a non-display field (e.g. a password); a field with
-    # no DISPLAY= is shown.
+    # no DISPLAY= is shown. INIT= sets the field's initial value.
     s = load_dtl(
         '<panel>'
         '<dtafld row="6" col="1" fldcol="16" datavar="pw" entwidth="8" display="no">P</dtafld>'
-        '<dtafld row="8" col="1" fldcol="16" datavar="sz" entwidth="5" numeric="yes" default="00150">S</dtafld>'
+        '<dtafld row="8" col="1" fldcol="16" datavar="sz" entwidth="5" numeric="yes" init="00150">S</dtafld>'
         '</panel>'
     )
     pw = s.items[1]
     assert pw.hidden and not pw.numeric
     sz = s.items[3]
     assert not sz.hidden and sz.numeric and sz.default == "00150"
+
+
+def test_dtafld_init_sets_initial_value():
+    # INIT= is the DTL attribute for a field's initial value. The non-standard
+    # `default=` is NOT read (no legacy alias) — it is silently ignored.
+    s = load_dtl(
+        '<panel>'
+        '<dtafld row="6" col="1" fldcol="16" datavar="a" entwidth="8" init="IKJACCNT">A</dtafld>'
+        '<dtafld row="8" col="1" fldcol="16" datavar="b" entwidth="5" default="99999">B</dtafld>'
+        '</panel>'
+    )
+    assert s.items[1].default == "IKJACCNT"
+    assert s.items[3].default == ""
 
 
 def test_dtafld_prompt_from_dtafldd_child():
