@@ -453,9 +453,9 @@ def test_action_bar_renders_labels_and_records_pulldowns():
     assert s.items[1] == Text(0, 8, "Help", DisplayIntensity.HIGH)
     # Pull-down structure + rendered position preserved for interaction.
     assert s.action_bar == [
-        {"label": "Menu", "row": 0, "col": 1, "mnemonic": None,
+        {"label": "Menu", "row": 0, "col": 1, "mnemonic": None, "help": None,
          "pdc": [{"label": "Exit", "action": "exit", "mnemonic": None}]},
-        {"label": "Help", "row": 0, "col": 8, "mnemonic": None,
+        {"label": "Help", "row": 0, "col": 8, "mnemonic": None, "help": None,
          "pdc": [{"label": "About", "action": "passthru", "mnemonic": None}]},
     ]
 
@@ -474,10 +474,10 @@ def test_action_bar_implicit_pdc_and_abc_end_tags():
         '</ab></panel>'
     )
     assert s.action_bar == [
-        {"label": "File", "row": 0, "col": 1, "mnemonic": None,
+        {"label": "File", "row": 0, "col": 1, "mnemonic": None, "help": None,
          "pdc": [{"label": "Add", "action": "add", "mnemonic": 0},
                  {"label": "Delete", "action": "delete", "mnemonic": 0}]},
-        {"label": "View", "row": 0, "col": 8, "mnemonic": None,
+        {"label": "View", "row": 0, "col": 8, "mnemonic": None, "help": None,
          "pdc": [{"label": "Name", "action": "name", "mnemonic": 0}]},
     ]
 
@@ -814,6 +814,22 @@ def test_field_help_non_panel_values_are_not_field_help():
                      f'<dtafld datavar="f" fldcol="10" entwidth="4" help="{val}">F</dtafld>'
                      f'</area></panel>')
         assert s.help_for(s.field_addr("f")) is None
+
+
+def test_action_bar_choice_help_resolved_by_cursor():
+    # <abc help=panel>: HELP with the cursor on that action-bar choice shows its
+    # own help; a choice without HELP resolves to None (the panel help is used).
+    s = load_dtl(
+        '<panel><ab row="0" col="1">'
+        '<abc help="filehelp">File<pdc action="x">Open</pdc>'
+        '<abc>Edit<pdc action="y">Cut</pdc>'
+        '</ab></panel>'
+    )
+    file_c, edit_c = s.action_bar
+    on_file = file_c["row"] * 80 + file_c["col"]
+    assert s.help_for(on_file) == "filehelp"           # cursor on "File"
+    assert s.help_for(on_file + 3) == "filehelp"       # within the label
+    assert s.help_for(edit_c["row"] * 80 + edit_c["col"]) is None   # Edit: no help
 
 
 def test_logon_size_field_has_context_help_bytes_unchanged():

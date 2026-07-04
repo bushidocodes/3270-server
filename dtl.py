@@ -476,7 +476,7 @@ class _DTLParser(HTMLParser):
             if self._ab is None:
                 raise DTLError("<abc> outside of an <ab>")
             self._end_abc()                     # implicit end of a previous <abc>
-            self._cur_abc = {"chars": [], "pdc": []}
+            self._cur_abc = {"chars": [], "pdc": [], "help": self._field_help(a)}
         elif tag == "pdc":
             if self._cur_abc is None:
                 raise DTLError("<pdc> outside of an <abc>")
@@ -1471,6 +1471,7 @@ class _DTLParser(HTMLParser):
                 mnem = mnem if 0 <= mnem < len(label) else None
             self._ab["choices"].append({
                 "label": label, "pdc": self._cur_abc["pdc"], "mnemonic": mnem,
+                "help": self._cur_abc.get("help"),
             })
         self._cur_abc = None
 
