@@ -30,7 +30,7 @@
     <choice num="X" name="  Exit          ">  Terminate ISPF using log/list defaults</choice>
   </selfld>
 
-  <info row="20" col="1">Enter X or PF3 to terminate ISPF.</info>
+  <info row="20" col="1">Enter <hp color="turq">X</hp> or <hp color="turq">PF3</hp> to terminate ISPF.</info>
   <info row="21" col="1">User ID . . :  &ZUSER</info>
   <info row="21" col="41">Time. . . . :  &ZTIME</info>
   <info row="22" col="1">System ID . :  SY1     </info>

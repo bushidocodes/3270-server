@@ -9,7 +9,7 @@ so DTL → Screen → bytes is proven equal to the live wire format.
 import pytest
 
 from dtl import load_dtl, load_panel, load_messages, load_message_member, DTLError
-from screen import Screen, Text, Field, DisplayIntensity
+from screen import Screen, Text, Field, DisplayIntensity, Color, Highlight, SA
 from screens import build_tso_logon, build_ispf_menu
 
 
@@ -92,6 +92,69 @@ def test_instruction_tags_flow_in_area():
 def test_logon_instruction_tags_byte_identical():
     # The logon panel uses <topinst>/<pnlinst> for some lines; bytes unchanged.
     assert load_panel("logon").render() == build_tso_logon().render()
+
+
+# ── inline <hp> (highlighted phrase) ─────────────────────────────────────────
+
+def _hp_line():
+    return load_dtl(
+        '<panel><info row="1" col="1">'
+        'Enter <hp color="turq">X</hp> or <hp color="turq">PF3</hp> to exit'
+        '</info></panel>'
+    )
+
+
+def test_hp_produces_one_rich_field():
+    # An inline <hp> does not split the line into separate fields: the whole line
+    # is a single Text.rich whose text is the concatenation, with the phrase(s)
+    # captured as coloured runs.
+    s = _hp_line()
+    assert len(s.items) == 1
+    it = s.items[0]
+    assert it.text == "Enter X or PF3 to exit"
+    assert it.runs == [
+        ("Enter ", None, None),
+        ("X", Color.TURQUOISE, None),
+        (" or ", None, None),
+        ("PF3", Color.TURQUOISE, None),
+        (" to exit", None, None),
+    ]
+
+
+def test_hp_mono_is_byte_identical_to_plain_text():
+    # Mono renders the concatenation exactly like a plain Text — so <hp> is safe
+    # to add to a bundled panel without changing the mono data stream.
+    it = _hp_line().items[0]
+    rich = bytearray(); it.render(rich, color=False)
+    plain = bytearray(); Text(1, 1, it.text).render(plain, color=False)
+    assert bytes(rich) == bytes(plain)
+    assert SA not in bytes(rich)                      # no Set Attribute on mono
+
+
+def test_hp_colour_emits_set_attribute():
+    # On a colour terminal the phrase is emphasised in place via SA runs (#110).
+    buf = bytearray(); _hp_line().items[0].render(buf, color=True)
+    assert SA in bytes(buf)
+
+
+def test_hp_highlight_via_type_attribute():
+    # <hp type=...> maps to a highlight (DTL spells hp emphasis as TYPE).
+    s = load_dtl(
+        '<panel><info row="2" col="1">see <hp type="uscore">HERE</hp> now</info></panel>'
+    )
+    assert s.items[0].runs == [
+        ("see ", None, None),
+        ("HERE", None, Highlight.UNDERSCORE),
+        (" now", None, None),
+    ]
+
+
+def test_hp_surrounding_text_keeps_the_element_role():
+    # The field's role colour still applies to the non-<hp> text: an <info> line is
+    # role "text" (green), so only the phrase overrides to its own colour.
+    it = _hp_line().items[0]
+    assert it.role == "text"          # base role preserved
+    assert it.color is None           # field base uses the role colour, not turq
 
 
 def test_info_intensity_and_fill():
