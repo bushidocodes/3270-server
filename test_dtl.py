@@ -313,6 +313,38 @@ def test_selfld_type_single_is_unchanged():
     assert s.selection_rows == {4: "1"}
 
 
+def test_choice_hide_removes_it_when_variable_true():
+    # HIDE=var removes the choice when the variable is true; the choices below it
+    # move up and it is not selectable. HIDEX=var is the inverse (hide when false).
+    N, H = DisplayIntensity.NORMAL, DisplayIntensity.HIGH
+    src = (
+        '<panel><selfld row="4" numcol="1" namecol="4" desccol="21">'
+        '<choice num="1" name="A" match="A" hide="vh">Alpha</choice>'
+        '<choice num="2" name="B" match="B">Beta</choice>'
+        '<choice num="3" name="C" match="C" hidex="vs">Gamma</choice>'
+        '</selfld></panel>'
+    )
+    # vh true → A hidden; vs false → C hidden. Only B remains, at the top row.
+    s = load_dtl(src, vh="1", vs="0")
+    assert s.items[0] == Text(4, 1, "2 ", H)
+    assert s.items[1] == Text(4, 4, "B", N)
+    assert s.selections == {"B": "B"}                  # A and C not selectable
+    assert s.selection_rows == {4: "B"}
+
+    # vh false → A shown; vs true → C shown. All three render on successive rows.
+    s2 = load_dtl(src, vh="0", vs="1")
+    assert [it.text for it in s2.items if it.col == 4] == ["A", "B", "C"]
+    assert set(s2.selections) == {"A", "B", "C"}
+
+
+def test_choice_bare_hide_always_removes_it():
+    s = load_dtl(
+        '<panel><selfld row="4"><choice num="1" name="A" hide>Alpha</choice>'
+        '<choice num="2" name="B">Beta</choice></selfld></panel>'
+    )
+    assert [it.text for it in s.items if it.col == 4] == ["B"]
+
+
 def test_selfld_prompt_renders_above_list_by_default():
     # The text between <selfld ...> and the first <choice> is the field prompt.
     # PMTLOC defaults to ABOVE: the caption sits on the line above the choices,
