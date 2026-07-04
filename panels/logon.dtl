@@ -51,7 +51,7 @@
   <info row="14" col="42">OIDcard   ===> None</info>
 
   <info row="15" col="1" intensity="highlighted">*** Authorized users only. Unauthorized access is prohibited. ***</info>
-  <paninst row="16" col="1">Press ENTER to logon to TSO/E</paninst>
+  <pnlinst row="16" col="1">Press ENTER to logon to TSO/E</pnlinst>
   <info row="17" col="1">PF1=HELP   PF3=LOGOFF</info>
   <info row="21" col="1">ENTER AN END COMMAND TO LOGOFF</info>
 
