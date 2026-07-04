@@ -1399,6 +1399,24 @@ def test_lines_preserves_internal_spacing_and_truncates_to_width():
     ]
 
 
+def test_xmp_renders_preformatted_like_lines():
+    # #206: <xmp> (example) is preformatted like <lines> — authored line breaks
+    # and interior spacing are significant; the common source indent is stripped.
+    s = load_dtl(
+        '<panel name="p" width="40"><info><xmp>\n'
+        '  A = 1\n'
+        '    B = 22\n'
+        '  C = 333\n'
+        '</xmp></info></panel>'
+    )
+    N = DisplayIntensity.NORMAL
+    assert s.items == [
+        Text(0, 1, "A = 1", N),
+        Text(1, 1, "  B = 22", N),   # interior indent kept (common indent stripped)
+        Text(2, 1, "C = 333", N),
+    ]
+
+
 # ── help-panel admonitions (<note>/<nt>/<warning>/…, <notel>) ────────────────
 
 def test_note_renders_as_a_labelled_callout():

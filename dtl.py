@@ -271,11 +271,11 @@ _ADMONITIONS = {
     "attention": "Attention:", "caution": "Caution:", "warning": "Warning:",
 }
 # Block tags whose text flows as protected lines (like <info>): paragraphs,
-# list items (<li>/<dt>/<dd>/<pt>/<pd>/<lp>), preformatted <lines>, and the
+# list items (<li>/<dt>/<dd>/<pt>/<pd>/<lp>), preformatted <lines>/<xmp>, and the
 # admonitions above. Their list containers (<ul>/<ol>/<sl>/<dl>/<parml>/<notel>)
 # are transparent — ignored (a plain container), except <notel>'s "Notes:"
 # heading. A <sl> (simple list) marks its <li>s without a bullet (see below).
-_FLOW_TEXT_TAGS = ("p", "li", "dt", "dd", "pt", "pd", "lp", "lines") + tuple(_ADMONITIONS)
+_FLOW_TEXT_TAGS = ("p", "li", "dt", "dd", "pt", "pd", "lp", "lines", "xmp") + tuple(_ADMONITIONS)
 # Instruction tags render as protected text like <info>: <topinst> (top),
 # <pnlinst> (panel), and <botinst> (bottom) instructions.
 _INSTRUCTION_TAGS = ("topinst", "pnlinst", "botinst")
@@ -970,7 +970,9 @@ class _DTLParser(HTMLParser):
             self._emit_listitem(a, content)
         elif tag in ("dt", "dd", "pt", "pd"):
             self._emit_defitem(tag, a, content)
-        elif tag == "lines":
+        elif tag in ("lines", "xmp"):
+            # <xmp> (example) is preformatted like <lines>: authored line breaks
+            # and interior spacing are significant.
             self._emit_lines(a, content)
         elif tag == "lstgrp":
             if self._lstgrp is not None:
