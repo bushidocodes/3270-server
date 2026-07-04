@@ -37,8 +37,9 @@ Supported tags
                                  unaffected.
 ``<info row col intensity>``     protected text (label / instruction / rule).
                                  ``fill`` + ``width`` repeats a character (rules).
-``<topinst row col>``            top instruction / panel instruction text. Render
-``<paninst row col>``            like ``<info>`` (protected text); semantic DTL tags.
+``<topinst row col>``            top / panel / bottom instruction text. Render like
+``<pnlinst row col>``            ``<info>`` (protected text); semantic DTL tags.
+``<botinst row col>``
 ``<p>`` ``<lines>`` ``<dt>`` ``<dd>``  flowed text: paragraphs and items each render
 ``<pt>`` ``<pd>``                as protected lines, word-wrapped to the panel
                                  width with a hanging indent. DTL omits end tags,
@@ -209,7 +210,10 @@ _HIGHLIGHTS = {
 # list items (<li>/<dt>/<dd>/<pt>/<pd>/<lp>), and preformatted <lines>. Their
 # list containers (<ul>/<ol>/<dl>/<parml>/<sl>) are transparent — ignored.
 _FLOW_TEXT_TAGS = ("p", "li", "dt", "dd", "pt", "pd", "lp", "lines")
-_TEXT_TAGS = ("info", "topinst", "paninst") + _FLOW_TEXT_TAGS
+# Instruction tags render as protected text like <info>: <topinst> (top),
+# <pnlinst> (panel), and <botinst> (bottom) instructions.
+_INSTRUCTION_TAGS = ("topinst", "pnlinst", "botinst")
+_TEXT_TAGS = ("info",) + _INSTRUCTION_TAGS + _FLOW_TEXT_TAGS
 _CONTENT_TAGS = _TEXT_TAGS + ("dtafld", "cmdarea", "choice")
 _FIELD_TAGS = ("dtafld", "cmdarea")
 
@@ -988,7 +992,7 @@ class _DTLParser(HTMLParser):
         # everything else is normal text (labels/values).
         if "fill" in a:
             role = "rule"
-        elif tag in ("topinst", "paninst"):
+        elif tag in _INSTRUCTION_TAGS:
             role = "inst"
         elif _intensity(a) is DisplayIntensity.HIGH:
             role = "title"

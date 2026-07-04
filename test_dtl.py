@@ -57,21 +57,32 @@ def test_info_basic():
     assert s.items == [Text(1, 2, "hello", DisplayIntensity.NORMAL)]
 
 
-def test_topinst_and_paninst_render_like_info():
+def test_instruction_tags_render_like_info():
+    # <pnlinst> (panel instruction) and <botinst> (bottom instruction) are the IBM
+    # spec tags; both render as positioned protected text, like <topinst>/<info>.
     s = load_dtl(
         '<panel>'
         '<topinst row="2" col="1">Enter parameters:</topinst>'
-        '<paninst row="16" col="1" intensity="high">Press ENTER</paninst>'
+        '<pnlinst row="16" col="1" intensity="high">Press ENTER</pnlinst>'
+        '<botinst row="23" col="1">PF3=Exit</botinst>'
         '</panel>'
     )
     assert s.items[0] == Text(2, 1, "Enter parameters:", DisplayIntensity.NORMAL)
     assert s.items[1] == Text(16, 1, "Press ENTER", DisplayIntensity.HIGH)
+    assert s.items[2] == Text(23, 1, "PF3=Exit", DisplayIntensity.NORMAL)
+
+
+def test_pnlinst_was_previously_dropped():
+    # Regression for the dispatch bug: the parser routed on a nonexistent "paninst"
+    # tag, so the real IBM <pnlinst> silently rendered nothing.
+    s = load_dtl('<panel><pnlinst row="2" col="1">Hi</pnlinst></panel>')
+    assert s.items == [Text(2, 1, "Hi", DisplayIntensity.NORMAL)]
 
 
 def test_instruction_tags_flow_in_area():
     s = load_dtl(
         '<panel><area row="3" col="1">'
-        '<topinst>line one</topinst><paninst>line two</paninst>'
+        '<topinst>line one</topinst><pnlinst>line two</pnlinst>'
         '</area></panel>'
     )
     assert s.items[0] == Text(3, 1, "line one", DisplayIntensity.NORMAL)
@@ -79,7 +90,7 @@ def test_instruction_tags_flow_in_area():
 
 
 def test_logon_instruction_tags_byte_identical():
-    # The logon panel now uses <topinst>/<paninst> for some lines; bytes unchanged.
+    # The logon panel uses <topinst>/<pnlinst> for some lines; bytes unchanged.
     assert load_panel("logon").render() == build_tso_logon().render()
 
 

@@ -23,7 +23,7 @@
   <info row="10" col="3">Command delimiter . . : ;</info>
   <info row="11" col="3">Tab to point-and-shoot: YES</info>
 
-  <paninst row="22" col="1">PF3=Return to the Primary Option Menu</paninst>
+  <pnlinst row="22" col="1">PF3=Return to the Primary Option Menu</pnlinst>
 
   <keyl name="SETKEYS">
     <keyi key="PF3"  cmd="EXIT">Return</keyi>
