@@ -976,6 +976,7 @@ def _library_members():
         "memlist": "Library - Member List",
         "tsohelp": "Logon help",
         "sizehelp": "Logon Size field help",
+        "loglisthelp": "Log/List defaults help",
         "ispfhelp": "ISPF menu help",
         "viewentry": "View entry panel",
         "editentry": "Edit entry panel",
@@ -1284,22 +1285,32 @@ def _show_pulldown(client_socket, screen, choice):
     border = "+" + "-" * inner + "+"
     screen.add(Text(top, col, border, DisplayIntensity.HIGH))
     action_by_row = {}
+    help_by_row = {}
     for n, item in enumerate(pdc):
         row = top + 1 + n
         screen.add(_pdc_item_text(row, col, n + 1, item, inner))
         action_by_row[row] = item["action"]
+        if item.get("help"):
+            help_by_row[row] = item["help"]
     screen.add(Text(top + 1 + len(texts), col, border, DisplayIntensity.HIGH))
-    _send_screen(client_socket, screen)
+    screen.cursor_at = (top + 1, col + 1)  # land on the first item
 
-    result = read_client_input(client_socket)
-    if result is None:
-        return None
-    aid, _, cursor = result
-    if aid_to_string(aid) == "Enter" and cursor is not None:
-        crow, ccol = divmod(cursor, 80)
-        if crow in action_by_row and col <= ccol <= col + inner + 1:
+    while True:
+        _send_screen(client_socket, screen)
+        result = read_client_input(client_socket)
+        if result is None:
+            return None
+        aid, _, cursor = result
+        aid_str = aid_to_string(aid)
+        crow, ccol = divmod(cursor, 80) if cursor is not None else (None, None)
+        on_item = crow in action_by_row and col <= ccol <= col + inner + 1
+        if aid_str == "PF1":  # HELP for the item under the cursor
+            if on_item and crow in help_by_row:
+                _show_overlay(client_socket, help_by_row[crow])
+            continue  # redisplay the pull-down either way
+        if aid_str == "Enter" and on_item:
             return action_by_row[crow]
-    return ""  # closed without selecting an item
+        return ""  # any other key closes the pull-down without selecting
 
 
 def _run_pdc_action(client_socket, screen, action) -> bool:

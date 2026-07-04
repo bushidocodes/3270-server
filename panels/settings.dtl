@@ -1,11 +1,11 @@
 <!DOCTYPE DM SYSTEM>
 <!-- ISPF Settings panel (option 0), shown when "0" is selected on the primary
-     menu. Demonstrates an action bar (<ab>/<abc>/<pdc>). PF3 returns to the
-     menu. The action-bar choices are rendered; pull-down selection (point and
-     shoot) is not yet interactive. -->
+     menu. Demonstrates an action bar (<ab>/<abc>/<pdc>): F10/F11 move along the
+     choices, Enter opens a pull-down, and PF1 on an item shows its <pdc help=>
+     panel (Log/List -> loglisthelp). PF3 returns to the menu. -->
 <panel name="settings" title="ISPF Settings" help="ispfhelp">
   <ab row="0" col="1" gap="3">
-    <abc><M>Log/List<pdc action="passthru">Log Data Set defaults</pdc></abc>
+    <abc><M>Log/List<pdc action="passthru" help="loglisthelp">Log Data Set defaults</pdc></abc>
     <abc><M>Function keys<pdc action="passthru">Keylist settings</pdc></abc>
     <abc><M>Colors<pdc action="passthru">CUA attributes</pdc></abc>
     <abc><M>Help<pdc action="alias help">Help for settings</pdc></abc>

@@ -722,3 +722,28 @@ def test_ws3270_help_works_inside_the_settings_overlay():
     ])
     assert "ISPF Settings" in out, out[-1500:]      # reached the Settings overlay
     assert "Menu  -  HELP" in out, out[-1500:]       # HELP (ispfhelp) then shown
+
+
+def test_ws3270_help_works_on_a_pulldown_item():
+    """PF1 with the cursor on an open pull-down item shows that item's own help
+    (DTL <pdc help=...>). Verified on a real emulator: from Settings, opening the
+    Log/List pull-down and pressing HELP on "Log Data Set defaults" brings up the
+    loglisthelp panel."""
+    _require_emulator()
+    port = _serve_one_client()
+    out = _drive(port, [
+        "Wait(20,InputField)",
+        "String(IBMUSER)", "Tab()", "String(SYS1)", "Enter()",
+        "Wait(20,Output)",              # ISPF menu
+        "String(0)", "Enter()",         # option 0 -> Settings overlay
+        "Wait(10,Output)",              # Settings panel (action bar)
+        "MoveCursor(0,2)", "Enter()",   # cursor on "Log/List" choice -> open pull-down
+        "Wait(10,Output)",
+        "Ascii()",                      # the open pull-down
+        "MoveCursor(2,2)", "PF(1)",     # HELP on the "Log Data Set defaults" item
+        "Wait(10,Output)",
+        "Ascii()",                      # the item help panel
+        "Quit()",
+    ])
+    assert "Log Data Set defaults" in out, out[-1500:]        # pull-down opened
+    assert "Log Data Set Defaults HELP" in out, out[-1500:]   # item help then shown
