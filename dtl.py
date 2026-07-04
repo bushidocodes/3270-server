@@ -1563,11 +1563,38 @@ class _DTLParser(HTMLParser):
                 self.screen.add(Text(sf["row"] + i, col, line, role="prompt"))
             sf["row"] += len(lines)
 
+    def _var_truthy(self, val):
+        """Truthiness of a HIDE/UNAVAIL-style condition. A bare attribute (no
+        value) is always true; otherwise the value names a dialog variable —
+        false only when that variable is empty or ``0`` (a literal ``0``/``no``/
+        ``off`` also counts as false if it isn't a known variable)."""
+        if val is None or str(val).strip() == "":
+            return True                         # bare attribute → unconditional
+        key = str(val).strip()
+        raw = self._subs.get(key.upper())
+        if raw is None:                         # not a known variable → boolean literal
+            return key.lower() not in ("0", "no", "off", "false")
+        return str(raw).strip() not in ("", "0")
+
+    def _choice_hidden(self, a):
+        """Whether a <choice> is hidden: HIDE=var removes it when the variable is
+        true; HIDEX=var removes it when the variable is false (the inverse)."""
+        if "hide" in a and self._var_truthy(a["hide"]):
+            return True
+        if "hidex" in a and not self._var_truthy(a["hidex"]):
+            return True
+        return False
+
     def _emit_choice(self, a, content):
         sf = self._selfld
         if sf is None:
             raise DTLError("<choice> outside of a <selfld>")
         self._emit_selfld_prompt(sf)
+        # HIDE/HIDEX conditionally remove the choice from the list (dynamic panels
+        # show a variable subset). A hidden choice renders nothing, consumes no
+        # row, and isn't selectable — the choices below it move up.
+        if self._choice_hidden(a):
+            return
         row = sf["row"]
         # UNAVAIL: the choice is shown but can't be selected. 3270 has intensity
         # (normal / intensified-high / non-display) but no *sub-normal* dim level,
