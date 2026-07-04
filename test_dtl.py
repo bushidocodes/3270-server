@@ -1933,6 +1933,77 @@ def test_panel_reference_figure_snapshot():
     assert _ascii_snapshot(s) == expected
 
 
+# Admonition reference figures (ATTENTION/CAUTION/WARNING, NOTE/NT/NOTEL). These
+# help panels omit WIDTH, so we render at the DTL default (76) — the reference
+# figures were displayed narrower, so the wrap points differ but the admonition
+# *format* matches. The runtime F-key area is ISPF chrome, not markup.
+
+def test_caution_reference_figure_snapshot():
+    """CAUTION-reference Figure 1: "CAUTION:" on its own line, emphasised body."""
+    src = ("<!DOCTYPE DM SYSTEM>\n<HELP NAME=caution DEPTH=20>Help for DELETE Command\n"
+           "<AREA>\n<INFO>\n"
+           "<P>The DELETE command erases the specified file from storage.\n"
+           "<P><CAUTION>Issuing the DELETE command permanently removes the file "
+           "from storage. There is no possibility of recovery.</CAUTION>\n"
+           "<P>You can exit from the DELETE operation by pressing F12.\n"
+           "</INFO>\n</AREA>\n</HELP>")
+    assert _ascii_snapshot(load_dtl(src)) == "\n".join([
+        "                            Help for DELETE Command",
+        " The DELETE command erases the specified file from storage.",
+        " CAUTION:",
+        " Issuing the DELETE command permanently removes the file from storage. There is",
+        " no possibility of recovery.",
+        " You can exit from the DELETE operation by pressing F12.",
+    ])
+
+
+def test_nt_reference_figure_snapshot():
+    """NT-reference Figure 1: "Note:" then the body hung indented under the text.
+
+    Delta: the nested <p> ("If the librarian ...") flows at the left margin; the
+    figure hangs it under the note too (tracked separately)."""
+    src = ("<!DOCTYPE DM SYSTEM>\n<HELP NAME=nt DEPTH=20>Book / Periodical Search Help\n"
+           "<AREA>\n<INFO>\n"
+           "<P>This entry screen allows you to locate a desired book or periodical "
+           "by entering the title in the entry field.\n"
+           "<NT>If the item you are trying to locate is not in stock and you would "
+           "like to reserve it, please see the librarian at the front desk.\n"
+           "<P>If the librarian is not there, please do not yell for help.  "
+           "This is a library!\n</NT>\n</INFO>\n</AREA>\n</HELP>")
+    assert _ascii_snapshot(load_dtl(src)) == "\n".join([
+        "                         Book / Periodical Search Help",
+        " This entry screen allows you to locate a desired book or periodical by",
+        " entering the title in the entry field.",
+        " Note: If the item you are trying to locate is not in stock and you would like",
+        "       to reserve it, please see the librarian at the front desk.",
+        " If the librarian is not there, please do not yell for help. This is a library!",
+    ])
+
+
+def test_notel_reference_figure_snapshot():
+    """NOTEL-reference Figure 1: "Notes:" + a blank line + numbered items."""
+    src = ("<!DOCTYPE DM SYSTEM>\n<HELP NAME=notel DEPTH=20>Book / Periodical Search Help\n"
+           "<AREA>\n<INFO>\n"
+           "<P>This entry screen allows you to locate a desired book or periodical "
+           "by entering the title in the entry field.\n"
+           "<NOTEL>\n"
+           "<LI>If the item you are trying to locate is not in stock and you would "
+           "like to reserve it, please see the librarian at the front desk.\n"
+           "<LI>If the librarian is not there, please do not yell for help.\n"
+           "<P>This is a library!\n</NOTEL>\n</INFO>\n</AREA>\n</HELP>")
+    assert _ascii_snapshot(load_dtl(src)) == "\n".join([
+        "                         Book / Periodical Search Help",
+        " This entry screen allows you to locate a desired book or periodical by",
+        " entering the title in the entry field.",
+        " Notes:",
+        "",
+        " 1.  If the item you are trying to locate is not in stock and you would like to",
+        "     reserve it, please see the librarian at the front desk.",
+        " 2.  If the librarian is not there, please do not yell for help.",
+        "     This is a library!",
+    ])
+
+
 def test_nested_unordered_lists_matches_guide_figure():
     # IBM DTL Guide "Nested Unordered Lists" figure: a centered title, then o/-/--
     # bullets by depth with increasing indentation. (Verbatim guide source.)
