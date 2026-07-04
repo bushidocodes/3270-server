@@ -1921,6 +1921,45 @@ def test_class_msg_is_the_fallback_for_type_checks():
     assert s2.first_validation_error({addr2: "AB12"})[0] == "CHK"    # checkl alpha
 
 
+def test_xlatl_xlati_restricts_input_to_its_translations():
+    # <xlatl><xlati value=internal>external>: a field of the class must be typed as
+    # one of the external values; FORMAT=upper makes the match case-insensitive and
+    # the <xlatl>'s own MSG names the failure.
+    s = load_dtl(
+        '<varclass name="monthcls" type="char 3">'
+        '  <xlatl format=upper></xlatl>'
+        '  <xlatl msg="ABCD003">'
+        '    <xlati value="11">NOV<xlati value="12">DEC'
+        '  </xlatl>'
+        '</varclass>'
+        '<varlist><vardcl name="month" varclass="monthcls"/></varlist>'
+        '<panel><dtafld row="5" col="1" fldcol="16" datavar="month" entwidth="3">M</dtafld></panel>'
+    )
+    addr = s.field_addr("month")
+    assert s.first_validation_error({addr: "NOV"}) is None                    # valid
+    assert s.first_validation_error({addr: "dec"}) is None                    # case-insensitive
+    assert s.first_validation_error({addr: "XYZ"}) == ("ABCD003", {"VALUE": "XYZ"})
+    assert s.first_validation_error({addr: ""}) is None                       # empty skipped
+
+
+def test_xlati_lit_external_preserves_literal_and_uses_own_message():
+    # A <lit> external keeps its interior spacing; the xlatl MSG applies to the
+    # xlati check independently of the class-level checkmsg.
+    s = load_dtl(
+        '<varclass name="cc" type="char 9" msg="CLASSMSG">'
+        '  <xlatl msg="XLMSG">'
+        '    <xlati value="1"><lit>V I S T A</lit><xlati value="2">CASH'
+        '  </xlatl>'
+        '</varclass>'
+        '<varlist><vardcl name="pay" varclass="cc"/></varlist>'
+        '<panel><dtafld row="5" col="1" fldcol="16" datavar="pay" entwidth="9">P</dtafld></panel>'
+    )
+    addr = s.field_addr("pay")
+    assert s.first_validation_error({addr: "V I S T A"}) is None              # literal external
+    assert s.first_validation_error({addr: "CASH"}) is None
+    assert s.first_validation_error({addr: "OTHER"}) == ("XLMSG", {"VALUE": "OTHER"})  # xlatl MSG, not CLASSMSG
+
+
 def test_checki_unsupported_type_is_still_lenient():
     # A type we don't enforce yet (e.g. picture) still loads without failing the
     # panel and adds no validation — leniency preserved for the unimplemented set.
