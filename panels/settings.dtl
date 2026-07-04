@@ -5,10 +5,10 @@
      shoot) is not yet interactive. -->
 <panel name="settings" title="ISPF Settings" help="ispfhelp">
   <ab row="0" col="1" gap="3">
-    <abc>Log/List<pdc action="passthru">Log Data Set defaults</pdc></abc>
-    <abc>Function keys<pdc action="passthru">Keylist settings</pdc></abc>
-    <abc>Colors<pdc action="passthru">CUA attributes</pdc></abc>
-    <abc>Help<pdc action="alias help">Help for settings</pdc></abc>
+    <abc><M>Log/List<pdc action="passthru">Log Data Set defaults</pdc></abc>
+    <abc><M>Function keys<pdc action="passthru">Keylist settings</pdc></abc>
+    <abc><M>Colors<pdc action="passthru">CUA attributes</pdc></abc>
+    <abc><M>Help<pdc action="alias help">Help for settings</pdc></abc>
   </ab>
   <info row="1" col="0" intensity="high" fill="-" width="79"/>
 
