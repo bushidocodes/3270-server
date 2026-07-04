@@ -27,4 +27,12 @@
     <keyi key="PF3" cmd="EXIT">Return</keyi>
     <keyi key="PF15" cmd="EXIT">Return</keyi>
   </keyl>
+
+  <!-- )PROC: this sub-menu's own option routing (see #55). Only Library (1) is
+       implemented; the rest report "not yet implemented" via &SELMSG. -->
+  <source type="proc">
+    &ZSEL = TRANS( TRUNC(&ZCMD,'.')
+        1,'PGM(memberlist)'
+        *,'?' )
+  </source>
 </panel>

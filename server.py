@@ -1143,20 +1143,19 @@ def _show_member_list(client_socket, model=None):
         # otherwise just redisplay the current page
 
 
-def _show_submenu(client_socket, panel_name: str, leaves=None, initial=None):
+def _show_submenu(client_socket, panel_name: str, initial=None, userid=None,
+                  model=None):
     """Display a nested selection menu (e.g. option 3, Utilities) and drive it
-    like the Primary Option Menu: read the option from the panel's <cmdarea>,
-    validate it against the panel's <choice> selections. A leaf listed in
-    ``leaves`` ({option: handler(client_socket)}) invokes its handler to show
-    that sub-panel; any other valid option reports back via &SELMSG. PF3/PF15
-    returns; PF1 shows help.
+    like the Primary Option Menu: read the option from the panel's <cmdarea> and
+    route it through the panel's own )PROC (Screen.selection_targets, #55). An
+    implemented leaf runs its behaviour; any other declared choice reports back
+    via &SELMSG. PF3/PF15 returns; PF1 shows help.
 
     ``initial`` pre-selects a sub-option without displaying the menu first, so a
     dotted jump from the parent (``3.1``) lands straight on the leaf; PF3 from
     there falls back to this menu."""
     from dtl import load_panel
 
-    leaves = leaves or {}
     msg = ""
     pending = (initial or "").strip().upper() or None
     while True:
@@ -1174,12 +1173,20 @@ def _show_submenu(client_socket, panel_name: str, leaves=None, initial=None):
                 opt = screen.selection_at(cursor) or ""
             if not opt:
                 continue
-        # A further dotted tail would forward into a deeper leaf; we nest one
-        # level, so select on the head and ignore any deeper segment.
         head = opt.split(".", 1)[0]
-        if head in leaves:
-            leaves[head](client_socket)  # a handler that shows the leaf sub-panel
-            msg = ""
+        tail = opt.split(".", 1)[1] if "." in opt else None
+        target = screen.selection_targets.get(head)
+        if target is not None:
+            # A leaf runs its behaviour; EXIT (or a nested return) falls back to
+            # this menu, and a declared-but-unhandled leaf reports via &SELMSG.
+            leaving = _run_selection(client_socket, target, tail, userid, model)
+            if leaving:
+                return
+            elif leaving is False:
+                msg = ""
+            else:
+                choice = screen.selections.get(head, "").strip()
+                msg = f"OPTION {head} ({choice}) NOT YET IMPLEMENTED"
         elif head in screen.selections:
             msg = f"OPTION {head} ({screen.selections[head].strip()}) NOT YET IMPLEMENTED"
         else:
@@ -1772,8 +1779,10 @@ _LEAVE_COMMANDS = {"EXIT", "END", "RETURN", "LOGOFF"}
 
 def _submenu(panel):
     """A handler that opens a nested selection sub-menu panel (passing the dotted
-    tail through as the sub-menu's initial option)."""
-    return lambda cs, tail=None, **kw: _show_submenu(cs, panel, initial=tail)
+    tail through as the sub-menu's initial option, and userid/model through so the
+    sub-menu's own )PROC leaves can run)."""
+    return lambda cs, tail=None, userid=None, model=None, **kw: _show_submenu(
+        cs, panel, initial=tail, userid=userid, model=model)
 
 
 _SELECTION_HANDLERS = {
@@ -1786,10 +1795,9 @@ _SELECTION_HANDLERS = {
     "dlgtest":    lambda cs, userid=None, model=None, **kw: _show_overlay(
                       cs, "dlgtest", rows=_dialog_vars(userid, model),
                       enter_returns=False),
-    "utility":    lambda cs, tail=None, model=None, **kw: _show_submenu(
-                      cs, "utility",
-                      leaves={"1": lambda c: _show_member_list(c, model=model)},
-                      initial=tail),
+    # A utility sub-menu leaf: the Library list (utility.dtl's )PROC routes 1 here).
+    "memberlist": lambda cs, model=None, **kw: _show_member_list(cs, model=model),
+    "utility":    _submenu("utility"),
     "foreground": _submenu("foreground"),
     "batch":      _submenu("batch"),
     "ibmprod":    _submenu("ibmprod"),

@@ -78,9 +78,12 @@ the `)PROC` in a `<source type=proc>` block. We currently parse `<source>` as a 
   options end-to-end — `test_typed_option_opens_dialog_test` (7), `…_command_shell` (6),
   `…_point_and_shoot_opens_utilities` (3), `…_dotted_jump_opens_member_list` (3.1),
   `…_pf3_from_menu_logs_off`.
-- **PR 3+ — extend & converge.** Give the submenu panels their own `)PROC` so `PANEL(utility)`
-  recurses into utility's own routing (the authentic ISPF model), then handle `PGM PARM`
-  passing and `CMD(...)` targets.
+- **PR 3 — submenu `)PROC` recursion.** Give the submenu panels their own `)PROC` so
+  `PANEL(utility)` recurses into utility's own routing (the authentic ISPF model). `_show_submenu`
+  now dispatches leaves through the same `selection_targets` + `_run_selection` mechanism as the
+  primary menu, instead of a hardcoded `leaves` dict.
+- **PR 4+ (as needed) — `PGM PARM` passing and `CMD(...)` targets.** Add when a panel actually
+  needs to pass parameters or invoke a command (nothing does yet).
 
 ## Verification strategy
 
@@ -107,4 +110,10 @@ existing menu integration tests plus a manual drive of options 1/3/6/7. This fol
   dispatches through `screen.selection_targets` + `_run_selection` instead of the hardcoded
   `if/elif`. Behaviors unchanged (registry = refactored branches). Integration tests extended to
   cover the view (`PGM(view)`) and plain-submenu (`PANEL(foreground)`) handler paths.
+- [x] **PR 3** — `_show_submenu` routes leaves through the sub-menu panel's own `)PROC`
+  (`selection_targets` + `_run_selection`) instead of a hardcoded `leaves` dict; `utility.dtl`
+  declares `1 → PGM(memberlist)`. Registry gains a `memberlist` handler. Behavior unchanged;
+  the last hardcoded submenu routing is gone. Integration test covers the interactive
+  utility → Library leaf.
+- [ ] PR 4+ — `PGM PARM` passing / `CMD(...)` targets, when a panel needs them.
 - [ ] PR 3+ — submenu `)PROC`; `PGM PARM`; `CMD`.
