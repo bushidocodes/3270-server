@@ -1778,17 +1778,23 @@ def test_choice_reference_figure_snapshot():
     single-choice list (``__  1.  New``) beside a multiple-choice list
     (``_ North Branch``, mark + description, the NAME not shown).
 
+    The panel has an <AB> action bar, so the title is centered on row 2 below the
+    CUA separator rule (row 1), as in the figure.
+
     Honest deltas from the IBM figure (documented, not asserted):
-      * The "File  Search  Help" action bar comes from the external ``&sampabc;``
-        entity, which we cannot resolve — so the bar and its rule are absent and
-        the title sits on row 0 (the figure pushes it down one bar + rule).
+      * The "File  Search  Help" action-bar *labels* come from the external
+        ``&sampabc;`` entity, which we cannot resolve — so the bar row is blank
+        (the separator rule and the title-below-it still render).
       * CUA prompt dot-leaders (``Date . . . :``) and the USAGE=out ``:`` are not
         modelled — the prompt renders as plain text.
       * The runtime F-key area (``F1=Help ...``) is ISPF chrome, not in the markup.
       * A +1 left-margin column from our field-attribute-byte convention.
     """
     expected = "\n".join([
-        "                           Library Card Registration",
+        "",                                              # blank action-bar row (no labels)
+        "-" * 79,                                        # CUA separator rule
+        "                           Library Card Registration",   # title on row 2
+        "",
         " Type in patron's name and card number (if applicable).",
         " Then select an action bar choice.",
         " Date",
@@ -1855,16 +1861,13 @@ _PANEL_FIGURE_SRC = (
 def test_panel_reference_figure_snapshot():
     """Layout snapshot of the PANEL-reference Figure 1 (Dream Vacation Guide).
     Pins: validated WIDTH=60/DEPTH=22, an inline <AB> action bar ("File Help",
-    labels rendered — unlike the external-entity bar in the CHOICE figure), a
-    <topinst>, and two side-by-side single-choice <selfld>s in a horizontal
-    <region>, each auto-numbered "N.", plus the <cmdarea> input field.
+    labels rendered — unlike the external-entity bar in the CHOICE figure) with a
+    CUA separator rule beneath it and the title centered below (action bar row 0,
+    rule row 1, title row 2, blank, body), a <topinst>, and two side-by-side
+    single-choice <selfld>s in a horizontal <region>, each auto-numbered "N.",
+    plus the <cmdarea> input field.
 
     Honest deltas from the IBM figure (documented, not asserted):
-      * The title "Dream Vacation Guide" is dropped: the action bar occupies row 0
-        and our title retracts on a row-0 collision (#188). CUA instead draws a
-        separator rule under the bar and centers the title below it — a known
-        action-bar/title layout gap.
-      * No auto-generated action-bar separator rule.
       * The empty <CMDAREA> renders just the input field; ISPF supplies a default
         "Command ===>" prompt we don't add.
       * The runtime F-key area (F1=Help ...) is ISPF chrome, not in the markup.
@@ -1873,8 +1876,12 @@ def test_panel_reference_figure_snapshot():
     s = load_dtl(_PANEL_FIGURE_SRC)
     assert (s.width, s.depth) == (60, 22)               # validated dimensions
     assert [c["label"] for c in s.action_bar] == ["File", "Help"]
+    assert s.title == "Dream Vacation Guide"
     expected = "\n".join([
         " File   Help",
+        "-" * 59,                                        # separator rule under the bar
+        "                    Dream Vacation Guide",       # title centered on row 2
+        "",
         " Choose one of the following exotic locations and your",
         " preferred mode of travel, then press Enter.",
         " Exotic Location:           Travel Mode:",
