@@ -1543,7 +1543,11 @@ class _DTLParser(HTMLParser):
             width = max(len(heading), 1)
         self._lstfld["cols"].append({
             "heading": heading,
-            "width": width,
+            "width": width,                    # data width (COLWIDTH)
+            # Column formatting width: the greater of COLWIDTH and the heading, so
+            # a heading wider than the data is not truncated (e.g. "MI" over a
+            # 1-wide column, "(Y or N)" over a 1-wide input).
+            "fmt": max(width, len(heading), 1),
             "datavar": a.get("datavar", ""),
             # A column is an input field unless it is explicitly display-only.
             "usage": "out" if a.get("usage", "").lower() == "out" else "in",
@@ -1565,24 +1569,32 @@ class _DTLParser(HTMLParser):
         x = fld["col"]
         for c in cols:
             c["x"] = x
-            x += c["width"] + 1  # one-column gap between columns
+            x += c["fmt"] + 1  # column formatting width + a one-column gap
         row = fld["row"]
         H = DisplayIntensity.HIGH
-        groups = [g for g in fld["groups"] if g["headline"] and g["heading"]]
+        # The group-heading row shows every group that has a heading; HEADLINE=yes
+        # pads the heading with a dashed rule spanning the group's columns.
+        groups = [g for g in fld["groups"] if g["heading"]]
         if groups:
             for g in groups:
                 gcols = [c for c in cols if c["group"] is g]
                 if not gcols:
                     continue
                 start = gcols[0]["x"]
-                end = gcols[-1]["x"] + gcols[-1]["width"]
-                text = g["heading"][:max(1, end - start)]
-                gx = start + max(0, (end - start - len(text)) // 2)
-                self.screen.add(Text(row, gx, text, H, role="heading"))
+                span = max(1, gcols[-1]["x"] + gcols[-1]["fmt"] - start)
+                if g["headline"]:              # dashes around the centered heading
+                    inner = f" {g['heading']} " if g["heading"] else "-"
+                    pad = max(0, span - len(inner))
+                    text = ("-" * (pad // 2) + inner + "-" * (pad - pad // 2))[:span]
+                    self.screen.add(Text(row, start, text, H, role="heading"))
+                else:
+                    text = g["heading"][:span]
+                    gx = start + max(0, (span - len(text)) // 2)
+                    self.screen.add(Text(row, gx, text, H, role="heading"))
             row += 1
         for c in cols:
             if c["heading"]:
-                self.screen.add(Text(row, c["x"], c["heading"][:c["width"]], H,
+                self.screen.add(Text(row, c["x"], c["heading"][:c["fmt"]], H,
                                      role="heading"))
         row += 1
         row = self._emit_lstfld_rows(cols, row)
