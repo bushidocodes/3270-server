@@ -2,28 +2,30 @@
 <!-- ISPF Settings panel (option 0), shown when "0" is selected on the primary
      menu. Demonstrates an action bar (<ab>/<abc>/<pdc>): F10/F11 move along the
      choices, Enter opens a pull-down, and PF1 on an item shows its <pdc help=>
-     panel (Log/List -> loglisthelp). PF3 returns to the menu. -->
+     panel (Log/List -> loglisthelp). PF3 returns to the menu.
+     Auto-flow (ISPDTLC-idiomatic): the action bar takes row 0 and the compiler
+     draws the separator rule and centres the title; no row/col or fill= needed. -->
 <panel name="settings" help="ispfhelp">ISPF Settings
-  <ab row="0" col="1" gap="3">
+  <ab>
     <abc><M>Log/List<pdc help="loglisthelp">Log Data Set defaults<action run="passthru"></pdc></abc>
     <abc><M>Function keys<pdc>Keylist settings<action run="passthru"></pdc></abc>
     <abc><M>Colors<pdc>CUA attributes<action run="passthru"></pdc></abc>
     <abc><M>Help<pdc>Help for settings<action run="help"></pdc></abc>
   </ab>
-  <info row="1" col="0" intensity="high" fill="-" width="79"/>
 
-  <info row="2" col="1" intensity="high">ISPF Settings</info>
+  <info>Terminal type . . . . : 3278</info>
+  <info>Screen format . . . . : DATA</info>
+  <info>Command line at bottom: NO</info>
+  <info>Panel display CUA . . : YES</info>
 
-  <info row="4" col="1">Terminal type . . . . : 3278</info>
-  <info row="5" col="1">Screen format . . . . : DATA</info>
-  <info row="6" col="1">Command line at bottom: NO</info>
-  <info row="7" col="1">Panel display CUA . . : YES</info>
+  <divider type="blank"/>
+  <info>Options:</info>
+  <region indent="2">
+    <info>Command delimiter . . : ;</info>
+    <info>Tab to point-and-shoot: YES</info>
+  </region>
 
-  <info row="9"  col="1">Options:</info>
-  <info row="10" col="3">Command delimiter . . : ;</info>
-  <info row="11" col="3">Tab to point-and-shoot: YES</info>
-
-  <pnlinst row="22" col="1">PF3=Return to the Primary Option Menu</pnlinst>
+  <pnlinst>PF3=Return to the Primary Option Menu</pnlinst>
 
   <keyl name="SETKEYS">
     <keyi key="PF3"  cmd="EXIT">Return</keyi>
