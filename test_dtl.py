@@ -2417,6 +2417,21 @@ def test_dl_headers_reference_figure_snapshot():
     ])
 
 
+def test_notel_space_sets_item_indent():
+    # #123: SPACE sets a note-list item's text indentation — YES → 3 columns,
+    # NO/absent → the default 4. An <li> SPACE overrides the enclosing <notel>.
+    def col(markup):
+        s = load_dtl('<panel name=p width=50><area><info>' + markup
+                     + '</info></area></panel>')
+        return next(it.col for it in s.items
+                    if isinstance(it, Text) and it.text.startswith("Alpha"))
+
+    default = col('<notel><li>Alpha</notel>')
+    assert col('<notel space=yes><li>Alpha</notel>') == default - 1   # 4 → 3
+    assert col('<notel><li space=yes>Alpha</notel>') == default - 1   # li overrides
+    assert col('<ul><li>Alpha</ul>') == default                      # other lists unchanged
+
+
 def test_dl_format_positions_term_within_tsize():
     # #123: <dl format=> places the DT term within its TSIZE column (START left,
     # CENTER centred, END right); the description column stays at base+TSIZE.

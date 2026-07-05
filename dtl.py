@@ -497,7 +497,9 @@ class _DTLParser(HTMLParser):
                                      _intensity(a, "intens"), color=self._color(a),
                                      highlight=self._hilite(a), role="text"))
                 ctx["row"] += 2               # heading + blank line before the items
-            self._lists.append({"type": "ol", "n": 0})
+            # SPACE sets the item-text indentation: YES → 3 columns, else 4.
+            self._lists.append({"type": "ol", "n": 0,
+                                "space": self._space_indent(a)})
         elif tag in ("dl", "parml"):
             # A definition/parameter list carries its term-column width (tsize)
             # and break style; <dt>/<dd> (<pt>/<pd>) entries lay out against it.
@@ -1574,8 +1576,19 @@ class _DTLParser(HTMLParser):
             marker = self._BULLETS[min(depth - 1, len(self._BULLETS) - 1)]
         # A list item is normal information-region text (CUA green), like a <p>;
         # without a role it would fall back to the base protected-field colour.
-        self._emit_flow_lines(text, row, bullet_col + self._LIST_INDENT, ctx,
+        # SPACE on the <li> overrides the list's item-text indentation (else the
+        # enclosing list's SPACE, else the default 4 — e.g. a <notel space=yes>).
+        indent = (self._space_indent(a) if "space" in a
+                  else (lst.get("space", self._LIST_INDENT) if lst
+                        else self._LIST_INDENT))
+        self._emit_flow_lines(text, row, bullet_col + indent, ctx,
                               marker=marker, marker_col=bullet_col, role="text")
+
+    def _space_indent(self, a):
+        """The list item-text indentation from a SPACE attribute: SPACE=YES → 3
+        columns, SPACE=NO / absent → the default 4 (per the NOTEL/LI reference)."""
+        return 3 if str(a.get("space", "")).strip().lower() == "yes" \
+            else self._LIST_INDENT
 
     def _emit_defitem(self, tag, a, content):
         """Emit one definition-list entry. A term (<dt>/<pt>) sits at the list
