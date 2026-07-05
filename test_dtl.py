@@ -1725,6 +1725,26 @@ def test_list_column_intens_and_hilite_style_cells():
     assert cell.intensity is N and cell.highlight is None
 
 
+def test_list_column_display_no_is_non_display():
+    # #235: DISPLAY=NO is a non-display (password-style) column — the data cell is
+    # hidden, but the column keeps its position and its heading still shows.
+    s = load_dtl(
+        '<panel name="p"><area><lstfld>'
+        '<lstcol datavar=u colwidth=8 usage=out>User'
+        '<lstcol datavar=pw colwidth=8 usage=out display=no>Pass'   # hidden output
+        '<lstcol datavar=s colwidth=6 display=no>Secret'            # hidden input
+        '</lstfld></area></panel>',
+        rows=[{"u": "IBMUSER", "pw": "SYS1", "s": "x"}])
+    cells = {(it.text if isinstance(it, Text) else it.name): it
+             for it in s.items if getattr(it, "role", None) == "cell"}
+    assert cells["IBMUSER"].intensity is DisplayIntensity.NORMAL     # shown
+    assert cells["SYS1"].intensity is DisplayIntensity.NON_DISPLAY   # hidden output
+    assert cells["s"].hidden is True                                 # hidden input
+    # Headings are still visible over the non-display columns.
+    heads = {it.text for it in s.items if getattr(it, "role", None) == "heading"}
+    assert {"User", "Pass", "Secret"} <= heads
+
+
 def test_list_column_format_positions_heading_and_data():
     # #230: FORMAT positions the shorter of (heading, data) within the column
     # formatting width. It does NOT touch the cell contents (that's ALIGN).

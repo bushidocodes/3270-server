@@ -1583,6 +1583,9 @@ class _DTLParser(HTMLParser):
             "color": self._color(a),
             "intensity": self._cell_intensity(a.get("intens")),
             "highlight": self._hilite(a),
+            # DISPLAY=NO is a non-display column (a password-style hidden cell); the
+            # heading still shows. YES is the default.
+            "display_no": str(a.get("display", "yes")).strip().lower() == "no",
             "group": self._lstgrp,
         })
         # TEXT: a short description rendered beside each data cell. TEXTLOC picks
@@ -1772,13 +1775,17 @@ class _DTLParser(HTMLParser):
                 raw = "" if entry is None else str(entry.get(c["datavar"], ""))
                 value = self._align(raw, c["width"], c["align"])
                 intensity = c.get("intensity", DisplayIntensity.NORMAL)
-                hidden = intensity is DisplayIntensity.NON_DISPLAY
+                # INTENS=NON or DISPLAY=NO make the data cell non-display.
+                hidden = (intensity is DisplayIntensity.NON_DISPLAY
+                          or c.get("display_no"))
                 # FORMAT shifts the data cell within the column width (the cell's
                 # own contents are still justified by ALIGN, per the reference).
                 cx = c["x"] + self._fmt_offset(c["width"], c["fmt"],
                                                c.get("format", "start"))
                 if c["usage"] == "out":
-                    self.screen.add(Text(cy, cx, value, intensity,
+                    self.screen.add(Text(cy, cx, value,
+                                         DisplayIntensity.NON_DISPLAY if hidden
+                                         else intensity,
                                          color=c.get("color"),
                                          highlight=c.get("highlight"), role="cell"))
                 else:
