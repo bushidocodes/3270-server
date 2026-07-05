@@ -287,7 +287,7 @@ _TEXT_TAGS = ("info",) + _INSTRUCTION_TAGS + _FLOW_TEXT_TAGS
 # A TOPINST instead gets a blank line AFTER it. See the P/TOPINST tag references.
 _BLANK_BEFORE_TAGS = ("p", "pnlinst")
 _CONTENT_TAGS = _TEXT_TAGS + ("dtafld", "cmdarea", "choice", "figcap",
-                              "dthd", "ddhd")
+                              "dthd", "ddhd", "dldiv", "pldiv")
 _FIELD_TAGS = ("dtafld", "cmdarea")
 
 
@@ -1120,6 +1120,8 @@ class _DTLParser(HTMLParser):
             self._emit_defitem(tag, a, content)
         elif tag in ("dthd", "ddhd"):
             self._emit_defhead(tag, a, content)
+        elif tag in ("dldiv", "pldiv"):
+            self._emit_listdiv(a, content)
         elif tag in ("lines", "xmp"):
             # <xmp> (example) is preformatted like <lines>: authored line breaks
             # and interior spacing are significant.
@@ -1633,6 +1635,35 @@ class _DTLParser(HTMLParser):
         self.screen.add(Text(row, desc_col, text, _intensity(a), role="heading"))
         if ctx is not None and not (dl and dl.get("compact")):
             ctx["row"] = row + 2                     # heading row + one blank line
+
+    def _emit_listdiv(self, a, content):
+        """Emit a definition/parameter-list divider (<dldiv>/<pldiv>): a horizontal
+        rule across the list. TYPE=NONE (default) is a blank spacer row; SOLID/DASH
+        draw a dashed rule (a text terminal is NOGRAPHIC, so SOLID falls back to
+        dashes); TYPE=TEXT lays the divider-text out, positioned by FORMAT. GAP=YES
+        leaves a one-character gap at each end."""
+        row, col, ctx = self._resolve_pos(a, "dldiv")   # advances the flow one row
+        typ = str(a.get("type", "none")).strip().lower()
+        if typ in ("none", "blank"):
+            return                                       # a blank spacer, no rule
+        span = max(1, self.screen.width - col - 1)
+        if ctx is not None and ctx.get("width"):
+            span = ctx["width"]
+        start = col
+        if _bool_attr(a, "gap"):                         # 1-char gap at each end
+            start, span = col + 1, max(1, span - 2)
+        if typ == "text":
+            text = " ".join(content.split())[:span]
+            fmt = str(a.get("format", "start")).strip().lower()
+            if fmt == "end":
+                off = span - len(text)
+            elif fmt == "center":
+                off = (span - len(text)) // 2
+            else:
+                off = 0
+            self.screen.add(Text(row, start + off, text, role="rule"))
+        else:                                            # solid / dash → dashed rule
+            self.screen.add(Text(row, start, "-" * span, role="rule"))
 
     def _emit_lines(self, a, content):
         """Emit a <lines> block: preformatted text whose authored line breaks
