@@ -1,26 +1,26 @@
 <!DOCTYPE DM SYSTEM>
 <!-- ISPF Utility Selection Panel (option 3) -- a nested selection menu.
      Same shape as the Primary Option Menu: an Option ===> command line
-     (<cmdarea>, ZCMD) and a <selfld> of choices. The server reads the option
-     with Screen.command_value() and validates it against Screen.selections;
-     an unimplemented leaf reports back via &SELMSG. PF3 returns to the menu. -->
+     (<cmdarea>, ZCMD) and a <selfld type=menu> of choices. The server reads the
+     option with Screen.command_value() and validates it against Screen.selections;
+     an unimplemented leaf reports back via &SELMSG. PF3 returns to the menu.
+     Auto-flow (ISPDTLC-idiomatic): no row/col and no manual number/keyword grid;
+     the menu auto-numbers, SELCHAR gives Outlist its 8, and the keyword+description
+     are folded into the choice text (padded so the descriptions line up). -->
 <panel name="utility" help="ispfhelp">Utility Selection Panel
-  <info row="0" col="0" intensity="high">------------------------------ Utility Selection Panel -------------------------</info>
+  <cmdarea cursor="yes">Option ===></cmdarea>
 
-  <cmdarea row="2" col="1" fldcol="13" entwidth="6" cursor="yes">Option ===></cmdarea>
-
-  <selfld row="4" numcol="1" namecol="4" desccol="21" numwidth="2" numintensity="high">
-    <choice num="1" name="  Library       ">  Compress or print data set; rename/delete members</choice>
-    <choice num="2" name="  Data Set      ">  Allocate, rename, delete, catalog, or display a data set</choice>
-    <choice num="3" name="  Move/Copy     ">  Move or copy members or data sets</choice>
-    <choice num="4" name="  Dslist        ">  Print or display a list of data set names</choice>
-    <choice num="5" name="  Reset         ">  Reset statistics for members of an ISPF library</choice>
-    <choice num="8" name="  Outlist       ">  Display, delete, or print held job output</choice>
+  <selfld type="menu">
+    <choice>Library          Compress or print data set; rename/delete members</choice>
+    <choice>Data Set         Allocate, rename, delete, catalog, or display a data set</choice>
+    <choice>Move/Copy        Move or copy members or data sets</choice>
+    <choice>Dslist           Print or display a list of data set names</choice>
+    <choice>Reset            Reset statistics for members of an ISPF library</choice>
+    <choice selchar="8">Outlist          Display, delete, or print held job output</choice>
   </selfld>
 
-  <info row="20" col="1" intensity="high">&SELMSG</info>
-  <info row="22" col="1">Enter an option, or PF3 to return to the Primary Option Menu.</info>
-  <info row="23" col="0" intensity="high" fill="-" width="79"/>
+  <info intensity="high">&SELMSG</info>
+  <botinst>Enter an option, or PF3 to return to the Primary Option Menu.</botinst>
 
   <keyl name="UTILKEYS">
     <keyi key="PF1" cmd="HELP">Help</keyi>

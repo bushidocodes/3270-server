@@ -2602,7 +2602,14 @@ class _DTLParser(HTMLParser):
         if unavail:
             return                          # not selectable → no routing/point-and-shoot
         if match:
-            self.screen.selections[match] = a.get("name", "").strip()
+            # The selection value carries the choice's keyword (the server names it
+            # in an "OPTION n (keyword) not implemented" message). A folded menu
+            # choice has no NAME — its keyword is the text before the description's
+            # 2-space gap, e.g. "Data Set" in "Data Set   Allocate ...".
+            keyword = a.get("name", "").strip()
+            if not keyword and content:
+                keyword = re.split(r"\s{2,}", content.strip(), 1)[0]
+            self.screen.selections[match] = keyword
             if mark is not None:
                 # Record how to read this multi-select mark field back.
                 self.screen.selection_fields.append(
