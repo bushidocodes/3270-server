@@ -73,9 +73,10 @@ renders centered on row 0, with the body flowing beneath it.
                                  as ``Screen.command_field``.
 ``<selfld row col type>``        a list of menu choices; each ``<choice>`` is laid
                                  out on its own row, auto-incrementing.
-``<choice num name match          one menu row: number, name, description. The
-   checkvar unavail>desc``        selection value (``match``, default ``num``) is
-                                 recorded in ``Screen.selections`` so the dialog can
+``<choice selchar name match      one menu row: number, name, description. The
+   checkvar unavail>desc``        selection value (``match``, default the
+                                 auto-number or ``selchar``) is recorded in
+                                 ``Screen.selections`` so the dialog can
                                  validate a typed option; ``checkvar`` lands the
                                  cursor on the current choice; ``unavail`` greys a
                                  choice out and makes it unselectable.
@@ -2553,10 +2554,9 @@ class _DTLParser(HTMLParser):
         # SELCHAR is the standard way to override that value (a menu number/letter
         # placed in front of the choice, e.g. option 8 in a 1..5,8 menu, or X):
         # its 'char(s),n' form gives the char(s); the trailing ,n (HIDE sizing) is
-        # unused here. NUM is our non-standard equivalent, kept for the not-yet-
-        # converted bundled menus.
+        # unused here.
         sel = a.get("selchar")
-        disp = sel.split(",")[0].strip() if sel is not None else a.get("num")
+        disp = sel.split(",")[0].strip() if sel is not None else None
         auto_num = disp is None and not sf.get("multi")
         num = str(sf["count"] + 1) if auto_num else (disp or "")
         # On the first choice, a column-less single-choice field whose choices are

@@ -450,11 +450,11 @@ def test_dtafld_mdt_defaults_true():
 def test_selfld_lays_out_choices_on_incrementing_rows():
     s = load_dtl(
         '<panel><selfld row="4">'
-        '<choice num="0" name="  A">  desc-a</choice>'
-        '<choice num="10" name="  B">  desc-b</choice>'
+        '<choice selchar="0" name="  A">  desc-a</choice>'
+        '<choice selchar="10" name="  B">  desc-b</choice>'
         '</selfld></panel>'
     )
-    # choice 0 → row 4, choice 1 → row 5; num is left-justified to numwidth (2)
+    # choice 0 → row 4, choice 1 → row 5; the number is left-justified to width 2
     assert s.items[0] == Text(4, 1, "0 ", DisplayIntensity.HIGH)
     assert s.items[1] == Text(4, 4, "  A", DisplayIntensity.NORMAL)
     assert s.items[2] == Text(4, 21, "  desc-a", DisplayIntensity.NORMAL)
@@ -480,12 +480,12 @@ def test_selfld_single_choice_auto_layout_matches_reference():
     assert set(s.selections) == {"1", "2", "3"}
 
 
-def test_selfld_explicit_num_still_wins_and_grid_is_unchanged():
-    # An explicit NUM (and explicit columns) keep the fixed grid — the bundled
-    # panels rely on this, so it must stay byte-for-byte as before.
+def test_selfld_selchar_sets_the_value_with_keyword_columns():
+    # SELCHAR sets the displayed selection value; a named choice lays its keyword
+    # and description out in the keyword/description columns.
     s = load_dtl(
         '<panel><selfld row="4">'
-        '<choice num="7" name="  A">  desc-a</choice></selfld></panel>'
+        '<choice selchar="7" name="  A">  desc-a</choice></selfld></panel>'
     )
     assert s.items[0] == Text(4, 1, "7 ", DisplayIntensity.HIGH)
     assert s.items[2] == Text(4, 21, "  desc-a", DisplayIntensity.NORMAL)
@@ -564,7 +564,7 @@ def test_selfld_type_multi_unavail_choice_has_no_mark_field():
 def test_selfld_type_single_is_unchanged():
     # The default (SINGLE) keeps the numbered layout — no mark fields.
     s = load_dtl(
-        '<panel><selfld row="4"><choice num="1" name="A">desc</choice></selfld></panel>'
+        '<panel><selfld row="4"><choice selchar="1" name="A">desc</choice></selfld></panel>'
     )
     assert not any(isinstance(it, Field) for it in s.items)
     assert s.items[0] == Text(4, 1, "1 ", DisplayIntensity.HIGH)
@@ -578,9 +578,9 @@ def test_choice_hide_removes_it_when_variable_true():
     N, H = DisplayIntensity.NORMAL, DisplayIntensity.HIGH
     src = (
         '<panel><selfld row="4">'
-        '<choice num="1" name="A" match="A" hide="vh">Alpha</choice>'
-        '<choice num="2" name="B" match="B">Beta</choice>'
-        '<choice num="3" name="C" match="C" hidex="vs">Gamma</choice>'
+        '<choice selchar="1" name="A" match="A" hide="vh">Alpha</choice>'
+        '<choice selchar="2" name="B" match="B">Beta</choice>'
+        '<choice selchar="3" name="C" match="C" hidex="vs">Gamma</choice>'
         '</selfld></panel>'
     )
     # vh true → A hidden; vs false → C hidden. Only B remains, at the top row.
@@ -603,8 +603,8 @@ def test_hidden_choice_stays_out_of_selections_even_when_proc_routes_it():
     # This asserts the data precondition that lets the gate block a hidden option.
     s = load_dtl(
         '<panel><selfld row="4">'
-        '<choice num="1" name="Open">Open'
-        '<choice num="7" name="Secret" hide="secret">Secret op</choice>'
+        '<choice selchar="1" name="Open">Open'
+        '<choice selchar="7" name="Secret" hide="secret">Secret op</choice>'
         '</selfld>'
         "<source type=proc>&ZSEL = TRANS(&ZCMD 1,'PANEL(a)' 7,'PGM(secret)')</source>"
         '</panel>',
@@ -617,8 +617,8 @@ def test_hidden_choice_stays_out_of_selections_even_when_proc_routes_it():
 
 def test_choice_bare_hide_always_removes_it():
     s = load_dtl(
-        '<panel><selfld row="4"><choice num="1" name="A" hide>Alpha</choice>'
-        '<choice num="2" name="B">Beta</choice></selfld></panel>'
+        '<panel><selfld row="4"><choice selchar="1" name="A" hide>Alpha</choice>'
+        '<choice selchar="2" name="B">Beta</choice></selfld></panel>'
     )
     assert [it.text for it in s.items if it.col == 4] == ["B"]
 
@@ -630,8 +630,8 @@ def test_selfld_prompt_renders_above_list_by_default():
     N, H = DisplayIntensity.NORMAL, DisplayIntensity.HIGH
     s = load_dtl(
         '<panel><selfld name="day" selwidth="20">Weekdays:'
-        '<choice num="1" name="Mon">day1</choice>'
-        '<choice num="2" name="Tue">day2</choice>'
+        '<choice selchar="1" name="Mon">day1</choice>'
+        '<choice selchar="2" name="Tue">day2</choice>'
         '</selfld></panel>'
     )
     assert s.items[0] == Text(0, 1, "Weekdays:", N)   # caption on the first row
@@ -647,7 +647,7 @@ def test_selfld_prompt_before_wraps_and_shifts_choices():
     s = load_dtl(
         '<panel><selfld name="cs" pmtwidth="11" pmtloc="before">'
         'Choose one of the following'
-        '<choice num="1" name="Civ">Civil</choice></selfld></panel>'
+        '<choice selchar="1" name="Civ">Civil</choice></selfld></panel>'
     )
     # caption wrapped to <= 11 columns, each on its own row from the top
     assert s.items[0] == Text(0, 1, "Choose one", N)
@@ -663,7 +663,7 @@ def test_selfld_empty_prompt_renders_nothing():
     # first <choice> — that must render nothing so they stay byte-identical.
     s = load_dtl(
         '<panel><selfld row="4">\n  '
-        '<choice num="1" name="A">desc</choice></selfld></panel>'
+        '<choice selchar="1" name="A">desc</choice></selfld></panel>'
     )
     assert s.items[0] == Text(4, 1, "1 ", DisplayIntensity.HIGH)   # no prompt item
     assert s.items[1] == Text(4, 4, "A", DisplayIntensity.NORMAL)
@@ -674,8 +674,8 @@ def test_choice_records_selection_rows_for_point_and_shoot():
     # it (point-and-shoot). selection_at(cursor) resolves a cursor address.
     s = load_dtl(
         '<panel><selfld row="4">'
-        '<choice num="0" name="A">  desc-a</choice>'
-        '<choice num="3" name="B">  desc-b</choice>'
+        '<choice selchar="0" name="A">  desc-a</choice>'
+        '<choice selchar="3" name="B">  desc-b</choice>'
         '</selfld></panel>'
     )
     assert s.selection_rows == {4: "0", 5: "3"}
@@ -692,23 +692,23 @@ def test_ispf_menu_selection_rows_map_options():
     assert s.selection_at(18 * 80 + 5) == "X"
 
 
-def test_choice_match_defaults_to_num_and_records_selections():
+def test_choice_match_defaults_to_the_number_and_records_selections():
     s = load_dtl(
         '<panel><selfld row="4">'
-        '<choice num="0" name="Settings">  desc</choice>'
-        '<choice num="X" name="Exit">  bye</choice>'
+        '<choice selchar="0" name="Settings">  desc</choice>'
+        '<choice selchar="X" name="Exit">  bye</choice>'
         '</selfld></panel>'
     )
     assert s.selections == {"0": "Settings", "X": "Exit"}
 
 
-def test_choice_explicit_match_overrides_num():
+def test_choice_explicit_match_overrides_the_number():
     s = load_dtl(
         '<panel><selfld row="4">'
-        '<choice num="1" name="View" match="V">  desc</choice>'
+        '<choice selchar="1" name="View" match="V">  desc</choice>'
         '</selfld></panel>'
     )
-    assert s.selections == {"V": "View"}        # MATCH wins over num
+    assert s.selections == {"V": "View"}        # MATCH wins over the number
 
 
 def test_choice_checkvar_lands_cursor_on_the_current_choice():
@@ -716,8 +716,8 @@ def test_choice_checkvar_lands_cursor_on_the_current_choice():
     # that choice is current — the cursor is placed on it.
     s = load_dtl(
         '<panel><selfld row="4">'
-        '<choice num="1" name="New" checkvar="card" match="NEW">create'
-        '<choice num="2" name="Old" checkvar="card" match="OLD">existing'
+        '<choice selchar="1" name="New" checkvar="card" match="NEW">create'
+        '<choice selchar="2" name="Old" checkvar="card" match="OLD">existing'
         '</selfld></panel>',
         CARD="OLD",
     )
@@ -731,8 +731,8 @@ def test_choice_unavail_is_dimmed_and_unselectable():
     from screen import Color, _role_colour
     s = load_dtl(
         '<panel><selfld row="4">'
-        '<choice num="1" name="Ok" match="A">available'
-        '<choice num="2" name="No" match="B" unavail>disabled'
+        '<choice selchar="1" name="Ok" match="A">available'
+        '<choice selchar="2" name="No" match="B" unavail>disabled'
         '</selfld></panel>'
     )
     assert "A" in s.selections and "B" not in s.selections     # unavailable can't be picked
@@ -2883,7 +2883,7 @@ def test_selfld_choice_columns_relative_to_enclosing_box():
     # column 1 the offset is 0, so panel-level selection fields are unchanged.
     N, H = DisplayIntensity.NORMAL, DisplayIntensity.HIGH
     base = load_dtl(
-        '<panel><selfld row="4"><choice num="1" name="Aaa">desc</choice></selfld></panel>'
+        '<panel><selfld row="4"><choice selchar="1" name="Aaa">desc</choice></selfld></panel>'
     )
     assert base.items[0] == Text(4, 1, "1 ", H)     # classic absolute columns:
     assert base.items[1] == Text(4, 4, "Aaa", N)    #   num@1, name@4, desc@21
@@ -2891,7 +2891,7 @@ def test_selfld_choice_columns_relative_to_enclosing_box():
 
     shifted = load_dtl(
         '<panel><region col="30">'
-        '<selfld row="4"><choice num="1" name="Aaa">desc</choice></selfld>'
+        '<selfld row="4"><choice selchar="1" name="Aaa">desc</choice></selfld>'
         '</region></panel>'
     )
     assert shifted.items[0] == Text(4, 30, "1 ", H)   # each shifted by (30 - 1)
@@ -2905,7 +2905,7 @@ def test_selfld_explicit_col_shifts_choice_columns():
     N, H = DisplayIntensity.NORMAL, DisplayIntensity.HIGH
     s = load_dtl(
         '<panel><selfld row="4" col="30">'
-        '<choice num="1" name="Aaa">desc</choice></selfld></panel>'
+        '<choice selchar="1" name="Aaa">desc</choice></selfld></panel>'
     )
     assert s.items[0] == Text(4, 30, "1 ", H)
     assert s.items[1] == Text(4, 33, "Aaa", N)
@@ -2917,8 +2917,8 @@ def test_selfld_as_horiz_column_shifts_right():
     # right one's choices shift to its column instead of pinning to column 1.
     s = load_dtl(
         '<panel><area col="1"><region dir="horiz">'
-        '<region><selfld row="1"><choice num="1" name="Mon">day</choice></selfld></region>'
-        '<region><selfld row="1"><choice num="1" name="Nine">am</choice></selfld></region>'
+        '<region><selfld row="1"><choice selchar="1" name="Mon">day</choice></selfld></region>'
+        '<region><selfld row="1"><choice selchar="1" name="Nine">am</choice></selfld></region>'
         '</region></area></panel>'
     )
     left = [it for it in s.items if isinstance(it, Text) and it.text.strip() == "Mon"][0]
@@ -3006,7 +3006,7 @@ def test_missing_required_attr_raises():
 
 def test_choice_outside_selfld_raises():
     with pytest.raises(DTLError):
-        load_dtl('<panel><choice num="0" name="A">d</choice></panel>')
+        load_dtl('<panel><choice selchar="0" name="A">d</choice></panel>')
 
 
 # ── keylist (<keyl>/<keyi>) ──────────────────────────────────────────────────
