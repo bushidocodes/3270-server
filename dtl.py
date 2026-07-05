@@ -1593,6 +1593,9 @@ class _DTLParser(HTMLParser):
             # preceding the data, so the data starts at POSITION+1. Absent/invalid →
             # normal left-to-right flow.
             "position": self._opt_int(a.get("position")),
+            # HELP=panel-name attaches field-level (cursor-sensitive) help to the
+            # column's cells, like <dtafld help=>.
+            "help": self._field_help(a),
             "group": self._lstgrp,
         })
         # TEXT: a short description rendered beside each data cell. TEXTLOC picks
@@ -1804,7 +1807,8 @@ class _DTLParser(HTMLParser):
                                          DisplayIntensity.NON_DISPLAY if hidden
                                          else intensity,
                                          color=c.get("color"),
-                                         highlight=c.get("highlight"), role="cell"))
+                                         highlight=c.get("highlight"), role="cell",
+                                         help=c.get("help")))
                 else:
                     self.screen.add(Field(
                         row=cy, col=cx, length=c["width"],
@@ -1815,7 +1819,7 @@ class _DTLParser(HTMLParser):
                         intensity=DisplayIntensity.NORMAL if hidden else intensity,
                         hidden=hidden,
                         color=c.get("color"), highlight=c.get("highlight"),
-                        role="cell",
+                        role="cell", help=c.get("help"),
                     ))
                 # TEXT description beside the cell, justified within its area
                 # (TEXTFMT); unformatted when the text overflows the reserved area.

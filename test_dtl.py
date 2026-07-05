@@ -1725,6 +1725,25 @@ def test_list_column_intens_and_hilite_style_cells():
     assert cell.intensity is N and cell.highlight is None
 
 
+def test_list_column_help_is_cursor_sensitive():
+    # #237: HELP=panel on a <lstcol> attaches field-level help to its cells, so
+    # HELP with the cursor on a cell resolves that panel — for both an output cell
+    # (Text) and an input cell (Field). A column without HELP falls through.
+    s = load_dtl(
+        '<panel name="p" help="panelhelp"><area><lstfld>'
+        '<lstcol datavar=u colwidth=8 usage=out help=userhelp>User'
+        '<lstcol datavar=amt colwidth=6 help=amthelp>Amount'
+        '<lstcol datavar=x colwidth=4 usage=out>Plain'
+        '</lstfld></area></panel>',
+        rows=[{"u": "IBMUSER", "amt": "100", "x": "z"}])
+    cell = {(it.text if isinstance(it, Text) else it.name): it
+            for it in s.items if getattr(it, "role", None) == "cell"}
+    # help_for takes a buffer address inside the cell's data span.
+    assert s.help_for(cell["IBMUSER"].data_addr + 1) == "userhelp"   # output cell
+    assert s.help_for(cell["amt"].data_addr + 1) == "amthelp"        # input cell
+    assert s.help_for(cell["z"].data_addr + 1) is None               # no column help
+
+
 def test_list_column_position_pins_column():
     # #231: POSITION=n pins a column — n is the attribute byte before the data, so
     # the data starts at n+1. Columns on different model lines pinned to the same
