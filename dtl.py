@@ -506,6 +506,7 @@ class _DTLParser(HTMLParser):
                 "tsize": int(a["tsize"]) if "tsize" in a else self._DL_TSIZE,
                 "break": a.get("break", "none").lower(),
                 "compact": _bool_attr(a, "compact"),  # no blank after a <ddhd> header
+                "indent": self._opt_int(a.get("indent"), 0),  # shift the list right
                 "pending": None,
             })
         if tag in ("panel", "help"):
@@ -1589,7 +1590,7 @@ class _DTLParser(HTMLParser):
         brk = dl["break"] if dl else "none"
         depth = max(len(self._lists), 1)
         row, col, ctx = self._resolve_pos(a, tag)  # advances the flow one line
-        base = col + (depth - 1) * self._LIST_INDENT
+        base = col + (depth - 1) * self._LIST_INDENT + (dl["indent"] if dl else 0)
         if tag in ("dt", "pt"):
             self.screen.add(Text(row, base, text, _intensity(a)))
             # Decide where this term's description goes. With break=none/fit a
@@ -1621,7 +1622,7 @@ class _DTLParser(HTMLParser):
         tsize = dl["tsize"] if dl else self._DL_TSIZE
         depth = max(len(self._lists), 1)
         row, col, ctx = self._resolve_pos(a, tag)   # advances the flow one line
-        base = col + (depth - 1) * self._LIST_INDENT
+        base = col + (depth - 1) * self._LIST_INDENT + (dl["indent"] if dl else 0)
         if tag == "dthd":
             self.screen.add(Text(row, base, text, _intensity(a), role="heading"))
             # The paired <ddhd> shares this row (rewind, like a <dt>'s <dd>).
@@ -1646,6 +1647,9 @@ class _DTLParser(HTMLParser):
         dashes); TYPE=TEXT lays the divider-text out, positioned by FORMAT. GAP=YES
         leaves a one-character gap at each end."""
         row, col, ctx = self._resolve_pos(a, "dldiv")   # advances the flow one row
+        dl = next((ln for ln in reversed(self._lists)
+                   if ln["type"] in ("dl", "parml")), None)
+        col += dl["indent"] if dl else 0                 # align with the list <INDENT>
         typ = str(a.get("type", "none")).strip().lower()
         if typ in ("none", "blank"):
             return                                       # a blank spacer, no rule
