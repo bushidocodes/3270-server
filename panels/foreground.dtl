@@ -1,24 +1,22 @@
 <!DOCTYPE DM SYSTEM>
-<!-- ISPF Foreground Selection Panel (a demo selection sub-menu). Its choices are
-     authentic ISPF sub-functions; each leaf reports back via &SELMSG
-     (not yet implemented). Driven by server._show_submenu; PF3 returns. -->
+<!-- ISPF Foreground Selection Panel (a selection sub-menu). Each leaf reports back via &SELMSG
+     (not yet implemented). Driven by server._show_submenu; PF3 returns. Auto-flow
+     (ISPDTLC-idiomatic): <selfld type=menu>, auto-numbered, no row/col or grid;
+     the keyword+description are folded into the padded choice text. -->
 <panel name="foreground" help="ispfhelp">Foreground Selection Panel
-  <info row="0" col="0" intensity="high">------------------------- Foreground Selection Panel --------------------------</info>
+  <cmdarea cursor="yes">Option ===></cmdarea>
 
-  <cmdarea row="2" col="1" fldcol="13" entwidth="6" cursor="yes">Option ===></cmdarea>
-
-  <selfld row="4" numcol="1" namecol="4" desccol="21" numwidth="2" numintensity="high">
-    <choice num="1" name="  Assembler       ">  Assemble a source program in the foreground</choice>
-    <choice num="2" name="  COBOL           ">  Compile a COBOL source program</choice>
-    <choice num="3" name="  PL/I            ">  Compile a PL/I source program</choice>
-    <choice num="4" name="  Fortran         ">  Compile a VS FORTRAN source program</choice>
-    <choice num="5" name="  C/C++           ">  Compile a C or C++ source program</choice>
-    <choice num="6" name="  Member list     ">  Display a member parts list</choice>
+  <selfld type="menu">
+    <choice>Assembler        Assemble a source program in the foreground</choice>
+    <choice>COBOL            Compile a COBOL source program</choice>
+    <choice>PL/I             Compile a PL/I source program</choice>
+    <choice>Fortran          Compile a VS FORTRAN source program</choice>
+    <choice>C/C++            Compile a C or C++ source program</choice>
+    <choice>Member list      Display a member parts list</choice>
   </selfld>
 
-  <info row="20" col="1" intensity="high">&SELMSG</info>
-  <info row="22" col="1">Enter an option, or PF3 to return to the Primary Option Menu.</info>
-  <info row="23" col="0" intensity="high" fill="-" width="79"/>
+  <info intensity="high">&SELMSG</info>
+  <botinst>Enter an option, or PF3 to return to the Primary Option Menu.</botinst>
 
   <keyl name="FGNDKEYS">
     <keyi key="PF1" cmd="HELP">Help</keyi>
