@@ -13,6 +13,38 @@ byte-for-byte golden tests**.
 This is an audit + design plan. No panel is changed by this document; the work is broken into
 tiers that can be scheduled independently.
 
+## Status — 2026-07 (the inventory below is now historical)
+
+The standardization is substantively **done**. All 21 bundled panels were converted to standard
+**auto-flow** DTL (no explicit `row`/`col` in the panel sources), and the parser support for the
+dead non-standard attributes has been removed — no legacy aliases (see the `no-legacy-aliases`
+rule). The old byte-identity-to-builder premise (below) no longer holds: the hand-built
+`screens.py` builders were **retired** (the server serves the DTL panels directly), and the logon
+panel is now pinned to a committed render golden (`panels/logon.golden`) instead.
+
+**Removed (attribute + parser support gone):** `title=` (→ content), `default=` (→ `INIT`),
+`<pdc action=>` (→ `<action run=>`), `<cmd trunc=>` (→ `<t>`), field `cursor=` (→ `<panel
+cursor=field>`), `fill=` (→ `<divider>`), `<ab gap=>` (fixed separator), `fldgap=` (default gap),
+the `<selfld>` grid `numcol`/`namecol`/`desccol`/`numwidth`/`numintensity` (auto-layout),
+`<choice num=>` (→ `SELCHAR` / auto-number), and `<dtafld/cmdarea fldcol=>` (entry flows after the
+prompt). New standard-DTL engine features added along the way: `<panel cursor=field>`,
+`<region width=n>` (fixed-width columns), and `<divider>` rendering a CUA rule.
+
+**Deliberately retained as the accepted dialect extension:**
+
+- **`row` / `col`** — the positioning primitive. Auto-flow is the panels' layout mode, but the
+  engine still resolves *all* layout down to `row`/`col` internally, and the test suite uses
+  explicit positions pervasively as scaffolding. Removing the attribute is a rearchitecture, not
+  cleanup; it stays as the one documented extension (this plan's original option **(b)**).
+
+- **`intensity=`** on `<info>`/`<p>` (message lines, paragraph headings, highlighted notices) —
+  deferred to the **#198 semantic re-baseline**, not a mechanical rename. `<hp>` is mono-identical
+  but changes the CUA colour role (`title` → `text`), and the *correct* colour differs per usage
+  (a dynamic `&SELMSG` message vs a `Rules:` heading vs the logon warning). That needs per-usage
+  design verified against real ISPF colours — a semantic pass, not attribute removal. The
+  `<info>…text…</info>` primitive itself (INFO is a container in standard DTL) is part of the same
+  re-baseline.
+
 ## Why the dialect exists (the governing constraint)
 
 `dtl.py`'s own module docstring says it plainly: every visible element *may* carry explicit
