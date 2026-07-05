@@ -71,8 +71,8 @@ renders centered on row 0, with the body flowing beneath it.
    entwidth ...>``                line). Renders like ``<dtafld>``; ``datavar``
                                  defaults to ``ZCMD`` and the field is recorded
                                  as ``Screen.command_field``.
-``<selfld row numcol namecol     a list of menu choices; each ``<choice>`` is laid
-   desccol numwidth>``           out on its own row, auto-incrementing.
+``<selfld row col type>``        a list of menu choices; each ``<choice>`` is laid
+                                 out on its own row, auto-incrementing.
 ``<choice num name match          one menu row: number, name, description. The
    checkvar unavail>desc``        selection value (``match``, default ``num``) is
                                  recorded in ``Screen.selections`` so the dialog can
@@ -540,26 +540,24 @@ class _DTLParser(HTMLParser):
             self._skip_blank_before(a)
             if ctx is not None:
                 ctx["had_content"] = True
-            # NUMCOL/NAMECOL/DESCCOL are columns *within* the selection field, so
-            # they are offsets from its origin column: an explicit COL, else the
-            # enclosing flow box's column (so a flowed <selfld> — e.g. a dir=horiz
-            # column — shifts with the box). At the base column 1 the offset is 0,
-            # so panel-level selection fields render byte-for-byte as before.
+            # The choice columns are offsets within the selection field, measured
+            # from its origin column: an explicit COL, else the enclosing flow
+            # box's column (so a flowed <selfld> — e.g. a dir=horiz column —
+            # shifts with the box). The number sits at the origin, the keyword one
+            # gap past a 2-wide number, the description one gap past that.
             origin = int(a["col"]) if "col" in a else (ctx["col"] if ctx else 1)
             base = origin - 1
             self._selfld = {
                 "row": int(a["row"]) if "row" in a else (ctx["row"] if ctx else 0),
-                "numcol": base + int(a.get("numcol", 1)),
-                "namecol": base + int(a.get("namecol", 4)),
-                "desccol": base + int(a.get("desccol", 21)),
-                "numwidth": int(a.get("numwidth", 2)),
-                # No explicit grid → auto-layout: a keyword-less <choice> puts its
-                # description at the keyword column (right after the number) rather
-                # than the far description column. Explicit columns (the bundled
-                # panels) keep the fixed grid, so they stay byte-identical.
-                "auto_cols": not any(k in a for k in
-                                     ("numcol", "namecol", "desccol")),
-                "numintensity": _intensity(a, "numintensity", DisplayIntensity.HIGH),
+                "numcol": base + 1,
+                "namecol": base + 4,
+                "desccol": base + 21,
+                "numwidth": 2,
+                # Auto-layout: a keyword-less <choice> puts its description at the
+                # keyword column (right after the number) rather than the far
+                # description column.
+                "auto_cols": True,
+                "numintensity": DisplayIntensity.HIGH,
                 # DTL COLOR on a <selfld> colours its choices; a <choice> may
                 # override with its own COLOR.
                 "color": self._color(a),

@@ -137,7 +137,7 @@ def test_dtl_hilite_attribute():
 
 def test_dtl_selfld_colors_choices():
     s = load_panel_src(
-        '<selfld row="3" numcol="2" namecol="5" desccol="10" color="turq">'
+        '<selfld row="3" color="turq">'
         '<choice num="1" name="A">Alpha</choice></selfld>')
     texts = [i for i in s.items if isinstance(i, Text)]
     assert texts and all(t.color is Color.TURQUOISE for t in texts)
