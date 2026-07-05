@@ -1725,6 +1725,32 @@ def test_list_column_intens_and_hilite_style_cells():
     assert cell.intensity is N and cell.highlight is None
 
 
+def test_list_column_format_positions_heading_and_data():
+    # #230: FORMAT positions the shorter of (heading, data) within the column
+    # formatting width. It does NOT touch the cell contents (that's ALIGN).
+    def hd(colwidth, heading, fmt, cell="x"):
+        s = load_dtl(
+            f'<panel name="p" width="40"><area><lstfld>'
+            f'<lstcol datavar=a colwidth={colwidth} usage=out format={fmt}>{heading}'
+            f'</lstfld></area></panel>', rows=[{"a": cell}])
+        head = next(it.col for it in s.items
+                    if isinstance(it, Text) and it.text == heading)
+        data = next(it.col for it in s.items
+                    if isinstance(it, Text) and it.text.strip() == cell)
+        return head, data
+
+    # Heading (2) shorter than colwidth (8): the heading moves within the column;
+    # the data cell (fills the width) stays put at col 1.
+    assert hd(8, "ID", "start") == (1, 1)
+    assert hd(8, "ID", "center") == (4, 1)               # (8-2)//2 = 3 → 1+3
+    assert hd(8, "ID", "end") == (7, 1)                  # 8-2 = 6 → 1+6
+    # Heading (11) longer than colwidth (2): the heading fills the column (stays at
+    # col 1); the data cell is centred/right-justified under it.
+    assert hd(2, "Description", "start") == (1, 1)
+    assert hd(2, "Description", "center") == (1, 5)      # (11-2)//2 = 4 → 1+4
+    assert hd(2, "Description", "end") == (1, 10)        # 11-2 = 9 → 1+9
+
+
 def test_list_column_text_description_before_and_after():
     # #229: <lstcol> TEXT renders a description beside each data cell. TEXTLOC picks
     # the side (default AFTER); the description flows in the column so the next
