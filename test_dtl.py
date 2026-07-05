@@ -1746,8 +1746,9 @@ def test_list_field_row_status_shows_and_is_suppressed_under_a_full_width_title(
 
 
 def test_list_field_line_attribute_stacks_columns():
-    # line=2 puts a column on the second row of each model entry; the entry is
-    # two rows tall, and each line's rightmost input field gets a terminator.
+    # #222: line=2 puts a column on the second row of each model entry — and the
+    # column HEADING stacks to match (A on the first heading row, B on the second),
+    # so the heading block is two rows tall, then the two-row data entry below.
     s = load_dtl(
         '<panel name="p"><area>'
         '<lstfld><lstcol datavar=a colwidth=5 line=1>A'
@@ -1756,9 +1757,9 @@ def test_list_field_line_attribute_stacks_columns():
     )
     H = DisplayIntensity.HIGH
     assert s.items == [
-        Text(0, 1, "A", H), Text(0, 9, "B", H),
-        Field(row=1, col=1, length=5, name="a", terminator=True),
-        Field(row=2, col=9, length=5, name="b", terminator=True),
+        Text(0, 1, "A", H), Text(1, 9, "B", H),        # headings stacked by line
+        Field(row=2, col=1, length=5, name="a", terminator=True),
+        Field(row=3, col=9, length=5, name="b", terminator=True),
     ]
 
 
@@ -2154,6 +2155,38 @@ def test_lstfld_reference_figure_snapshot():
         " Sally            Forth            N    ____________   _",
         " Melba            Toast            T    ____________   _",
         " " + "*" * 29 + " BOTTOM OF DATA " + "*" * 29,   # table end reached
+        "   ________",
+    ])
+
+
+def test_lstgrp_nested_groups_reference_figure_snapshot():
+    """LSTGRP reference Figure 140 (Class Roster): nested <lstgrp> groups produce
+    stacked heading rows (#222). "Student Name" (HEADLINE) spans Last/First/M on
+    the top row; the child groups Last/First/M and Year sit on the second row; the
+    directly-nested Sem 1/Sem 2 column headings fall on the column-heading row
+    below (blank under Student Name / Class). "Class" and its single child "Year"
+    are left-justified over the one column; "Grade" (HEADLINE) spans Sem 1/Sem 2."""
+    src = ("<PANEL NAME=lstgrp WIDTH=66>Class Roster<AREA><LSTFLD>"
+           "<LSTGRP HEADLINE=yes>Student Name"
+           "<LSTGRP>Last<LSTCOL DATAVAR=xlname USAGE=out COLWIDTH=12></LSTGRP>"
+           "<LSTGRP>First<LSTCOL DATAVAR=xfname USAGE=out COLWIDTH=12></LSTGRP>"
+           "<LSTGRP>M<LSTCOL DATAVAR=xmid USAGE=out COLWIDTH=1></LSTGRP>"
+           "</LSTGRP>"
+           "<LSTGRP>Class<LSTGRP>Year"
+           "<LSTCOL DATAVAR=xyear USAGE=out COLWIDTH=9></LSTGRP></LSTGRP>"
+           "<LSTGRP HEADLINE=yes>Grade"
+           "<LSTCOL DATAVAR=sem1 COLWIDTH=2>Sem 1<LSTCOL DATAVAR=sem2 COLWIDTH=2>Sem 2"
+           "</LSTGRP></LSTFLD></AREA><CMDAREA></PANEL>")
+    rows = [{"xlname": "Duff", "xfname": "Dean", "xmid": "T", "xyear": "Junior"},
+            {"xlname": "Gillihan", "xfname": "Dana", "xmid": "L", "xyear": "Freshman"}]
+    assert _ascii_snapshot(load_dtl(src, rows=rows)) == "\n".join([
+        "                           Class Roster           ROW 1 TO 2 OF 2",
+        " ------- Student Name --------  Class      --- Grade ---",
+        " Last          First         M  Year",
+        "                                           Sem 1   Sem 2",
+        " Duff          Dean          T  Junior      __      __",
+        " Gillihan      Dana          L  Freshman    __      __",
+        " " + "*" * 24 + " BOTTOM OF DATA " + "*" * 24,
         "   ________",
     ])
 
