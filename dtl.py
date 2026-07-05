@@ -1580,7 +1580,10 @@ class _DTLParser(HTMLParser):
         row, col, ctx = self._resolve_pos(a, "lines")
         width = max(1, self.screen.width - (col + 1))
         for i, ln in enumerate(lines):
-            self.screen.add(Text(row + i, col, ln[:width], DisplayIntensity.NORMAL))
+            # Preformatted lines are normal information-region text (CUA green);
+            # without a role they fall back to the base protected-field colour.
+            self.screen.add(Text(row + i, col, ln[:width], DisplayIntensity.NORMAL,
+                                 role="text"))
         if ctx is not None:
             ctx["row"] = row + len(lines)
 
