@@ -365,7 +365,8 @@ class _DTLParser(HTMLParser):
         self._titline = True      # <panel titline=no> suppresses the on-screen title line
         self._lists = []          # stack of open <ul>/<ol> ({"type", "n"})
         self._lstfld = None       # active <lstfld> table {"cols", "groups", …}
-        self._lstgrp = None       # current <lstgrp> column group, or None
+        self._lstgrp = None       # innermost open <lstgrp> column group, or None
+        self._lstgrp_stack = []   # open <lstgrp> groups, outermost first (nesting)
         self._xlatl = None        # active <xlatl> {"msg", "upper", "items"} or None
         self._rows = None         # data rows for the list field (datavar→value)
         self._subs = {}           # &NAME/%NAME substitution values (for COLOR=%var)
@@ -694,6 +695,7 @@ class _DTLParser(HTMLParser):
                 "div": a.get("div", "none"),   # divider after each model set (raw)
             }
             self._lstgrp = None
+            self._lstgrp_stack = []
         elif tag == "lstgrp":
             if self._lstfld is None:
                 raise DTLError("<lstgrp> outside of a <lstfld>")
@@ -704,7 +706,13 @@ class _DTLParser(HTMLParser):
                 hv is None or str(hv).lower() in ("yes", "dash", "true", "1", "headline")
             )
             align = a.get("align", "center").lower()
-            self._lstgrp = {"heading": "", "headline": headline, "align": align}
+            # <lstgrp> nests: a group may contain child groups for a second heading
+            # row. Track the open groups on a stack so a column binds to the
+            # innermost group and each group records its parent and nesting depth.
+            parent = self._lstgrp_stack[-1] if self._lstgrp_stack else None
+            self._lstgrp = {"heading": "", "headline": headline, "align": align,
+                            "parent": parent, "depth": parent["depth"] + 1 if parent else 1}
+            self._lstgrp_stack.append(self._lstgrp)
             self._lstfld["groups"].append(self._lstgrp)
             self._tag, self._attrs, self._chars = "lstgrp", a, []  # capture heading
         elif tag == "lstcol":
@@ -949,12 +957,17 @@ class _DTLParser(HTMLParser):
             self._end_xlatl()
             return
         if tag == "lstgrp":
-            self._lstgrp = None  # the open <lstcol>, if any, was flushed above
+            # Pop back to the enclosing group (nested <lstgrp>); the open <lstcol>,
+            # if any, was flushed above and bound to this group.
+            if self._lstgrp_stack:
+                self._lstgrp_stack.pop()
+            self._lstgrp = self._lstgrp_stack[-1] if self._lstgrp_stack else None
             return
         if tag == "lstfld":
             if self._lstfld is not None:
                 self._emit_lstfld()
             self._lstfld, self._lstgrp = None, None
+            self._lstgrp_stack = []
             return
         if tag == "varlist":
             self._in_varlist = False
@@ -1565,11 +1578,44 @@ class _DTLParser(HTMLParser):
             "group": self._lstgrp,
         })
 
+    def _add_group_heading(self, g, start, span, row, ncols):
+        """Draw a <lstgrp> heading over its column span at ``(row, start)``.
+        ALIGN: START left, END right, CENTER (default) centres over multiple
+        columns but left-justifies over a single column. HEADLINE draws a dashed
+        rule around (padding out) the heading text."""
+        H = DisplayIntensity.HIGH
+        align = g["align"]
+        if align == "start" or (align != "end" and ncols == 1):
+            just = "start"
+        elif align == "end":
+            just = "end"
+        else:
+            just = "center"
+        if g["headline"]:                  # dashed rule around the heading
+            inner = f" {g['heading']} " if g["heading"] else "-"
+            pad = max(0, span - len(inner))
+            if just == "start":
+                text = (inner + "-" * pad)[:span]
+            elif just == "end":
+                text = ("-" * pad + inner)[:span]
+            else:
+                text = ("-" * (pad // 2) + inner + "-" * (pad - pad // 2))[:span]
+            self.screen.add(Text(row, start, text, H, role="heading"))
+        else:
+            text = g["heading"][:span]
+            if just == "start":
+                off = 0
+            elif just == "end":
+                off = max(0, span - len(text))
+            else:
+                off = max(0, (span - len(text)) // 2)
+            self.screen.add(Text(row, start + off, text, H, role="heading"))
+
     def _emit_lstfld(self):
-        """Lay out the table's column header: each <lstcol> heading at its
-        computed column (left to right, ``colwidth`` + a one-column gap), with
-        any <lstgrp headline=yes> heading centered over its columns' span on the
-        row above. Advances the enclosing flow past the header."""
+        """Lay out the table's column header: each <lstcol> heading at its computed
+        column (left to right, ``colwidth`` + the CUA attribute-byte gutter), with
+        <lstgrp> group headings stacked by nesting depth above, and column headings
+        stacked by LINE. Advances the enclosing flow past the header."""
         fld = self._lstfld
         cols = fld["cols"]
         if not cols:
@@ -1583,51 +1629,35 @@ class _DTLParser(HTMLParser):
             x += c["fmt"] + (2 if c["usage"] == "out" or c["autotab"] else 3)
         row = fld["row"]
         H = DisplayIntensity.HIGH
-        # The group-heading row shows every group that has a heading; HEADLINE=yes
-        # pads the heading with a dashed rule spanning the group's columns.
-        groups = [g for g in fld["groups"] if g["heading"]]
-        if groups:
-            for g in groups:
-                gcols = [c for c in cols if c["group"] is g]
-                if not gcols:
-                    continue
-                start = gcols[0]["x"]
-                span = max(1, gcols[-1]["x"] + gcols[-1]["fmt"] - start)
-                # ALIGN: START=left, END=right, CENTER (default) centres over
-                # multiple columns but LEFT-justifies over a single column, so a
-                # one-column group heading sits directly above its column.
-                align = g["align"]
-                if align == "start" or (align != "end" and len(gcols) == 1):
-                    just = "start"
-                elif align == "end":
-                    just = "end"
-                else:
-                    just = "center"
-                if g["headline"]:              # dashed rule around the heading
-                    inner = f" {g['heading']} " if g["heading"] else "-"
-                    pad = max(0, span - len(inner))
-                    if just == "start":
-                        text = (inner + "-" * pad)[:span]
-                    elif just == "end":
-                        text = ("-" * pad + inner)[:span]
-                    else:
-                        text = ("-" * (pad // 2) + inner + "-" * (pad - pad // 2))[:span]
-                    self.screen.add(Text(row, start, text, H, role="heading"))
-                else:
-                    text = g["heading"][:span]
-                    if just == "start":
-                        off = 0
-                    elif just == "end":
-                        off = max(0, span - len(text))
-                    else:
-                        off = max(0, (span - len(text)) // 2)
-                    self.screen.add(Text(row, start + off, text, H, role="heading"))
-            row += 1
+        # Group headings stack by nesting depth: a depth-1 group heads the top row,
+        # each nested <lstgrp> level the row below it, spanning the leaf columns
+        # beneath it (a parent group covers all columns under its child groups).
+        def _under(col, g):
+            grp = col["group"]
+            while grp is not None:
+                if grp is g:
+                    return True
+                grp = grp["parent"]
+            return False
+        max_depth = max((g["depth"] for g in fld["groups"]), default=0)
+        for g in fld["groups"]:
+            if not (g["heading"] or g["headline"]):
+                continue
+            gcols = [c for c in cols if _under(c, g)]
+            if not gcols:
+                continue
+            start = min(c["x"] for c in gcols)
+            span = max(1, max(c["x"] + c["fmt"] for c in gcols) - start)
+            self._add_group_heading(g, start, span, row + g["depth"] - 1, len(gcols))
+        row += max_depth
+        # Column headings, stacked by LINE: a column on model line n heads on the
+        # nth row of the heading block, matching its data-row placement below.
+        head_lines = max((c["line"] for c in cols if c["heading"]), default=0)
         for c in cols:
             if c["heading"]:
-                self.screen.add(Text(row, c["x"], c["heading"][:c["fmt"]], H,
-                                     role="heading"))
-        row += 1
+                self.screen.add(Text(row + c["line"] - 1, c["x"],
+                                     c["heading"][:c["fmt"]], H, role="heading"))
+        row += head_lines
         row = self._emit_lstfld_rows(cols, row)
         # ISPF puts a "ROW x TO y OF z" scroll status on the title line's right —
         # but only if that region is free (a bundled panel's full-width title rule
