@@ -449,7 +449,7 @@ def test_dtafld_mdt_defaults_true():
 
 def test_selfld_lays_out_choices_on_incrementing_rows():
     s = load_dtl(
-        '<panel><selfld row="4" numcol="1" namecol="4" desccol="21">'
+        '<panel><selfld row="4">'
         '<choice num="0" name="  A">  desc-a</choice>'
         '<choice num="10" name="  B">  desc-b</choice>'
         '</selfld></panel>'
@@ -484,7 +484,7 @@ def test_selfld_explicit_num_still_wins_and_grid_is_unchanged():
     # An explicit NUM (and explicit columns) keep the fixed grid — the bundled
     # panels rely on this, so it must stay byte-for-byte as before.
     s = load_dtl(
-        '<panel><selfld row="4" numcol="1" namecol="4" desccol="21">'
+        '<panel><selfld row="4">'
         '<choice num="7" name="  A">  desc-a</choice></selfld></panel>'
     )
     assert s.items[0] == Text(4, 1, "7 ", DisplayIntensity.HIGH)
@@ -514,7 +514,7 @@ def test_selfld_type_multi_renders_a_mark_field_per_choice():
     # TYPE=MULTI is a multiple-selection field: each choice gets its own 1-char
     # input field to mark (in place of a number), so several can be selected.
     s = load_dtl(
-        '<panel><selfld name="off" type="multi" row="4" namecol="4" desccol="21">'
+        '<panel><selfld name="off" type="multi" row="4">'
         '<choice name="pat" match="P">Patent</choice>'
         '<choice name="def" match="D">Defamation</choice>'
         '</selfld></panel>'
@@ -523,8 +523,9 @@ def test_selfld_type_multi_renders_a_mark_field_per_choice():
     assert isinstance(m0, Field) and m0.row == 4 and m0.col == 1 and m0.length == 1
     assert isinstance(m1, Field) and m1.row == 5 and m1.col == 1
     # The choice NAME is the field identifier (read the mark back), not display
-    # text: a multi row is just the mark + description.
-    assert s.items[1] == Text(4, 21, "Patent", DisplayIntensity.NORMAL)
+    # text: a multi row is just the mark + description, the description hugging
+    # the mark (auto-layout keyword column).
+    assert s.items[1] == Text(4, 4, "Patent", DisplayIntensity.NORMAL)
     assert not any(getattr(it, "text", None) == "pat" for it in s.items)
     # No numbered Text is emitted for a multi-select choice.
     assert not any(isinstance(it, Text) and it.role == "num" for it in s.items)
@@ -576,7 +577,7 @@ def test_choice_hide_removes_it_when_variable_true():
     # move up and it is not selectable. HIDEX=var is the inverse (hide when false).
     N, H = DisplayIntensity.NORMAL, DisplayIntensity.HIGH
     src = (
-        '<panel><selfld row="4" numcol="1" namecol="4" desccol="21">'
+        '<panel><selfld row="4">'
         '<choice num="1" name="A" match="A" hide="vh">Alpha</choice>'
         '<choice num="2" name="B" match="B">Beta</choice>'
         '<choice num="3" name="C" match="C" hidex="vs">Gamma</choice>'
@@ -601,7 +602,7 @@ def test_hidden_choice_stays_out_of_selections_even_when_proc_routes_it():
     # route only options that are in `selections` (it checks `head in selections`).
     # This asserts the data precondition that lets the gate block a hidden option.
     s = load_dtl(
-        '<panel><selfld row="4" numcol="1" namecol="4" desccol="21">'
+        '<panel><selfld row="4">'
         '<choice num="1" name="Open">Open'
         '<choice num="7" name="Secret" hide="secret">Secret op</choice>'
         '</selfld>'
@@ -644,8 +645,8 @@ def test_selfld_prompt_before_wraps_and_shifts_choices():
     # the caption's top row.
     N, H = DisplayIntensity.NORMAL, DisplayIntensity.HIGH
     s = load_dtl(
-        '<panel><selfld name="cs" pmtwidth="11" pmtloc="before" '
-        'numcol="1" namecol="4" desccol="21">Choose one of the following'
+        '<panel><selfld name="cs" pmtwidth="11" pmtloc="before">'
+        'Choose one of the following'
         '<choice num="1" name="Civ">Civil</choice></selfld></panel>'
     )
     # caption wrapped to <= 11 columns, each on its own row from the top
@@ -653,15 +654,15 @@ def test_selfld_prompt_before_wraps_and_shifts_choices():
     assert s.items[1] == Text(1, 1, "of the", N)
     assert s.items[2] == Text(2, 1, "following", N)
     # first choice on the top row, its columns shifted right of the 11-col prompt
-    assert s.items[3] == Text(0, 12, "1 ", H)         # numcol 1 -> 1 + 11
-    assert s.items[4] == Text(0, 15, "Civ", N)        # namecol 4 -> 4 + 11
+    assert s.items[3] == Text(0, 12, "1 ", H)         # number col 1 -> 1 + 11
+    assert s.items[4] == Text(0, 15, "Civ", N)        # keyword col 4 -> 4 + 11
 
 
 def test_selfld_empty_prompt_renders_nothing():
     # The bundled numbered menus have only whitespace between <selfld> and the
     # first <choice> — that must render nothing so they stay byte-identical.
     s = load_dtl(
-        '<panel><selfld row="4" numcol="1" namecol="4" desccol="21">\n  '
+        '<panel><selfld row="4">\n  '
         '<choice num="1" name="A">desc</choice></selfld></panel>'
     )
     assert s.items[0] == Text(4, 1, "1 ", DisplayIntensity.HIGH)   # no prompt item
@@ -672,7 +673,7 @@ def test_choice_records_selection_rows_for_point_and_shoot():
     # Each choice also records the row it renders on, so the cursor can select
     # it (point-and-shoot). selection_at(cursor) resolves a cursor address.
     s = load_dtl(
-        '<panel><selfld row="4" numcol="1" namecol="4" desccol="21">'
+        '<panel><selfld row="4">'
         '<choice num="0" name="A">  desc-a</choice>'
         '<choice num="3" name="B">  desc-b</choice>'
         '</selfld></panel>'
@@ -693,7 +694,7 @@ def test_ispf_menu_selection_rows_map_options():
 
 def test_choice_match_defaults_to_num_and_records_selections():
     s = load_dtl(
-        '<panel><selfld row="4" numcol="1" namecol="4" desccol="21">'
+        '<panel><selfld row="4">'
         '<choice num="0" name="Settings">  desc</choice>'
         '<choice num="X" name="Exit">  bye</choice>'
         '</selfld></panel>'
@@ -703,7 +704,7 @@ def test_choice_match_defaults_to_num_and_records_selections():
 
 def test_choice_explicit_match_overrides_num():
     s = load_dtl(
-        '<panel><selfld row="4" numcol="1" namecol="4" desccol="21">'
+        '<panel><selfld row="4">'
         '<choice num="1" name="View" match="V">  desc</choice>'
         '</selfld></panel>'
     )
@@ -714,7 +715,7 @@ def test_choice_checkvar_lands_cursor_on_the_current_choice():
     # <choice checkvar=var match=val>: when the variable equals a choice's MATCH,
     # that choice is current — the cursor is placed on it.
     s = load_dtl(
-        '<panel><selfld row="4" numcol="1" namecol="4" desccol="21">'
+        '<panel><selfld row="4">'
         '<choice num="1" name="New" checkvar="card" match="NEW">create'
         '<choice num="2" name="Old" checkvar="card" match="OLD">existing'
         '</selfld></panel>',
@@ -729,7 +730,7 @@ def test_choice_unavail_is_dimmed_and_unselectable():
     # and coloured with the CUA "unavailable" role.
     from screen import Color, _role_colour
     s = load_dtl(
-        '<panel><selfld row="4" numcol="1" namecol="4" desccol="21">'
+        '<panel><selfld row="4">'
         '<choice num="1" name="Ok" match="A">available'
         '<choice num="2" name="No" match="B" unavail>disabled'
         '</selfld></panel>'
@@ -2903,7 +2904,7 @@ def test_selfld_explicit_col_shifts_choice_columns():
     # offset from (previously COL was ignored and the columns were absolute).
     N, H = DisplayIntensity.NORMAL, DisplayIntensity.HIGH
     s = load_dtl(
-        '<panel><selfld row="4" col="30" namecol="4" desccol="21">'
+        '<panel><selfld row="4" col="30">'
         '<choice num="1" name="Aaa">desc</choice></selfld></panel>'
     )
     assert s.items[0] == Text(4, 30, "1 ", H)
