@@ -2,24 +2,27 @@
 <!-- Pull-down-item help for the ISPF Settings "Log/List -> Log Data Set defaults"
      choice. Shown when the Log/List pull-down is open, the cursor is on that item
      and HELP (PF1) is pressed - DTL <pdc help="loglisthelp">. PF3 returns to the
-     open pull-down. -->
+     open pull-down. Auto-flow (ISPDTLC-idiomatic): no row/col; the title centres
+     itself and the conversion utility spaces the blocks. -->
 <panel name="loglisthelp">Log Data Set Defaults HELP
-  <info row="0" col="0" intensity="high">--------------------- Log Data Set Defaults HELP ------------------------------</info>
+  <info>
+    <p>The <hp>Log Data Set defaults</hp> choice controls how ISPF disposes of the
+       session <hp>log</hp> - the running record of your ISPF activity - when you
+       exit.</p>
 
-  <info row="2" col="1">The <hp>Log Data Set defaults</hp> choice controls how ISPF disposes of the</info>
-  <info row="3" col="1">session <hp>log</hp> - the running record of your ISPF activity - when you</info>
-  <info row="4" col="1">exit.</info>
+    <p intensity="high">Process option:</p>
+    <ul>
+      <li><hp>Print</hp> and delete the data set.</li>
+      <li><hp>Delete</hp> the data set without printing.</li>
+      <li><hp>Keep</hp> the data set for the next session.</li>
+    </ul>
 
-  <info row="6" col="1" intensity="high">Process option:</info>
-  <info row="7" col="3">- <hp>Print</hp> and delete the data set.</info>
-  <info row="8" col="3">- <hp>Delete</hp> the data set without printing.</info>
-  <info row="9" col="3">- <hp>Keep</hp> the data set for the next session.</info>
+    <p>SYSOUT class and local printer ID apply only when the log is printed.</p>
 
-  <info row="11" col="1">SYSOUT class and local printer ID apply only when the log is printed.</info>
+    <p>Press ENTER or PF3 to return to the pull-down.</p>
+  </info>
 
-  <info row="13" col="1">Press ENTER or PF3 to return to the pull-down.</info>
-
-  <info row="22" col="1">PF3=Return</info>
+  <botinst>PF3=Return</botinst>
 
   <keyl name="HELPKEYS">
     <keyi key="PF3"  cmd="EXIT">Return</keyi>

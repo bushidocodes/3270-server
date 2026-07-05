@@ -721,7 +721,7 @@ def test_ws3270_help_works_inside_the_settings_overlay():
         "Quit()",
     ])
     assert "ISPF Settings" in out, out[-1500:]      # reached the Settings overlay
-    assert "Menu  -  HELP" in out, out[-1500:]       # HELP (ispfhelp) then shown
+    assert "Menu - HELP" in out, out[-1500:]         # HELP (ispfhelp) then shown
 
 
 def test_ws3270_help_works_on_a_pulldown_item():

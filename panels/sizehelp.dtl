@@ -5,17 +5,19 @@
      Auto-flow (ISPDTLC-idiomatic): no row/col; the title centres itself, and the
      conversion utility spaces the paragraphs. -->
 <panel name="sizehelp">TSO/E LOGON - Size Field HELP
-  <p>The <hp>Size</hp> field sets the region size, in kilobytes, for your TSO
-     address space - the amount of virtual storage your session may use.</p>
+  <info>
+    <p>The <hp>Size</hp> field sets the region size, in kilobytes, for your TSO
+       address space - the amount of virtual storage your session may use.</p>
 
-  <p intensity="high">Rules:</p>
-  <ul>
-    <li>Numeric only.</li>
-    <li>Range 0 to 32768 (a larger value is rejected with message TSO001).</li>
-    <li>The default is 00150. Leave it unless your work needs more storage.</li>
-  </ul>
+    <p intensity="high">Rules:</p>
+    <ul>
+      <li>Numeric only.</li>
+      <li>Range 0 to 32768 (a larger value is rejected with message TSO001).</li>
+      <li>The default is 00150. Leave it unless your work needs more storage.</li>
+    </ul>
 
-  <p>Press ENTER or PF3 to return to the LOGON panel and continue.</p>
+    <p>Press ENTER or PF3 to return to the LOGON panel and continue.</p>
+  </info>
 
   <botinst>PF3=Return</botinst>
 
