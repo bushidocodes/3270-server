@@ -88,7 +88,7 @@ def test_dtl_dtafld_color_is_on_the_field_not_the_prompt():
     # DTL's COLOR on a <dtafld> colours the entry field; the caption/prompt is a
     # CUA element with its own (default) colour.
     s = load_panel_src(
-        '<dtafld row="1" col="1" datavar="u" entwidth="8"'
+        '<dtafld datavar="u" entwidth="8"'
         ' color="turq">Name ===></dtafld>')
     prompt = next(i for i in s.items if isinstance(i, Text))
     field = next(i for i in s.items if isinstance(i, Field))
@@ -103,14 +103,14 @@ def test_dtl_color_keywords():
                      ("green", Color.GREEN), ("pink", Color.PINK),
                      ("yellow", Color.YELLOW), ("turq", Color.TURQUOISE)]:
         s = load_panel_src(
-            f'<dtafld row="1" col="1" datavar="u" color="{kw}">X</dtafld>')
+            f'<dtafld datavar="u" color="{kw}">X</dtafld>')
         field = next(i for i in s.items if isinstance(i, Field))
         assert field.color is want, kw
 
 
 def test_dtl_color_percent_variable():
     # COLOR=%VAR takes its value from a dialog variable (like &VAR substitution).
-    s = load_dtl('<panel><dtafld row="1" col="1" datavar="u"'
+    s = load_dtl('<panel><dtafld datavar="u"'
                  ' color="%HILITEC">X</dtafld></panel>', HILITEC="red")
     field = next(i for i in s.items if isinstance(i, Field))
     assert field.color is Color.RED
@@ -120,7 +120,7 @@ def test_dtl_info_takes_cua_colour_not_explicit_color():
     # <info> is not COLOR-bearing: a stray color= is ignored. But on a colour
     # terminal it still renders in its CUA role colour (normal text → green),
     # never the explicit red.
-    s = load_panel_src('<info row="1" col="1" color="red">HELLO</info>')
+    s = load_panel_src('<info color="red">HELLO</info>')
     data = s.render(color=True)
     assert bytes([XA_FOREGROUND, Color.GREEN.value]) in data     # CUA green applied
     assert bytes([XA_FOREGROUND, Color.RED.value]) not in data   # explicit red ignored
@@ -132,7 +132,7 @@ def test_whole_line_hp_is_cua_emphasis():
     # a "Rules:" heading) is CUA emphasis: high intensity on mono AND white on a
     # colour terminal — the standard replacement for the old non-standard
     # intensity="high"/"highlighted".
-    s = load_panel_src('<info row="1" col="1"><hp>OPTION NOT IMPLEMENTED</hp></info>')
+    s = load_panel_src('<info><hp>OPTION NOT IMPLEMENTED</hp></info>')
     from screen import DisplayIntensity, Text
     it = next(i for i in s.items if isinstance(i, Text))
     assert it.intensity is DisplayIntensity.HIGH and it.role == "emphasis"
@@ -141,7 +141,7 @@ def test_whole_line_hp_is_cua_emphasis():
 
 def test_dtl_hilite_attribute():
     s = load_panel_src(
-        '<dtafld row="1" col="1" datavar="u"'
+        '<dtafld datavar="u"'
         ' color="green" hilite="reverse">X</dtafld>')
     field = next(i for i in s.items if isinstance(i, Field))
     assert field.highlight is Highlight.REVERSE
@@ -149,7 +149,7 @@ def test_dtl_hilite_attribute():
 
 def test_dtl_selfld_colors_choices():
     s = load_panel_src(
-        '<selfld row="3" color="turq">'
+        '<selfld color="turq">'
         '<choice selchar="1" name="A">Alpha</choice></selfld>')
     texts = [i for i in s.items if isinstance(i, Text)]
     assert texts and all(t.color is Color.TURQUOISE for t in texts)
@@ -157,7 +157,7 @@ def test_dtl_selfld_colors_choices():
 
 def test_dtl_lstcol_colors_cells():
     s = load_dtl(
-        '<panel><lstfld row="2" col="1">'
+        '<panel><lstfld>'
         '<lstcol datavar="v" usage="out" colwidth="6" color="yellow">Val</lstcol>'
         '</lstfld></panel>', rows=[{"v": "HI"}])
     cell = next(i for i in s.items if isinstance(i, Text) and i.text.strip() == "HI")

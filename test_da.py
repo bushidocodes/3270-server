@@ -27,7 +27,7 @@ def _fields(s):
 
 def test_attr_chars_delimit_typed_colored_fields():
     s = _panel(
-        '<da row="4" col="2">'
+        '<da>'
         '<attr attrchar="$" type="char" color="red">'
         '<attr attrchar="|" type="dataout" color="green">'
         '<attr attrchar="#" type="datain" color="blue" padc="_">'
@@ -40,13 +40,13 @@ def test_attr_chars_delimit_typed_colored_fields():
     assert [t.text for t in reds] == ["Name:  ", "Card:  "]
     assert [t.text for t in greens] == ["Ada"]
     # Column alignment: the attribute char occupies its own cell; text follows.
-    assert reds[0].row == 4 and reds[0].col == 2
-    assert greens[0].col == 2 + len("$Name:  ")
+    assert reds[0].row == 0 and reds[0].col == 1
+    assert greens[0].col == 1 + len("$Name:  ")
 
 
 def test_datain_is_input_field_sized_by_its_run():
     s = _panel(
-        '<da row="1" col="1">'
+        '<da>'
         '<attr attrchar="#" type="datain" color="blue" padc="_">'
         "\n#________\n"
         "</da>")
@@ -60,7 +60,7 @@ def test_datain_is_input_field_sized_by_its_run():
 
 def test_da_hilite_attribute():
     s = _panel(
-        '<da row="1" col="1">'
+        '<da>'
         '<attr attrchar="$" type="char" color="yellow" hilite="reverse">'
         "\n$WARNING\n"
         "</da>")
@@ -70,7 +70,7 @@ def test_da_hilite_attribute():
 
 def test_da_mono_vs_color():
     s = _panel(
-        '<da row="1" col="1"><attr attrchar="$" type="char" color="red">'
+        '<da><attr attrchar="$" type="char" color="red">'
         "\n$hello\n</da>")
     assert SFE not in s.render(color=False)
     assert SFE in s.render(color=True)
@@ -78,7 +78,7 @@ def test_da_mono_vs_color():
 
 def test_multiple_attr_chars_on_one_line():
     s = _panel(
-        '<da row="1" col="1">'
+        '<da>'
         '<attr attrchar="$" type="char" color="red">'
         '<attr attrchar="|" type="char" color="green">'
         "\n$A|B$C\n</da>")
@@ -90,19 +90,19 @@ def test_attr_outside_da_is_ignored_not_fatal():
     # Panel-scope <attr> (CUA type defs) isn't modelled yet, but must not abort
     # the panel — the info line still renders.
     s = _panel('<attr attrchar="!" type="FP">'
-               '<info row="1" col="1">HELLO</info>')
+               '<info>HELLO</info>')
     assert any(t.text == "HELLO" for t in _texts(s))
 
 
 def test_attr_missing_attrchar_in_da_raises():
     with pytest.raises(DTLError):
-        _panel('<da row="1" col="1"><attr type="char" color="red"></da>')
+        _panel('<da><attr type="char" color="red"></da>')
 
 
 def test_empty_da_body_renders_nothing():
     # The guide's ex091/ex102 define attributes but have no body — no crash.
     s = _panel(
-        '<da row="4" col="2" depth="6">'
+        '<da depth="6">'
         '<attr attrchar="#" type="datain" padc="_" color="blue">'
         '<attr attrchar="$" type="char" color="red">'
         "</da>")
