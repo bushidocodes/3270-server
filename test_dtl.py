@@ -149,14 +149,14 @@ def test_ispf_dtl_option_field_and_title():
 # ── parser unit behaviour ────────────────────────────────────────────────────
 
 def test_info_basic():
-    s = load_dtl('<panel><info row="1" col="2">hello</info></panel>')
-    assert s.items == [Text(1, 2, "hello", DisplayIntensity.NORMAL)]
+    s = load_dtl('<panel><info>hello</info></panel>')
+    assert s.items == [Text(0, 1, "hello", DisplayIntensity.NORMAL)]
 
 
 def test_non_cp037_text_renders_without_crashing():
     # #150: a character the code page can't encode must degrade to the substitute
     # (?), not raise UnicodeEncodeError and take down the whole render/session.
-    s = load_dtl('<panel><info row="1" col="1">Cost 5€ (— x)</info></panel>')
+    s = load_dtl('<panel><info>Cost 5€ (— x)</info></panel>')
     data = s.render()                                   # must not raise
     shown = data.decode("cp037", errors="replace")
     assert "Cost 5? (? x)" in shown                     # euro / em-dash -> ?
@@ -174,33 +174,33 @@ def test_instruction_tags_render_like_info():
     # spec tags; both render as positioned protected text, like <topinst>/<info>.
     s = load_dtl(
         '<panel>'
-        '<topinst row="2" col="1">Enter parameters:</topinst>'
-        '<pnlinst row="16" col="1">Press ENTER</pnlinst>'
-        '<botinst row="23" col="1">PF3=Exit</botinst>'
+        '<topinst>Enter parameters:</topinst>'
+        '<pnlinst>Press ENTER</pnlinst>'
+        '<botinst>PF3=Exit</botinst>'
         '</panel>'
     )
-    assert s.items[0] == Text(2, 1, "Enter parameters:", DisplayIntensity.NORMAL)
-    assert s.items[1] == Text(16, 1, "Press ENTER", DisplayIntensity.NORMAL)
-    assert s.items[2] == Text(23, 1, "PF3=Exit", DisplayIntensity.NORMAL)
+    assert s.items[0] == Text(0, 1, "Enter parameters:", DisplayIntensity.NORMAL)
+    assert s.items[1] == Text(2, 1, "Press ENTER", DisplayIntensity.NORMAL)
+    assert s.items[2] == Text(22, 1, "PF3=Exit", DisplayIntensity.NORMAL)
 
 
 def test_pnlinst_was_previously_dropped():
     # Regression for the dispatch bug: the parser routed on a nonexistent "paninst"
     # tag, so the real IBM <pnlinst> silently rendered nothing.
-    s = load_dtl('<panel><pnlinst row="2" col="1">Hi</pnlinst></panel>')
-    assert s.items == [Text(2, 1, "Hi", DisplayIntensity.NORMAL)]
+    s = load_dtl('<panel><pnlinst>Hi</pnlinst></panel>')
+    assert s.items == [Text(0, 1, "Hi", DisplayIntensity.NORMAL)]
 
 
 def test_instruction_tags_flow_in_area():
     s = load_dtl(
-        '<panel><area row="3" col="1">'
+        '<panel><area>'
         '<topinst>line one</topinst><pnlinst>line two</pnlinst>'
         '</area></panel>'
     )
     # A blank line follows a TOPINST and precedes a PNLINST; the two coincide into a
     # single blank between them (row 4), so the PNLINST lands on row 5.
-    assert s.items[0] == Text(3, 1, "line one", DisplayIntensity.NORMAL)
-    assert s.items[1] == Text(5, 1, "line two", DisplayIntensity.NORMAL)
+    assert s.items[0] == Text(0, 1, "line one", DisplayIntensity.NORMAL)
+    assert s.items[1] == Text(2, 1, "line two", DisplayIntensity.NORMAL)
 
 
 def test_botinst_anchors_at_the_panel_foot():
@@ -240,7 +240,7 @@ def test_logon_instruction_tags_render_their_text():
 
 def _hp_line():
     return load_dtl(
-        '<panel><info row="1" col="1">'
+        '<panel><info>'
         'Enter <hp color="turq">X</hp> or <hp color="turq">PF3</hp> to exit'
         '</info></panel>'
     )
@@ -268,7 +268,7 @@ def test_hp_mono_is_byte_identical_to_plain_text():
     # to add to a bundled panel without changing the mono data stream.
     it = _hp_line().items[0]
     rich = bytearray(); it.render(rich, color=False)
-    plain = bytearray(); Text(1, 1, it.text).render(plain, color=False)
+    plain = bytearray(); Text(it.row, it.col, it.text).render(plain, color=False)
     assert bytes(rich) == bytes(plain)
     assert SA not in bytes(rich)                      # no Set Attribute on mono
 
@@ -282,7 +282,7 @@ def test_hp_colour_emits_set_attribute():
 def test_hp_highlight_via_type_attribute():
     # <hp type=...> maps to a highlight (DTL spells hp emphasis as TYPE).
     s = load_dtl(
-        '<panel><info row="2" col="1">see <hp type="uscore">HERE</hp> now</info></panel>'
+        '<panel><info>see <hp type="uscore">HERE</hp> now</info></panel>'
     )
     assert s.items[0].runs == [
         ("see ", None, None),
@@ -331,22 +331,22 @@ def test_info_hp_emphasis():
     # A whole-line <hp> is CUA emphasis: high intensity (mono) + white (colour).
     s = load_dtl(
         '<panel>'
-        '<info row="0" col="0"><hp>hi</hp></info>'
+        '<info><hp>hi</hp></info>'
         '</panel>'
     )
-    assert s.items[0] == Text(0, 0, "hi", DisplayIntensity.HIGH, role="emphasis")
+    assert s.items[0] == Text(0, 1, "hi", DisplayIntensity.HIGH, role="emphasis")
 
 
 def test_dtafld_emits_prompt_then_field():
     s = load_dtl(
-        '<panel><dtafld row="5" col="1" datavar="userid" '
+        '<panel><dtafld datavar="userid" '
         'entwidth="8" cursor="yes">Userid ===></dtafld></panel>'
     )
-    assert s.items[0] == Text(5, 1, "Userid ===>", DisplayIntensity.NORMAL)
+    assert s.items[0] == Text(0, 1, "Userid ===>", DisplayIntensity.NORMAL)
     fld = s.items[1]
     assert isinstance(fld, Field)
     # entry flows one column past the 11-char prompt: 1 + 11 + 1 = 13
-    assert (fld.row, fld.col, fld.length, fld.name, fld.cursor) == (5, 13, 8, "userid", True)
+    assert (fld.row, fld.col, fld.length, fld.name, fld.cursor) == (0, 13, 8, "userid", True)
 
 
 def test_dtafld_display_no_numeric_and_init():
@@ -354,8 +354,8 @@ def test_dtafld_display_no_numeric_and_init():
     # no DISPLAY= is shown. INIT= sets the field's initial value.
     s = load_dtl(
         '<panel>'
-        '<dtafld row="6" col="1" datavar="pw" entwidth="8" display="no">P</dtafld>'
-        '<dtafld row="8" col="1" datavar="sz" entwidth="5" numeric="yes" init="00150">S</dtafld>'
+        '<dtafld datavar="pw" entwidth="8" display="no">P</dtafld>'
+        '<dtafld datavar="sz" entwidth="5" numeric="yes" init="00150">S</dtafld>'
         '</panel>'
     )
     pw = s.items[1]
@@ -369,8 +369,8 @@ def test_dtafld_init_sets_initial_value():
     # `default=` is NOT read (no legacy alias) — it is silently ignored.
     s = load_dtl(
         '<panel>'
-        '<dtafld row="6" col="1" datavar="a" entwidth="8" init="IKJACCNT">A</dtafld>'
-        '<dtafld row="8" col="1" datavar="b" entwidth="5" default="99999">B</dtafld>'
+        '<dtafld datavar="a" entwidth="8" init="IKJACCNT">A</dtafld>'
+        '<dtafld datavar="b" entwidth="5" default="99999">B</dtafld>'
         '</panel>'
     )
     assert s.items[1].default == "IKJACCNT"
@@ -380,10 +380,10 @@ def test_dtafld_init_sets_initial_value():
 def test_dtafld_prompt_from_dtafldd_child():
     # Authentic DTL: the prompt is the text of a nested <dtafldd>.
     s = load_dtl(
-        '<panel><dtafld row="5" col="1" datavar="userid" entwidth="8">'
+        '<panel><dtafld datavar="userid" entwidth="8">'
         '<dtafldd>Userid ===></dtafldd></dtafld></panel>'
     )
-    assert s.items[0] == Text(5, 1, "Userid ===>", DisplayIntensity.NORMAL)
+    assert s.items[0] == Text(0, 1, "Userid ===>", DisplayIntensity.NORMAL)
     assert isinstance(s.items[1], Field)
     assert (s.items[1].col, s.items[1].name) == (13, "userid")   # flows past the prompt
 
@@ -391,12 +391,12 @@ def test_dtafld_prompt_from_dtafldd_child():
 def test_dtafld_dtafldd_equivalent_to_text_shorthand():
     # The <dtafldd> child and the inline-text shorthand render identically.
     inline = load_dtl(
-        '<panel><dtafld row="5" col="1" datavar="u" entwidth="8">'
+        '<panel><dtafld datavar="u" entwidth="8">'
         'Userid ===></dtafld></panel>'
     )
     nested = load_dtl(
         '<panel>\n'
-        '  <dtafld row="5" col="1" datavar="u" entwidth="8">\n'
+        '  <dtafld datavar="u" entwidth="8">\n'
         '    <dtafldd>Userid ===></dtafldd>\n'
         '  </dtafld>\n'
         '</panel>'
@@ -409,7 +409,7 @@ def test_dtafld_inline_prompt_plus_dtafldd_description():
     # prompt, and a nested <dtafldd> is the trailing description (past the entry).
     s = load_dtl(
         '<panel>'
-        '<dtafld row="5" col="1" datavar="author" entwidth="20">Author'
+        '<dtafld datavar="author" entwidth="20">Author'
         '  <dtafldd>Last name, First name, M.I.'
         '</dtafld></panel>'
     )
@@ -425,7 +425,7 @@ def test_dtafld_inline_prompt_plus_dtafldd_description():
 def test_dtafld_deswidth_truncates_the_description():
     s = load_dtl(
         '<panel>'
-        '<dtafld row="5" col="1" datavar="x" entwidth="5" deswidth="10">P'
+        '<dtafld datavar="x" entwidth="5" deswidth="10">P'
         '  <dtafldd>0123456789ABCDEF'
         '</dtafld></panel>'
     )
@@ -438,30 +438,30 @@ def test_dtafld_sole_dtafldd_is_still_the_prompt():
     # trailing description (the shorthand the bundled panels use).
     s = load_dtl(
         '<panel>'
-        '<dtafld row="5" col="1" datavar="u" entwidth="8">'
+        '<dtafld datavar="u" entwidth="8">'
         '  <dtafldd>Userid ===></dtafld></panel>'
     )
     texts = [it for it in s.items if isinstance(it, Text)]
-    assert len(texts) == 1 and texts[0] == Text(5, 1, "Userid ===>", DisplayIntensity.NORMAL, role="prompt")
+    assert len(texts) == 1 and texts[0] == Text(0, 1, "Userid ===>", DisplayIntensity.NORMAL, role="prompt")
 
 
 def test_dtafld_mdt_defaults_true():
-    s = load_dtl('<panel><dtafld row="1" col="1" datavar="x" entwidth="4">L</dtafld></panel>')
+    s = load_dtl('<panel><dtafld datavar="x" entwidth="4">L</dtafld></panel>')
     assert s.items[1].mdt is True
 
 
 def test_selfld_lays_out_choices_on_incrementing_rows():
     s = load_dtl(
-        '<panel><selfld row="4">'
+        '<panel><selfld>'
         '<choice selchar="0" name="  A">  desc-a</choice>'
         '<choice selchar="10" name="  B">  desc-b</choice>'
         '</selfld></panel>'
     )
-    # choice 0 → row 4, choice 1 → row 5; the number is left-justified to width 2
-    assert s.items[0] == Text(4, 1, "0 ", DisplayIntensity.HIGH)
-    assert s.items[1] == Text(4, 4, "  A", DisplayIntensity.NORMAL)
-    assert s.items[2] == Text(4, 21, "  desc-a", DisplayIntensity.NORMAL)
-    assert s.items[3] == Text(5, 1, "10", DisplayIntensity.HIGH)
+    # choice 0 → row 0, choice 1 → row 1; the number is left-justified to width 2
+    assert s.items[0] == Text(0, 1, "0 ", DisplayIntensity.HIGH)
+    assert s.items[1] == Text(0, 4, "  A", DisplayIntensity.NORMAL)
+    assert s.items[2] == Text(0, 21, "  desc-a", DisplayIntensity.NORMAL)
+    assert s.items[3] == Text(1, 1, "10", DisplayIntensity.HIGH)
 
 
 def test_selfld_single_choice_auto_layout_matches_reference():
@@ -487,11 +487,11 @@ def test_selfld_selchar_sets_the_value_with_keyword_columns():
     # SELCHAR sets the displayed selection value; a named choice lays its keyword
     # and description out in the keyword/description columns.
     s = load_dtl(
-        '<panel><selfld row="4">'
+        '<panel><selfld>'
         '<choice selchar="7" name="  A">  desc-a</choice></selfld></panel>'
     )
-    assert s.items[0] == Text(4, 1, "7 ", DisplayIntensity.HIGH)
-    assert s.items[2] == Text(4, 21, "  desc-a", DisplayIntensity.NORMAL)
+    assert s.items[0] == Text(0, 1, "7 ", DisplayIntensity.HIGH)
+    assert s.items[2] == Text(0, 21, "  desc-a", DisplayIntensity.NORMAL)
 
 
 def test_selfld_selchar_overrides_the_auto_number():
@@ -517,18 +517,18 @@ def test_selfld_type_multi_renders_a_mark_field_per_choice():
     # TYPE=MULTI is a multiple-selection field: each choice gets its own 1-char
     # input field to mark (in place of a number), so several can be selected.
     s = load_dtl(
-        '<panel><selfld name="off" type="multi" row="4">'
+        '<panel><selfld name="off" type="multi">'
         '<choice name="pat" match="P">Patent</choice>'
         '<choice name="def" match="D">Defamation</choice>'
         '</selfld></panel>'
     )
     m0, m1 = s.items[0], s.items[2]
-    assert isinstance(m0, Field) and m0.row == 4 and m0.col == 1 and m0.length == 1
-    assert isinstance(m1, Field) and m1.row == 5 and m1.col == 1
+    assert isinstance(m0, Field) and m0.row == 0 and m0.col == 1 and m0.length == 1
+    assert isinstance(m1, Field) and m1.row == 1 and m1.col == 1
     # The choice NAME is the field identifier (read the mark back), not display
     # text: a multi row is just the mark + description, the description hugging
     # the mark (auto-layout keyword column).
-    assert s.items[1] == Text(4, 4, "Patent", DisplayIntensity.NORMAL)
+    assert s.items[1] == Text(0, 4, "Patent", DisplayIntensity.NORMAL)
     assert not any(getattr(it, "text", None) == "pat" for it in s.items)
     # No numbered Text is emitted for a multi-select choice.
     assert not any(isinstance(it, Text) and it.role == "num" for it in s.items)
@@ -536,7 +536,7 @@ def test_selfld_type_multi_renders_a_mark_field_per_choice():
 
 def test_selfld_type_multi_records_and_reads_selected_values():
     s = load_dtl(
-        '<panel><selfld name="off" type="multi" row="4">'
+        '<panel><selfld name="off" type="multi">'
         '<choice name="pat" match="P">Patent</choice>'
         '<choice name="def" match="D">Defamation</choice>'
         '<choice name="fra" match="F">Fraud</choice>'
@@ -554,25 +554,25 @@ def test_selfld_type_multi_unavail_choice_has_no_mark_field():
     # An unavailable choice can't be selected, so it gets no mark field and is
     # not recorded as readable.
     s = load_dtl(
-        '<panel><selfld name="off" type="multi" row="4">'
+        '<panel><selfld name="off" type="multi">'
         '<choice name="ok" match="A">Available</choice>'
         '<choice name="no" match="B" unavail>Unavailable</choice>'
         '</selfld></panel>'
     )
     marks = [it for it in s.items if isinstance(it, Field)]
-    assert len(marks) == 1 and marks[0].row == 4       # only the available choice
+    assert len(marks) == 1 and marks[0].row == 0       # only the available choice
     assert [sf["value"] for sf in s.selection_fields] == ["A"]
 
 
 def test_selfld_type_single_is_unchanged():
     # The default (SINGLE) keeps the numbered layout — no mark fields.
     s = load_dtl(
-        '<panel><selfld row="4"><choice selchar="1" name="A">desc</choice></selfld></panel>'
+        '<panel><selfld><choice selchar="1" name="A">desc</choice></selfld></panel>'
     )
     assert not any(isinstance(it, Field) for it in s.items)
-    assert s.items[0] == Text(4, 1, "1 ", DisplayIntensity.HIGH)
+    assert s.items[0] == Text(0, 1, "1 ", DisplayIntensity.HIGH)
     assert s.selection_fields == []
-    assert s.selection_rows == {4: "1"}
+    assert s.selection_rows == {0: "1"}
 
 
 def test_choice_hide_removes_it_when_variable_true():
@@ -580,7 +580,7 @@ def test_choice_hide_removes_it_when_variable_true():
     # move up and it is not selectable. HIDEX=var is the inverse (hide when false).
     N, H = DisplayIntensity.NORMAL, DisplayIntensity.HIGH
     src = (
-        '<panel><selfld row="4">'
+        '<panel><selfld>'
         '<choice selchar="1" name="A" match="A" hide="vh">Alpha</choice>'
         '<choice selchar="2" name="B" match="B">Beta</choice>'
         '<choice selchar="3" name="C" match="C" hidex="vs">Gamma</choice>'
@@ -588,10 +588,10 @@ def test_choice_hide_removes_it_when_variable_true():
     )
     # vh true → A hidden; vs false → C hidden. Only B remains, at the top row.
     s = load_dtl(src, vh="1", vs="0")
-    assert s.items[0] == Text(4, 1, "2 ", H)
-    assert s.items[1] == Text(4, 4, "B", N)
+    assert s.items[0] == Text(0, 1, "2 ", H)
+    assert s.items[1] == Text(0, 4, "B", N)
     assert s.selections == {"B": "B"}                  # A and C not selectable
-    assert s.selection_rows == {4: "B"}
+    assert s.selection_rows == {0: "B"}
 
     # vh false → A shown; vs true → C shown. All three render on successive rows.
     s2 = load_dtl(src, vh="0", vs="1")
@@ -605,7 +605,7 @@ def test_hidden_choice_stays_out_of_selections_even_when_proc_routes_it():
     # route only options that are in `selections` (it checks `head in selections`).
     # This asserts the data precondition that lets the gate block a hidden option.
     s = load_dtl(
-        '<panel><selfld row="4">'
+        '<panel><selfld>'
         '<choice selchar="1" name="Open">Open'
         '<choice selchar="7" name="Secret" hide="secret">Secret op</choice>'
         '</selfld>'
@@ -620,7 +620,7 @@ def test_hidden_choice_stays_out_of_selections_even_when_proc_routes_it():
 
 def test_choice_bare_hide_always_removes_it():
     s = load_dtl(
-        '<panel><selfld row="4"><choice selchar="1" name="A" hide>Alpha</choice>'
+        '<panel><selfld><choice selchar="1" name="A" hide>Alpha</choice>'
         '<choice selchar="2" name="B">Beta</choice></selfld></panel>'
     )
     assert [it.text for it in s.items if it.col == 4] == ["B"]
@@ -665,25 +665,25 @@ def test_selfld_empty_prompt_renders_nothing():
     # The bundled numbered menus have only whitespace between <selfld> and the
     # first <choice> — that must render nothing so they stay byte-identical.
     s = load_dtl(
-        '<panel><selfld row="4">\n  '
+        '<panel><selfld>\n  '
         '<choice selchar="1" name="A">desc</choice></selfld></panel>'
     )
-    assert s.items[0] == Text(4, 1, "1 ", DisplayIntensity.HIGH)   # no prompt item
-    assert s.items[1] == Text(4, 4, "A", DisplayIntensity.NORMAL)
+    assert s.items[0] == Text(0, 1, "1 ", DisplayIntensity.HIGH)   # no prompt item
+    assert s.items[1] == Text(0, 4, "A", DisplayIntensity.NORMAL)
 
 
 def test_choice_records_selection_rows_for_point_and_shoot():
     # Each choice also records the row it renders on, so the cursor can select
     # it (point-and-shoot). selection_at(cursor) resolves a cursor address.
     s = load_dtl(
-        '<panel><selfld row="4">'
+        '<panel><selfld>'
         '<choice selchar="0" name="A">  desc-a</choice>'
         '<choice selchar="3" name="B">  desc-b</choice>'
         '</selfld></panel>'
     )
-    assert s.selection_rows == {4: "0", 5: "3"}
-    assert s.selection_at(4 * 80 + 10) == "0"   # cursor anywhere on row 4 -> "0"
-    assert s.selection_at(5 * 80 + 0) == "3"
+    assert s.selection_rows == {0: "0", 1: "3"}
+    assert s.selection_at(0 * 80 + 10) == "0"   # cursor anywhere on the choice row
+    assert s.selection_at(1 * 80 + 0) == "3"
     assert s.selection_at(9 * 80 + 1) is None    # not on a choice row
     assert s.selection_at(None) is None
 
@@ -697,7 +697,7 @@ def test_ispf_menu_selection_rows_map_options():
 
 def test_choice_match_defaults_to_the_number_and_records_selections():
     s = load_dtl(
-        '<panel><selfld row="4">'
+        '<panel><selfld>'
         '<choice selchar="0" name="Settings">  desc</choice>'
         '<choice selchar="X" name="Exit">  bye</choice>'
         '</selfld></panel>'
@@ -707,7 +707,7 @@ def test_choice_match_defaults_to_the_number_and_records_selections():
 
 def test_choice_explicit_match_overrides_the_number():
     s = load_dtl(
-        '<panel><selfld row="4">'
+        '<panel><selfld>'
         '<choice selchar="1" name="View" match="V">  desc</choice>'
         '</selfld></panel>'
     )
@@ -718,13 +718,13 @@ def test_choice_checkvar_lands_cursor_on_the_current_choice():
     # <choice checkvar=var match=val>: when the variable equals a choice's MATCH,
     # that choice is current — the cursor is placed on it.
     s = load_dtl(
-        '<panel><selfld row="4">'
+        '<panel><selfld>'
         '<choice selchar="1" name="New" checkvar="card" match="NEW">create'
         '<choice selchar="2" name="Old" checkvar="card" match="OLD">existing'
         '</selfld></panel>',
         CARD="OLD",
     )
-    assert s.cursor_at == (5, 4)                 # second choice's row, namecol
+    assert s.cursor_at == (1, 4)                 # second choice's row, keyword column
     assert s.selections == {"NEW": "New", "OLD": "Old"}
 
 
@@ -733,7 +733,7 @@ def test_choice_unavail_is_dimmed_and_unselectable():
     # and coloured with the CUA "unavailable" role.
     from screen import Color, _role_colour
     s = load_dtl(
-        '<panel><selfld row="4">'
+        '<panel><selfld>'
         '<choice selchar="1" name="Ok" match="A">available'
         '<choice selchar="2" name="No" match="B" unavail>disabled'
         '</selfld></panel>'
@@ -756,20 +756,20 @@ def test_ispf_panel_selections_drive_validation():
 
 def test_substitution():
     # &NAME dialog-variable reference, matched case-insensitively.
-    s = load_dtl('<panel><info row="1" col="1">Hi &who</info></panel>', WHO="BOB")
+    s = load_dtl('<panel><info>Hi &who</info></panel>', WHO="BOB")
     assert s.items[0].text == "Hi BOB"
 
 
 def test_substitution_terminator_and_escape():
     # A trailing '.' terminates (and is consumed by) the reference; && is literal.
     s = load_dtl(
-        '<panel><info row="1" col="1">&ZUSER.X uses &&</info></panel>', ZUSER="IBMUSER"
+        '<panel><info>&ZUSER.X uses &&</info></panel>', ZUSER="IBMUSER"
     )
     assert s.items[0].text == "IBMUSERX uses &"
 
 
 def test_substitution_unknown_left_intact():
-    s = load_dtl('<panel><info row="1" col="1">keep &NOPE here</info></panel>')
+    s = load_dtl('<panel><info>keep &NOPE here</info></panel>')
     assert s.items[0].text == "keep &NOPE here"
 
 
@@ -782,7 +782,7 @@ def test_internal_entity_reference_resolved():
         '<!doctype dm system [\n'
         '<!entity guar "money-back guarantee">\n'
         ']>\n'
-        '<panel><info row="1" col="1">It has our &guar;.</info></panel>'
+        '<panel><info>It has our &guar;.</info></panel>'
     )
     assert s.items[0].text == "It has our money-back guarantee."
 
@@ -794,7 +794,7 @@ def test_external_system_entity_reference_left_intact():
         '<!doctype dm system [\n'
         '<!entity widgets system>\n'
         ']>\n'
-        '<panel><info row="1" col="1">See &widgets; now.</info></panel>'
+        '<panel><info>See &widgets; now.</info></panel>'
     )
     assert s.items[0].text == "See &widgets; now."
 
@@ -804,7 +804,7 @@ def test_entity_does_not_disturb_dialog_vars():
     # variables (which use a '.' terminator, not ';') or && escapes.
     s = load_dtl(
         '<!entity guar "G">\n'
-        '<panel><info row="1" col="1">&guar; &who.X &&</info></panel>',
+        '<panel><info>&guar; &who.X &&</info></panel>',
         WHO="BOB",
     )
     assert s.items[0].text == "G BOBX &"
@@ -861,7 +861,7 @@ def test_ispf_panel_has_command_table():
 def test_action_bar_renders_labels_and_records_pulldowns():
     s = load_dtl(
         '<panel>'
-        '<ab row="0" col="1">'
+        '<ab>'
         '<abc>Menu<pdc>Exit<action run="exit"></pdc></abc>'
         '<abc>Help<pdc>About<action run="passthru"></pdc></abc>'
         '</ab>'
@@ -884,7 +884,7 @@ def test_action_bar_implicit_pdc_and_abc_end_tags():
     # The <action run=...> child gives each pull-down its command, and <M> (the
     # mnemonic marker) is transparent to the label text.
     s = load_dtl(
-        '<panel><ab row="0" col="1">'
+        '<panel><ab>'
         '<abc>File'
         '<pdc><M>Add<action run=add>'
         '<pdc><M>Delete<action run=delete>'
@@ -906,7 +906,7 @@ def test_pulldown_item_records_its_help_panel():
     # by name; NO/YES/*/% are field-help sentinels, not panel names, so they don't
     # count as a help panel here.
     s = load_dtl(
-        '<panel><ab row="0" col="1">'
+        '<panel><ab>'
         '<abc>Log/List'
         '<pdc help="loglisthelp">Log Data Set defaults<action run="passthru"></pdc>'
         '<pdc>Keylist settings<action run="passthru"></pdc>'
@@ -928,7 +928,7 @@ def test_action_bar_mnemonic_is_recorded_and_underlined():
     # <M> marks the shortcut letter; it's recorded by offset and rendered with an
     # underscore highlight (mono is byte-identical to a plain high-intensity label).
     s = load_dtl(
-        '<panel><ab row="0" col="1">'
+        '<panel><ab>'
         '<abc><M>File<pdc>Open<action run="x"></pdc>'
         '<abc>E<M>xit<pdc>Leave<action run="exit"></pdc>'
         '</ab></panel>'
@@ -971,7 +971,7 @@ def test_pulldown_item_underlines_its_mnemonic():
 def test_action_choice_at_maps_cursor_to_choice():
     s = load_dtl(
         '<panel>'
-        '<ab row="0" col="1">'
+        '<ab>'
         '<abc>Menu<pdc>A<action run="x"></pdc></abc>'
         '<abc>Help<pdc>B<action run="y"></pdc></abc>'
         '</ab>'
@@ -1004,7 +1004,7 @@ def test_abc_outside_ab_raises():
 
 def test_pdc_outside_abc_raises():
     with pytest.raises(DTLError):
-        load_dtl('<panel><ab row="0" col="1"><pdc>x</pdc></ab></panel>')
+        load_dtl('<panel><ab><pdc>x</pdc></ab></panel>')
 
 
 # ── small structural tags: <pdsep>, <rp>, <t>, <varsub> (#118) ───────────────
@@ -1014,7 +1014,7 @@ def test_pdsep_records_separator_between_pulldown_choices():
     # choice above it (DTL omits end tags) and lands a separator marker between
     # the pull-down choices, without itself being a selectable choice.
     s = load_dtl(
-        '<panel><ab row="0" col="1">'
+        '<panel><ab>'
         '<abc>File'
         '<pdc>Add<action run=add><pdsep>'
         '<pdc>Exit<action run=exit>'
@@ -1029,7 +1029,7 @@ def test_pdsep_records_separator_between_pulldown_choices():
 
 def test_pdsep_outside_abc_raises():
     with pytest.raises(DTLError):
-        load_dtl('<panel><ab row="0" col="1"><pdsep></ab></panel>')
+        load_dtl('<panel><ab><pdsep></ab></panel>')
 
 
 def test_pdsep_renders_as_divider_row_in_open_pulldown():
@@ -1068,7 +1068,7 @@ def test_rp_reference_phrase_is_inline_underlined_link():
     # <rp> (reference phrase — a link to another help panel) emphasises a phrase
     # in place, like <hp>: one Text.rich whose phrase run is underlined.
     s = load_dtl(
-        '<panel><info row="2" col="1">see <rp help=glospan>the glossary</rp> now</info></panel>'
+        '<panel><info>see <rp help=glospan>the glossary</rp> now</info></panel>'
     )
     assert len(s.items) == 1
     assert s.items[0].runs == [
@@ -1082,11 +1082,11 @@ def test_rp_mono_is_byte_identical_to_plain_text():
     # A reference phrase is safe on a mono terminal: the underline is colour-only,
     # so the data stream matches the plain concatenated line byte-for-byte.
     s = load_dtl(
-        '<panel><info row="2" col="1">see <rp help=g>the glossary</rp> now</info></panel>'
+        '<panel><info>see <rp help=g>the glossary</rp> now</info></panel>'
     )
     it = s.items[0]
     rich = bytearray(); it.render(rich, color=False)
-    plain = bytearray(); Text(2, 1, it.text).render(plain, color=False)
+    plain = bytearray(); Text(it.row, it.col, it.text).render(plain, color=False)
     assert bytes(rich) == bytes(plain)
     assert SA not in bytes(rich)
 
@@ -1319,32 +1319,6 @@ def test_panel_dimensions_validate_bounds_and_fit():
     assert load_dtl('<panel width="wide"></panel>').width == 80
 
 
-def test_row_beyond_depth_raises():
-    with pytest.raises(DTLError):
-        load_dtl('<panel><info row="24" col="0">off-screen</info></panel>')
-
-
-def test_col_beyond_width_raises():
-    with pytest.raises(DTLError):
-        load_dtl('<panel><info row="0" col="80">off-screen</info></panel>')
-
-
-def test_position_valid_within_declared_size():
-    # row 30 is illegal on a 24-deep panel but fine when depth is declared 43.
-    s = load_dtl('<panel depth="43"><info row="30" col="0">ok</info></panel>')
-    assert s.items[0].row == 30
-
-
-def test_field_overflowing_width_raises():
-    # An explicitly-positioned field whose entry would run past the right edge is
-    # a panel error (auto-flowed fields clamp instead; see the flow tests).
-    with pytest.raises(DTLError):
-        load_dtl(
-            '<panel><dtafld row="0" col="0" datavar="x" entwidth="100">'
-            'P</dtafld></panel>'
-        )
-
-
 def test_panel_dimensions_do_not_change_bytes():
     # DEPTH/WIDTH set to their defaults (24/80) render identically to omitting them.
     a = load_dtl("<panel>Menu<info>hi</info></panel>")
@@ -1355,7 +1329,7 @@ def test_panel_dimensions_do_not_change_bytes():
 # ── help panels (<panel help=...>) ───────────────────────────────────────────
 
 def test_panel_help_attribute_parsed():
-    s = load_dtl('<panel name="p" help="phelp"><info row="0" col="0">x</info></panel>')
+    s = load_dtl('<panel name="p" help="phelp"><info>x</info></panel>')
     assert s.help == "phelp"
     assert load_dtl('<panel name="p"></panel>').help is None
 
@@ -1375,7 +1349,7 @@ def test_field_help_is_recorded_and_resolved_by_cursor():
     # <dtafld help=panel> records a field-level help panel; Screen.help_for maps a
     # cursor within the field's span to it, and to None elsewhere.
     s = load_dtl(
-        '<panel><area row="3" col="1">'
+        '<panel><area>'
         '<dtafld datavar="size" entwidth="5" help="sizehelp">Size</dtafld>'
         '<dtafld datavar="name" entwidth="8">Name</dtafld>'
         '</area></panel>'
@@ -1391,7 +1365,7 @@ def test_field_help_is_recorded_and_resolved_by_cursor():
 def test_field_help_non_panel_values_are_not_field_help():
     # HELP=NO/YES, a *message id, or a %varname don't name a help panel.
     for val in ("no", "yes", "*ISRZ001", "%dynhelp"):
-        s = load_dtl(f'<panel><area row="1" col="1">'
+        s = load_dtl(f'<panel><area>'
                      f'<dtafld datavar="f" entwidth="4" help="{val}">F</dtafld>'
                      f'</area></panel>')
         assert s.help_for(s.field_addr("f")) is None
@@ -1401,7 +1375,7 @@ def test_action_bar_choice_help_resolved_by_cursor():
     # <abc help=panel>: HELP with the cursor on that action-bar choice shows its
     # own help; a choice without HELP resolves to None (the panel help is used).
     s = load_dtl(
-        '<panel><ab row="0" col="1">'
+        '<panel><ab>'
         '<abc help="filehelp">File<pdc>Open<action run="x"></pdc>'
         '<abc>Edit<pdc>Cut<action run="y"></pdc>'
         '</ab></panel>'
@@ -1808,7 +1782,7 @@ def test_list_field_scrollvar_adds_command_line_scroll_field():
         '<panel name="p" width="76">L<area>'
         '<lstfld scrollvar=zscroll scrcaps=on scrvhelp=scrhelp>'
         '<lstcol datavar=a colwidth=8 usage=out>Item</lstfld></area>'
-        '<cmdarea row="20" col="1" entwidth="60">Command ===></cmdarea></panel>',
+        '<cmdarea entwidth="60">Command ===></cmdarea></panel>',
         rows=[{"a": "one"}], ZSCROLL="page")
     scroll = next(it for it in s.items
                   if isinstance(it, Field) and it.name == "zscroll")
@@ -1824,7 +1798,7 @@ def test_list_field_scrollvar_adds_command_line_scroll_field():
     narrow = load_dtl(
         '<panel name="p" width="30">L<area>'
         '<lstfld scrollvar=zs><lstcol datavar=a colwidth=4 usage=out>I</lstfld>'
-        '</area><cmdarea row="20" col="1" entwidth="20">Cmd ===></cmdarea></panel>',
+        '</area><cmdarea entwidth="20">Cmd ===></cmdarea></panel>',
         rows=[{"a": "x"}])
     assert not any(isinstance(it, Field) and it.name == "zs" for it in narrow.items)
 
@@ -2045,7 +2019,7 @@ def test_list_field_row_status_shows_and_is_suppressed_under_a_full_width_title(
     assert any(t.text == "ROW 1 TO 3 OF 3" for t in row0)     # status present
     # A full-width element on row 0 (a title rule) suppresses the status.
     s2 = load_dtl('<panel name="p" width="60"><area>'
-                  '<divider row="0" col="0"/><lstfld>'
+                  '<divider/><lstfld>'
                   '<lstcol datavar=a colwidth=4>A</lstfld></area></panel>',
                   rows=[{"a": "1"}])
     assert not any("ROW " in getattr(t, "text", "") for t in s2.items)
@@ -2116,22 +2090,10 @@ def test_panel_title_text_centered():
     assert s.items[1] == Text(1, 1, "body", DisplayIntensity.NORMAL)   # flows below title
 
 
-def test_panel_title_retracted_when_row0_is_occupied():
-    # #188: a content title normally renders centered on row 0, but the bundled
-    # panels draw their own title rule / action bar there. When an explicit
-    # element already occupies row 0, the auto centered title is retracted so the
-    # standard content form is byte-identical to the old metadata-only title=.
-    s = load_dtl('<panel name="p" width="79">ISPF Settings'
-                 '<info row="0" col="0">----- ISPF Settings -----</info></panel>')
-    assert s.title == "ISPF Settings"                      # metadata kept
-    assert s.items == [Text(0, 0, "----- ISPF Settings -----", DisplayIntensity.NORMAL)]
-    assert all(it.text != "ISPF Settings" for it in s.items)   # no centered title item
-
-
 def test_panel_title_kept_when_row0_is_free():
     # With nothing else on row 0, the centered content title still renders.
     s = load_dtl('<panel name="p" width="20">My Title'
-                 '<info row="2" col="1">body</info></panel>')
+                 '<info>body</info></panel>')
     assert s.items[0] == Text(0, (20 - len("My Title")) // 2, "My Title",
                               DisplayIntensity.NORMAL)
 
@@ -2159,7 +2121,7 @@ def test_title_only_panel_renders_its_title_at_eof():
 
 def test_open_content_element_is_flushed_at_eof():
     # An open content element with no end tag and no </panel> is flushed at EOF.
-    s = load_dtl('<panel name="p">Title<info row="3" col="1">Trailing')
+    s = load_dtl('<panel name="p">Title<info>Trailing')
     assert [i.text for i in s.items] == ["Title", "Trailing"]
 
 
@@ -2622,35 +2584,21 @@ def test_unpositioned_area_is_transparent_to_flow():
     assert rows == [(0, "before"), (1, "inside-a"), (2, "inside-b"), (3, "after")]
 
 
-def test_explicit_position_still_wins_under_autoflow():
-    # Explicit row/col overrides the flow and the flow resumes after it.
-    s = load_dtl(
-        '<panel name="p">'
-        '<info>flowed0</info>'
-        '<info row="10" col="5">explicit</info>'
-        '<info>flowed11</info>'
-        '</panel>'
-    )
-    assert s.items[0] == Text(0, 1, "flowed0", DisplayIntensity.NORMAL)
-    assert s.items[1] == Text(10, 5, "explicit", DisplayIntensity.NORMAL)
-    assert s.items[2] == Text(11, 1, "flowed11", DisplayIntensity.NORMAL)
-
-
 # ── flow layout (<area>/<region>) ────────────────────────────────────────────
 
 def test_area_flows_rows_and_derives_the_entry_column():
     s = load_dtl(
-        '<panel><area row="5" col="1">'
+        '<panel><area>'
         '<dtafld datavar="userid" entwidth="8">Userid   ===></dtafld>'
         '<dtafld datavar="pw" entwidth="8">Password ===></dtafld>'
         '</area></panel>'
     )
     # Prompts at col 1 on flowing rows 5, 6; entries after the 13-char prompt
     # plus the default 1-col gap → col 15.
-    assert s.items[0] == Text(5, 1, "Userid   ===>", DisplayIntensity.NORMAL)
-    assert (s.items[1].row, s.items[1].col, s.items[1].name) == (5, 15, "userid")
-    assert s.items[2] == Text(6, 1, "Password ===>", DisplayIntensity.NORMAL)
-    assert (s.items[3].row, s.items[3].col, s.items[3].name) == (6, 15, "pw")
+    assert s.items[0] == Text(0, 1, "Userid   ===>", DisplayIntensity.NORMAL)
+    assert (s.items[1].row, s.items[1].col, s.items[1].name) == (0, 15, "userid")
+    assert s.items[2] == Text(1, 1, "Password ===>", DisplayIntensity.NORMAL)
+    assert (s.items[3].row, s.items[3].col, s.items[3].name) == (1, 15, "pw")
 
 
 def test_dtacol_aligns_entries_at_a_fixed_prompt_column():
@@ -2683,7 +2631,7 @@ def test_dtacol_supplies_default_entry_width():
 def test_dtafld_usage_out_is_a_protected_display_field():
     # usage=out renders the variable's value as protected text — no input field.
     s = load_dtl(
-        '<panel><area row="3" col="1">'
+        '<panel><area>'
         '<dtafld datavar="curdate" usage="out" entwidth="8">Date</dtafld>'
         '</area></panel>',
         CURDATE="07/03/26",
@@ -2696,7 +2644,7 @@ def test_dtafld_usage_out_is_a_protected_display_field():
 
 def test_dtafld_usage_in_stays_an_input_field():
     s = load_dtl(
-        '<panel><area row="3" col="1">'
+        '<panel><area>'
         '<dtafld datavar="x" usage="in" entwidth="8">Name</dtafld>'
         '</area></panel>'
     )
@@ -2707,7 +2655,7 @@ def test_dtafld_cua_leader_dots_and_output_colon():
     # PMTFMT=CUA (default): a prompt shorter than PMTWIDTH is padded with CUA
     # leader dots; USAGE=out ends the prompt with a colon (the DTAFLD figure).
     s = load_dtl(
-        '<panel><area row="3" col="1"><dtacol pmtwidth="12">'
+        '<panel><area><dtacol pmtwidth="12">'
         '<dtafld datavar="curdate" usage="out" entwidth="8">Date</dtafld>'
         '<dtafld datavar="namevar" entwidth="25">Name</dtafld>'
         '<dtafld datavar="passvar" entwidth="8">Password</dtafld>'
@@ -2721,11 +2669,11 @@ def test_dtafld_cua_leader_dots_and_output_colon():
 
 def test_dtafld_pmtfmt_ispf_and_none():
     # PMTFMT=ISPF puts "===>" in the rightmost 4 bytes; NONE adds no leaders.
-    ispf = load_dtl('<panel><area row="1" col="1"><dtafld datavar="x" '
+    ispf = load_dtl('<panel><area><dtafld datavar="x" '
                     'pmtwidth="12" pmtfmt="ispf">Name</dtafld></area></panel>')
     assert any(t.text == "Name".ljust(8) + "===>"       # rightmost 4 bytes
                for t in ispf.items if isinstance(t, Text))
-    none = load_dtl('<panel><area row="1" col="1"><dtafld datavar="x" '
+    none = load_dtl('<panel><area><dtafld datavar="x" '
                     'pmtwidth="12" pmtfmt="none">Name</dtafld></area></panel>')
     assert any(t.text == "Name" for t in none.items if isinstance(t, Text))
 
@@ -2735,9 +2683,9 @@ def test_size_attributes_tolerate_star_and_list_forms():
     # parsed with a bare int() and crashed. They must now fall back gracefully
     # (MSGMBR WIDTH, LSTCOL COLWIDTH, SELFLD ENTWIDTH).
     load_dtl('<msgmbr name="m" width="*"><msg msgid="X1">hi</msg></msgmbr>')
-    load_dtl('<panel><selfld row="1" col="1" entwidth="2 2"><choice>A</selfld></panel>')
+    load_dtl('<panel><selfld entwidth="2 2"><choice>A</selfld></panel>')
     # a LSTCOL with COLWIDTH=* falls back to the heading width (no crash)
-    hdr = load_dtl('<panel><lstfld row="1" col="1">'
+    hdr = load_dtl('<panel><lstfld>'
                    '<lstcol colwidth="*" datavar="x">Heading</lstcol></lstfld></panel>')
     assert any(getattr(t, "text", "") == "Heading" for t in hdr.items)
 
@@ -2755,28 +2703,28 @@ def test_dtafld_star_widths_do_not_crash():
 
 def test_dtafld_pmtloc_above_puts_prompt_on_the_line_above():
     s = load_dtl(
-        '<panel><area row="5" col="1">'
+        '<panel><area>'
         '<dtafld datavar="t" entwidth="20" pmtloc="above">Title</dtafld>'
         '<dtafld datavar="u" entwidth="8">Next</dtafld>'
         '</area></panel>'
     )
     prompt = next(t for t in s.items if isinstance(t, Text) and t.text == "Title")
     fld = next(f for f in s.items if isinstance(f, Field) and f.name == "t")
-    assert prompt.row == 5 and fld.row == 6 and fld.col == 1    # prompt above, field below
+    assert prompt.row == 0 and fld.row == 1 and fld.col == 1    # prompt above, field below
     nxt = next(f for f in s.items if isinstance(f, Field) and f.name == "u")
-    assert nxt.row == 7                                         # flow advanced past 2 rows
+    assert nxt.row == 2                                         # flow advanced past 2 rows
 
 
 def test_divider_draws_a_rule_across_the_flow():
     s = load_dtl(
-        '<panel><area row="4" col="1"><info>above</info><divider>'
+        '<panel><area><info>above</info><divider>'
         '<info>below</info></area></panel>'
     )
     texts = [i for i in s.items if isinstance(i, Text)]
-    assert texts[0] == Text(4, 1, "above", DisplayIntensity.NORMAL)
+    assert texts[0] == Text(0, 1, "above", DisplayIntensity.NORMAL)
     rule = texts[1]
-    assert rule.row == 5 and rule.col == 1 and set(rule.text) == {"-"}
-    assert texts[2] == Text(6, 1, "below", DisplayIntensity.NORMAL)  # flow resumed
+    assert rule.row == 1 and rule.col == 1 and set(rule.text) == {"-"}
+    assert texts[2] == Text(2, 1, "below", DisplayIntensity.NORMAL)  # flow resumed
 
 
 def test_divider_type_none_is_a_blank_spacer():
@@ -2784,38 +2732,27 @@ def test_divider_type_none_is_a_blank_spacer():
     # whereas the default/SOLID divider draws a rule.
     for dtype in ("none", "blank"):
         s = load_dtl(
-            f'<panel><area row="4" col="1"><info>above</info>'
+            f'<panel><area><info>above</info>'
             f'<divider type="{dtype}"><info>below</info></area></panel>'
         )
         texts = [i for i in s.items if isinstance(i, Text)]
         assert not any(set(t.text) == {"-"} for t in texts)          # no rule
-        assert texts[-1] == Text(6, 1, "below", DisplayIntensity.NORMAL)  # row consumed
-
-
-def test_area_explicit_position_wins_and_continues_flow():
-    s = load_dtl(
-        '<panel><area row="5" col="1">'
-        '<info>first</info>'              # flows to row 5
-        '<info row="9">jump</info>'       # explicit row 9
-        '<info>after</info>'              # flow continues at row 10
-        '</area></panel>'
-    )
-    assert s.items[0] == Text(5, 1, "first", DisplayIntensity.NORMAL)
-    assert s.items[1] == Text(9, 1, "jump", DisplayIntensity.NORMAL)
-    assert s.items[2] == Text(10, 1, "after", DisplayIntensity.NORMAL)
+        assert texts[-1] == Text(2, 1, "below", DisplayIntensity.NORMAL)  # row consumed
 
 
 def test_regions_lay_out_side_by_side_columns():
     s = load_dtl(
         '<panel>'
-        '<region row="2" col="1"><info>left1</info><info>left2</info></region>'
-        '<region row="2" col="40"><info>right1</info><info>right2</info></region>'
+        '<region dir="horiz">'
+        '<region><info>left1</info><info>left2</info></region>'
+        '<region><info>right1</info><info>right2</info></region>'
+        '</region>'
         '</panel>'
     )
-    assert s.items[0] == Text(2, 1, "left1", DisplayIntensity.NORMAL)
-    assert s.items[1] == Text(3, 1, "left2", DisplayIntensity.NORMAL)
-    assert s.items[2] == Text(2, 40, "right1", DisplayIntensity.NORMAL)
-    assert s.items[3] == Text(3, 40, "right2", DisplayIntensity.NORMAL)
+    assert s.items[0] == Text(0, 1, "left1", DisplayIntensity.NORMAL)
+    assert s.items[1] == Text(1, 1, "left2", DisplayIntensity.NORMAL)
+    assert s.items[2] == Text(0, 8, "right1", DisplayIntensity.NORMAL)
+    assert s.items[3] == Text(1, 8, "right2", DisplayIntensity.NORMAL)
 
 
 def test_horiz_region_flows_fields_side_by_side():
@@ -2823,7 +2760,7 @@ def test_horiz_region_flows_fields_side_by_side():
     # them) — the guide's implicit layout for a row of related fields (City /
     # State / Zip). The enclosing flow then resumes on the row *below* them.
     s = load_dtl(
-        '<panel><area col="1">'
+        '<panel><area>'
         '<dtafld datavar="name" entwidth="10">Name'
         '<region dir="horiz">'
         '  <dtafld datavar="city" entwidth="8">City'
@@ -2848,7 +2785,7 @@ def test_horiz_region_stacks_child_regions_and_resumes_below_tallest():
     # a <divider gutter=n> between them is a vertical gutter (no rule). The flow
     # resumes below whichever column is taller.
     s = load_dtl(
-        '<panel><area col="1">'
+        '<panel><area>'
         '<region dir="horiz">'
         '  <region><info>a1</info><info>a2</info></region>'
         '  <divider gutter="6">'
@@ -2870,7 +2807,7 @@ def test_horiz_region_stacks_child_regions_and_resumes_below_tallest():
 def test_horiz_region_default_vert_is_unchanged():
     # Without dir=horiz a region still stacks its children vertically (default).
     s = load_dtl(
-        '<panel><area col="1">'
+        '<panel><area>'
         '<region><info>x1</info><info>x2</info></region>'
         '<info>y</info>'
         '</area></panel>'
@@ -2888,42 +2825,29 @@ def test_selfld_choice_columns_relative_to_enclosing_box():
     # column 1 the offset is 0, so panel-level selection fields are unchanged.
     N, H = DisplayIntensity.NORMAL, DisplayIntensity.HIGH
     base = load_dtl(
-        '<panel><selfld row="4"><choice selchar="1" name="Aaa">desc</choice></selfld></panel>'
+        '<panel><selfld><choice selchar="1" name="Aaa">desc</choice></selfld></panel>'
     )
-    assert base.items[0] == Text(4, 1, "1 ", H)     # classic absolute columns:
-    assert base.items[1] == Text(4, 4, "Aaa", N)    #   num@1, name@4, desc@21
-    assert base.items[2] == Text(4, 21, "desc", N)
+    assert base.items[0] == Text(0, 1, "1 ", H)     # classic columns from the origin:
+    assert base.items[1] == Text(0, 4, "Aaa", N)    #   num@1, name@4, desc@21
+    assert base.items[2] == Text(0, 21, "desc", N)
 
     shifted = load_dtl(
-        '<panel><region col="30">'
-        '<selfld row="4"><choice selchar="1" name="Aaa">desc</choice></selfld>'
+        '<panel><region indent="29">'
+        '<selfld><choice selchar="1" name="Aaa">desc</choice></selfld>'
         '</region></panel>'
     )
-    assert shifted.items[0] == Text(4, 30, "1 ", H)   # each shifted by (30 - 1)
-    assert shifted.items[1] == Text(4, 33, "Aaa", N)
-    assert shifted.items[2] == Text(4, 50, "desc", N)
-
-
-def test_selfld_explicit_col_shifts_choice_columns():
-    # An explicit COL on the <selfld> itself is the origin the choice columns
-    # offset from (previously COL was ignored and the columns were absolute).
-    N, H = DisplayIntensity.NORMAL, DisplayIntensity.HIGH
-    s = load_dtl(
-        '<panel><selfld row="4" col="30">'
-        '<choice selchar="1" name="Aaa">desc</choice></selfld></panel>'
-    )
-    assert s.items[0] == Text(4, 30, "1 ", H)
-    assert s.items[1] == Text(4, 33, "Aaa", N)
-    assert s.items[2] == Text(4, 50, "desc", N)
+    assert shifted.items[0] == Text(0, 30, "1 ", H)   # each shifted by the indent (29)
+    assert shifted.items[1] == Text(0, 33, "Aaa", N)
+    assert shifted.items[2] == Text(0, 50, "desc", N)
 
 
 def test_selfld_as_horiz_column_shifts_right():
     # Two <selfld>s in side-by-side dir=horiz regions no longer overlap: the
     # right one's choices shift to its column instead of pinning to column 1.
     s = load_dtl(
-        '<panel><area col="1"><region dir="horiz">'
-        '<region><selfld row="1"><choice selchar="1" name="Mon">day</choice></selfld></region>'
-        '<region><selfld row="1"><choice selchar="1" name="Nine">am</choice></selfld></region>'
+        '<panel><area><region dir="horiz">'
+        '<region><selfld><choice selchar="1" name="Mon">day</choice></selfld></region>'
+        '<region><selfld><choice selchar="1" name="Nine">am</choice></selfld></region>'
         '</region></area></panel>'
     )
     left = [it for it in s.items if isinstance(it, Text) and it.text.strip() == "Mon"][0]
@@ -2936,7 +2860,7 @@ def test_region_indent_shifts_content_right_and_nests():
     # <region indent=n> flows its content n columns right of the origin; nested
     # indents stack, and the parent flow resumes at its own column afterwards.
     s = load_dtl(
-        '<panel><area col="1">'
+        '<panel><area>'
         '<info>flush</info>'
         '<region indent="4"><info>indented</info>'
         '<region indent="3"><info>deeper</info></region></region>'
@@ -2954,7 +2878,7 @@ def test_missing_row_outside_any_flow_context_raises():
     # With no <panel> (hence no implicit flow box) and no <area>, an <info>
     # without a row has nowhere to flow, so it still raises.
     with pytest.raises(DTLError):
-        load_dtl('<info col="1">x</info>')
+        load_dtl('<info>x</info>')
 
 
 def test_area_flow_is_transparent():
@@ -2970,22 +2894,22 @@ def test_area_flow_is_transparent():
 def test_doctype_prolog_is_tolerated():
     s = load_dtl(
         '<!DOCTYPE DM SYSTEM>\n'
-        '<panel><info row="1" col="2">hi</info></panel>'
+        '<panel><info>hi</info></panel>'
     )
-    assert s.items == [Text(1, 2, "hi", DisplayIntensity.NORMAL)]
+    assert s.items == [Text(0, 1, "hi", DisplayIntensity.NORMAL)]
 
 
 def test_tag_and_attribute_names_are_case_insensitive():
-    s = load_dtl('<PANEL><INFO ROW="1" COL="2"><HP>hi</HP></INFO></PANEL>')
-    assert s.items == [Text(1, 2, "hi", DisplayIntensity.HIGH, role="emphasis")]
+    s = load_dtl('<PANEL><INFO><HP>hi</HP></INFO></PANEL>')
+    assert s.items == [Text(0, 1, "hi", DisplayIntensity.HIGH, role="emphasis")]
 
 
 def test_boolean_attribute_minimization():
     # <dtafld cursor> (no value) means cursor="yes"; <... numeric> likewise.
     s = load_dtl(
         '<panel>'
-        '<dtafld row="6" col="1" datavar="pw" entwidth="8" cursor>P</dtafld>'
-        '<dtafld row="8" col="1" datavar="sz" entwidth="5" numeric>S</dtafld>'
+        '<dtafld datavar="pw" entwidth="8" cursor>P</dtafld>'
+        '<dtafld datavar="sz" entwidth="5" numeric>S</dtafld>'
         '</panel>'
     )
     assert s.items[1].cursor is True
@@ -3019,7 +2943,7 @@ def test_choice_outside_selfld_raises():
 def test_keyl_builds_keylist_and_emits_no_items():
     s = load_dtl(
         '<panel>'
-        '<info row="0" col="0">hi</info>'
+        '<info>hi</info>'
         '<keyl name="K">'
         '<keyi key="PF1" cmd="HELP">Help</keyi>'
         '<keyi key="PF3" cmd="EXIT">Exit</keyi>'
@@ -3027,7 +2951,7 @@ def test_keyl_builds_keylist_and_emits_no_items():
         '</panel>'
     )
     # The keylist is metadata: it adds no renderable items.
-    assert s.items == [Text(0, 0, "hi", DisplayIntensity.NORMAL)]
+    assert s.items == [Text(0, 1, "hi", DisplayIntensity.NORMAL)]
     assert s.keylist == {"PF1": "HELP", "PF3": "EXIT"}
 
 
@@ -3046,7 +2970,7 @@ def test_vardcl_makes_field_numeric():
         '<panel>'
         '<varclass name="NUMFLD" type="numeric"/>'
         '<varlist><vardcl name="size" varclass="NUMFLD"/></varlist>'
-        '<dtafld row="8" col="1" datavar="size" entwidth="5">Size</dtafld>'
+        '<dtafld datavar="size" entwidth="5">Size</dtafld>'
         '</panel>'
     )
     assert s.items[1].numeric is True   # inherited from the varclass
@@ -3059,7 +2983,7 @@ def _range_panel():
         '  <checkl msg="M001"><checki type="range">0 100</checki></checkl>'
         '</varclass>'
         '<varlist><vardcl name="sz" varclass="SZ"/></varlist>'
-        '<dtafld row="8" col="1" datavar="sz" entwidth="5">Size</dtafld>'
+        '<dtafld datavar="sz" entwidth="5">Size</dtafld>'
         '</panel>'
     )
 
@@ -3091,7 +3015,7 @@ def test_values_check():
         '  <checkl msg="M2"><checki type="values">YES NO</checki></checkl>'
         '</varclass>'
         '<varlist><vardcl name="flag" varclass="YN"/></varlist>'
-        '<dtafld row="1" col="1" datavar="flag" entwidth="3">F</dtafld>'
+        '<dtafld datavar="flag" entwidth="3">F</dtafld>'
         '</panel>'
     )
     addr = s.field_addr("flag")
@@ -3104,7 +3028,7 @@ def _check_panel(checki):
         '<panel>'
         '<varclass name="C"><checkl msg="M">' + checki + '</checkl></varclass>'
         '<varlist><vardcl name="f" varclass="C"/></varlist>'
-        '<dtafld row="1" col="1" datavar="f" entwidth="20">F</dtafld>'
+        '<dtafld datavar="f" entwidth="20">F</dtafld>'
         '</panel>'
     )
     return s, s.field_addr("f")
@@ -3160,7 +3084,7 @@ def _varclass_panel(vc):
     s = load_dtl(
         '<panel>' + vc +
         '<varlist><vardcl name="f" varclass="C"/></varlist>'
-        '<area><dtafld datavar="f" row="1" col="1" entwidth="30">F</dtafld></area>'
+        '<area><dtafld datavar="f" entwidth="30">F</dtafld></area>'
         '</panel>'
     )
     return s, s.field_addr("f")
@@ -3217,7 +3141,7 @@ def test_xlatl_xlati_restricts_input_to_its_translations():
         '  </xlatl>'
         '</varclass>'
         '<varlist><vardcl name="month" varclass="monthcls"/></varlist>'
-        '<panel><dtafld row="5" col="1" datavar="month" entwidth="3">M</dtafld></panel>'
+        '<panel><dtafld datavar="month" entwidth="3">M</dtafld></panel>'
     )
     addr = s.field_addr("month")
     assert s.first_validation_error({addr: "NOV"}) is None                    # valid
@@ -3236,7 +3160,7 @@ def test_xlati_lit_external_preserves_literal_and_uses_own_message():
         '  </xlatl>'
         '</varclass>'
         '<varlist><vardcl name="pay" varclass="cc"/></varlist>'
-        '<panel><dtafld row="5" col="1" datavar="pay" entwidth="9">P</dtafld></panel>'
+        '<panel><dtafld datavar="pay" entwidth="9">P</dtafld></panel>'
     )
     addr = s.field_addr("pay")
     assert s.first_validation_error({addr: "V I S T A"}) is None              # literal external
@@ -3254,7 +3178,7 @@ def test_xlatl_format_upper_is_order_independent():
         '<xlatl format=upper></xlatl>'
         '</varclass>'
         '<varlist><vardcl name="cmd" varclass="CC"/></varlist>'
-        '<panel><dtafld row="2" col="2" datavar="cmd" entwidth="6">C</dtafld></panel>'
+        '<panel><dtafld datavar="cmd" entwidth="6">C</dtafld></panel>'
     )
     addr = s.field_addr("cmd")
     assert s.first_validation_error({addr: "list"}) is None          # case-insensitive
@@ -3287,7 +3211,7 @@ def test_required_field_rejects_empty_input():
     # IBM REQUIRED=YES: the field must be non-empty on submit; MSG names the error.
     s = load_dtl(
         '<panel>'
-        '<dtafld row="6" col="1" datavar="name" entwidth="8"'
+        '<dtafld datavar="name" entwidth="8"'
         ' required="yes" msg="ORDB000">Name</dtafld>'
         '</panel>'
     )
@@ -3301,7 +3225,7 @@ def test_required_without_msg_uses_default_message():
     # REQUIRED (minimized) with no field/class MSG falls back to a system stand-in.
     s = load_dtl(
         '<panel>'
-        '<dtafld row="6" col="1" datavar="pw" entwidth="8"'
+        '<dtafld datavar="pw" entwidth="8"'
         ' required display="no">Password</dtafld>'
         '</panel>'
     )
@@ -3318,7 +3242,7 @@ def test_required_combines_with_varclass_checks():
         '  <checkl msg="M001"><checki type="range">0 100</checki></checkl>'
         '</varclass>'
         '<varlist><vardcl name="sz" varclass="SZ"/></varlist>'
-        '<dtafld row="8" col="1" datavar="sz" entwidth="5" required="yes">Size</dtafld>'
+        '<dtafld datavar="sz" entwidth="5" required="yes">Size</dtafld>'
         '</panel>'
     )
     addr = s.field_addr("sz")
@@ -3352,7 +3276,7 @@ def test_char_varclass_leaves_field_alphanumeric():
         '<panel>'
         '<varclass name="C" type="char"/>'
         '<varlist><vardcl name="x" varclass="C"/></varlist>'
-        '<dtafld row="1" col="1" datavar="x" entwidth="4">X</dtafld>'
+        '<dtafld datavar="x" entwidth="4">X</dtafld>'
         '</panel>'
     )
     assert s.items[1].numeric is False
@@ -3363,7 +3287,7 @@ def test_explicit_numeric_attr_overrides_varclass():
         '<panel>'
         '<varclass name="C" type="char"/>'
         '<varlist><vardcl name="x" varclass="C"/></varlist>'
-        '<dtafld row="1" col="1" datavar="x" entwidth="4" numeric="yes">X</dtafld>'
+        '<dtafld datavar="x" entwidth="4" numeric="yes">X</dtafld>'
         '</panel>'
     )
     assert s.items[1].numeric is True   # field attribute wins over the class
@@ -3373,7 +3297,7 @@ def test_vardcl_outside_varlist_is_tolerated():
     # A stray <vardcl> (some guide examples begin mid-declaration) is ignored
     # rather than aborting the panel: the panel still renders its body.
     s = load_dtl('<panel><vardcl name="x" varclass="C"/>'
-                 '<info row="1" col="1">HELLO</info></panel>')
+                 '<info>HELLO</info></panel>')
     assert any(getattr(i, "text", None) == "HELLO" for i in s.items)
 
 
@@ -3386,23 +3310,23 @@ def test_varclass_missing_name_raises():
 
 def test_cmdarea_renders_like_dtafld_and_records_command_field():
     cmd = load_dtl(
-        '<panel><cmdarea row="2" col="1" entwidth="6" cursor="yes">'
+        '<panel><cmdarea entwidth="6" cursor="yes">'
         'Option ===></cmdarea></panel>'
     )
     # Same prompt + field bytes as the equivalent <dtafld> (name aside).
     fld = load_dtl(
-        '<panel><dtafld row="2" col="1" datavar="ZCMD" entwidth="6" '
+        '<panel><dtafld datavar="ZCMD" entwidth="6" '
         'cursor="yes">Option ===></dtafld></panel>'
     )
     assert cmd.render() == fld.render()
     assert cmd.command_field is cmd.items[1]
     assert cmd.command_field.name == "ZCMD"          # default ISPF command var
-    assert cmd.field_addr("ZCMD") == 2 * 80 + 14
+    assert cmd.field_addr("ZCMD") == 0 * 80 + 14
 
 
 def test_cmdarea_datavar_override_and_command_value():
     s = load_dtl(
-        '<panel><cmdarea row="2" col="1" datavar="OPT" entwidth="6">'
+        '<panel><cmdarea datavar="OPT" entwidth="6">'
         'Option ===></cmdarea></panel>'
     )
     assert s.command_field.name == "OPT"
@@ -3412,7 +3336,7 @@ def test_cmdarea_datavar_override_and_command_value():
 
 
 def test_command_value_none_without_cmdarea():
-    s = load_dtl('<panel><info row="0" col="0">hi</info></panel>')
+    s = load_dtl('<panel><info>hi</info></panel>')
     assert s.command_field is None
     assert s.command_value({0: "x"}) is None
 

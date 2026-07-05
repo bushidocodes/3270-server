@@ -8,14 +8,13 @@ take on the same idea: ``load_dtl(source)`` parses DTL markup into a
 
 Relationship to authentic DTL
 -----------------------------
-We keep DTL's tag *names* and spirit. Positioning works both ways: every visible
-element may carry explicit ``row``/``col`` (predictable, and how the bundled
-panels are written), but a ``<panel>`` is also an implicit **flow box** — an
-element that omits ``row``/``col`` flows down from the top (and a ``<dtafld>``'s
-entry field follows its prompt). Explicit positions always
-win, so fully-positioned panels are unaffected. This is a pragmatic take on
-``ISPDTLC``'s auto-layout (the genuinely hard part); the bundled panels position
-explicitly, while the conformance corpus (``tests/dtl_examples/``) exercises flow.
+We keep DTL's tag *names* and spirit. A ``<panel>`` is a **flow box**: every
+element flows down from the top (and a ``<dtafld>``'s entry field follows its
+prompt), the way real DTL relies on ``ISPDTLC`` to auto-lay-out. There is no
+explicit ``row``/``col`` positioning — the bundled panels are all auto-flow.
+This is a pragmatic take on ``ISPDTLC``'s auto-layout (the genuinely hard part),
+exercised by both the bundled panels and the conformance corpus
+(``tests/dtl_examples/``).
 
 Like real DTL the source is SGML: files may begin with a ``<!DOCTYPE DM SYSTEM>``
 prolog (tolerated and ignored), tag and attribute names are case-insensitive
@@ -38,8 +37,7 @@ Supported tags
                                  prompt. ``dir=horiz`` lays the box's children side
                                  by side instead of stacking them, and the enclosing
                                  flow resumes below the tallest column; ``width=n``
-                                 fixes a column's width. Explicit positions always
-                                 win, so non-flowed panels are unaffected.
+                                 fixes a column's width.
 ``<info row col>``               protected text (label / instruction). A whole-line
                                  ``<hp>`` is CUA emphasis (high intensity + white);
                                  a horizontal rule is a ``<divider>``.
@@ -530,9 +528,8 @@ class _DTLParser(HTMLParser):
                 d = self._panel_dim(a["depth"], self._DEPTH_MIN, self._DEPTH_MAX)
                 if d is not None:
                     self.screen.depth = d
-            # The panel itself is an implicit flow box: elements that omit
-            # row/col flow down from the top. Explicit positions still win, so
-            # fully-positioned panels are unaffected.
+            # The panel itself is the root flow box: every element flows down
+            # from the top.
             self._areas.append(
                 {"row": 0, "col": 1, "fldgap": 1, "explicit": True, "parent": None}
             )
@@ -545,14 +542,14 @@ class _DTLParser(HTMLParser):
             if ctx is not None:
                 ctx["had_content"] = True
             # The choice columns are offsets within the selection field, measured
-            # from its origin column: an explicit COL, else the enclosing flow
-            # box's column (so a flowed <selfld> — e.g. a dir=horiz column —
-            # shifts with the box). The number sits at the origin, the keyword one
-            # gap past a 2-wide number, the description one gap past that.
-            origin = int(a["col"]) if "col" in a else (ctx["col"] if ctx else 1)
+            # from its origin column — the enclosing flow box's column (so a flowed
+            # <selfld>, e.g. a dir=horiz column, shifts with the box). The number
+            # sits at the origin, the keyword one gap past a 2-wide number, the
+            # description one gap past that.
+            origin = ctx["col"] if ctx else 1
             base = origin - 1
             self._selfld = {
-                "row": int(a["row"]) if "row" in a else (ctx["row"] if ctx else 0),
+                "row": ctx["row"] if ctx else 0,
                 "numcol": base + 1,
                 "namecol": base + 4,
                 "desccol": base + 21,
@@ -635,10 +632,9 @@ class _DTLParser(HTMLParser):
             if self._cmd_chars is not None:
                 self._cmd_tpos = len("".join(self._cmd_chars).strip())
         elif tag == "ab":
-            # Action-bar choices are separated by a fixed gap (the non-standard
-            # per-bar gap= attribute has been removed).
-            self._ab = {"row": int(a.get("row", 0)), "col": int(a.get("col", 1)),
-                        "gap": 3, "choices": []}
+            # The action bar sits on the top row; its choices are separated by a
+            # fixed gap (the non-standard per-bar gap= attribute has been removed).
+            self._ab = {"row": 0, "col": 1, "gap": 3, "choices": []}
         elif tag == "abc":
             if self._ab is None:
                 raise DTLError("<abc> outside of an <ab>")
@@ -709,8 +705,8 @@ class _DTLParser(HTMLParser):
             ctx = self._areas[-1] if self._areas else None
             self._lstfld = {
                 "cols": [], "groups": [], "ctx": ctx,
-                "row": int(a["row"]) if "row" in a else (ctx["row"] if ctx else 0),
-                "col": int(a["col"]) if "col" in a else (ctx["col"] if ctx else 1),
+                "row": ctx["row"] if ctx else 0,
+                "col": ctx["col"] if ctx else 1,
                 "div": a.get("div", "none"),   # divider after each model set (raw)
             }
             self._lstgrp = None
@@ -753,10 +749,10 @@ class _DTLParser(HTMLParser):
             # type fields, like the classic ISPF )ATTR + )BODY model.
             ctx = self._areas[-1] if self._areas else None
             self._da = {
-                "row": int(a["row"]) if "row" in a else (ctx["row"] if ctx else 0),
-                "col": int(a["col"]) if "col" in a else (ctx["col"] if ctx else 1),
+                "row": ctx["row"] if ctx else 0,
+                "col": ctx["col"] if ctx else 1,
                 "attrs": {}, "body": [],
-                "ctx": None if "row" in a else ctx,   # flow only if unpositioned
+                "ctx": ctx,
             }
         elif tag == "attr":
             self._emit_attr(a)
@@ -765,14 +761,14 @@ class _DTLParser(HTMLParser):
             # prompt/entry widths (PMTWIDTH/ENTWIDTH) that its <dtafld>s inherit
             # so their captions and entries line up in a column.
             parent = self._areas[-1] if self._areas else None
-            row = int(a["row"]) if "row" in a else (parent["row"] if parent else 0)
+            row = parent["row"] if parent else 0
             self._areas.append({
                 "row": row, "row0": row, "maxbottom": row,
-                "col": int(a["col"]) if "col" in a else (parent["col"] if parent else 1),
+                "col": parent["col"] if parent else 1,
                 "fldgap": parent["fldgap"] if parent else 1,
                 "dir": str(a.get("dir", "vert")).strip().lower(),
                 "start_idx": len(self.screen.items),
-                "explicit": "row" in a,
+                "explicit": False,
                 "parent": parent,
                 "pmtwidth": (self._opt_int(a["pmtwidth"]) if "pmtwidth" in a
                              else (parent.get("pmtwidth") if parent else None)),
@@ -786,10 +782,10 @@ class _DTLParser(HTMLParser):
                 # between the columns either side of it: advance the column cursor
                 # (by GUTTER, else the default gap) and draw no rule.
                 ctx["col"] += int(a["gutter"]) if "gutter" in a else self._HGAP
-            elif ctx is not None or "row" in a:
+            elif ctx is not None:
                 # A horizontal rule spanning the rest of the flow box's width.
-                row = int(a["row"]) if "row" in a else ctx["row"]
-                col = int(a["col"]) if "col" in a else (ctx["col"] if ctx else 1)
+                row = ctx["row"]
+                col = ctx["col"] if ctx else 1
                 if ctx is not None:
                     ctx["row"] = row + 1
                 # TYPE=NONE/BLANK is a blank spacer (consumes the row but draws no
@@ -804,17 +800,16 @@ class _DTLParser(HTMLParser):
                     # <info fill=->.
                     self.screen.add(Text(row, col, "-" * width, role="rule"))
         elif tag in ("area", "region"):
-            # A flow box. With explicit row/col it is a positioned sub-box; with
-            # neither it transparently continues the enclosing flow (so its
-            # content flows after the parent's, and the parent resumes after it).
+            # A flow box that transparently continues the enclosing flow: its
+            # content flows after the parent's, and the parent resumes after it.
             # DIR=HORIZ lays the box's children left-to-right instead of stacking
             # them top-to-bottom (side-by-side region columns).
             parent = self._areas[-1] if self._areas else None
-            explicit = "row" in a
+            explicit = False
             # INDENT shifts the box's content that many columns to the right of its
             # origin (a <region indent=n>), nesting cumulatively.
-            base_col = int(a["col"]) if "col" in a else (parent["col"] if parent else 1)
-            row = int(a["row"]) if "row" in a else (parent["row"] if parent else 0)
+            base_col = parent["col"] if parent else 1
+            row = parent["row"] if parent else 0
             self._areas.append({
                 "row": row, "row0": row, "maxbottom": row,
                 "col": base_col + (int(a["indent"]) if "indent" in a else 0),
@@ -841,8 +836,8 @@ class _DTLParser(HTMLParser):
             # <figcap> caption line beneath. Its children (<p>, lists, <xmp>, …)
             # flow through the box like an <area>.
             parent = self._areas[-1] if self._areas else None
-            col = int(a["col"]) if "col" in a else (parent["col"] if parent else 1)
-            row = int(a["row"]) if "row" in a else (parent["row"] if parent else 0)
+            col = parent["col"] if parent else 1
+            row = parent["row"] if parent else 0
             frame = str(a.get("frame", "rule")).strip().lower() != "none"
             width = max(1, self.screen.width - col - 1)
             if frame:                                  # top rule
@@ -851,7 +846,7 @@ class _DTLParser(HTMLParser):
             self._areas.append({
                 "row": row, "row0": row, "maxbottom": row, "col": col,
                 "fldgap": parent["fldgap"] if parent else 1, "dir": "vert",
-                "start_idx": len(self.screen.items), "explicit": "row" in a,
+                "start_idx": len(self.screen.items), "explicit": False,
                 "parent": parent, "fig": True, "frame": frame,
                 "fig_col": col, "fig_width": width, "caption": None,
             })
@@ -1206,48 +1201,26 @@ class _DTLParser(HTMLParser):
         return int(attrs[key])
 
     def _resolve_pos(self, a, tag):
-        """Resolve an element's ``(row, col)`` and return it with the active flow
-        box. Explicit ``row``/``col`` win; otherwise they flow from the enclosing
-        ``<area>``/``<region>`` (the row cursor advances one line per element).
-        Outside any flow box, ``row``/``col`` are required."""
+        """Resolve an element's ``(row, col)`` from the enclosing flow box — the
+        row cursor advances one line per element — and return it with that box.
+        Every element auto-flows; there is no explicit positioning."""
         ctx = self._areas[-1] if self._areas else None
-        row_explicit = "row" in a
-        if row_explicit:
-            row = int(a["row"])
-            if ctx is not None:
-                ctx["row"] = row + 1
-        elif ctx is not None:
-            row = ctx["row"]
-            ctx["row"] = row + 1
-        else:
-            raise DTLError(f"<{tag}> missing required attribute 'row'")
-        col_explicit = "col" in a
-        if col_explicit:
-            col = int(a["col"])
-        elif ctx is not None:
-            col = ctx["col"]
-        else:
-            raise DTLError(f"<{tag}> missing required attribute 'col'")
-        if row < 0 or (row_explicit and row >= self.screen.depth):
-            raise DTLError(
-                f"<{tag}> row {row} outside panel depth {self.screen.depth}"
-            )
+        if ctx is None:
+            raise DTLError(f"<{tag}> outside any flow box")
+        row = ctx["row"]
+        ctx["row"] = row + 1
+        col = ctx["col"]
         if row >= self.screen.depth:
             # An auto-flowed element ran past the panel bottom (a tall panel plus
             # our block spacing); clamp to the last row rather than abort the panel,
             # as the column clamp below does for the horizontal overflow.
             row = self.screen.depth - 1
-        if col < 0 or (col_explicit and col >= self.screen.width):
-            raise DTLError(
-                f"<{tag}> col {col} outside panel width {self.screen.width}"
-            )
         if col >= self.screen.width:
             # An auto-flowed column ran off the panel — our side-by-side
             # (dir=horiz) column math only approximates ISPDTLC's, so clamp to the
-            # edge rather than abort the whole panel (as the width clamp does too).
+            # edge rather than abort the whole panel.
             col = max(0, self.screen.width - 2)
-        if ctx is not None:
-            ctx["had_content"] = True   # real content — a later block skips before it
+        ctx["had_content"] = True   # real content — a later block skips before it
         return row, col, ctx
 
     # Unordered-list bullets by nesting depth (ISPF: o, then -, then --, …).
@@ -1999,31 +1972,13 @@ class _DTLParser(HTMLParser):
             emph = DisplayIntensity.HIGH
         else:
             emph = _intensity(a)
-        if "row" in a:
-            # Explicit position: emit content exactly as written (no wrap), so
-            # the bundled panels stay byte-for-byte identical (mono).
-            if "\n" in content:
-                content = re.sub(r"\s*\n\s*", " ", content).strip()
-            if not content.strip():
-                return
-            row, col, _ = self._resolve_pos(a, "info")
-            if runs is not None:
-                # A phrase inside this line is emphasised via SA runs (see #110):
-                # one Text.rich field whose surround uses the element's role colour
-                # and whose <hp> phrase carries its own colour/highlight. Mono
-                # renders as the plain concatenation, byte-for-byte unchanged.
-                self.screen.add(Text.rich(row, col, runs,
-                                          intensity=emph, role=role))
-            else:
-                self.screen.add(Text(row, col, content, emph, role=role))
-            return
         # Flowed text: normalize whitespace and word-wrap to the panel width.
         text = " ".join(content.split())
         if not text:
             return
         # ISPDTLC block spacing: a blank line precedes a flowed paragraph or panel
-        # instruction (see _skip_blank_before for the exact rule; COMPACT / an
-        # explicit row suppress it).
+        # instruction (see _skip_blank_before for the exact rule; COMPACT
+        # suppresses it).
         if tag in _BLANK_BEFORE_TAGS:
             self._skip_blank_before(a)
         row, col, ctx = self._resolve_pos(a, "info")
@@ -2230,23 +2185,15 @@ class _DTLParser(HTMLParser):
         # size via the column or the variable still render.
         default_ew = (ctx.get("entwidth") if ctx else None) or 8
         length = int(a.get("entwidth", a.get("dispmaxlen", default_ew)))
-        auto = ctx is not None and "row" not in a
         if fldcol + length > self.screen.width:
-            if auto:
-                # An auto-flowed field whose entry runs off the panel: our column
-                # math only approximates ISPDTLC's (side-by-side dir=horiz columns
-                # especially), so clamp it to the panel edge rather than abort the
-                # whole panel — an explicit position that overflows is still an
-                # author error and raises below.
-                length = max(1, self.screen.width - fldcol - 1)
-                if length < 1 or fldcol >= self.screen.width:
-                    fldcol = max(col, self.screen.width - 2)
-                    length = 1
-            else:
-                raise DTLError(
-                    f"<{tag}> field at col {fldcol} width {length} overflows "
-                    f"panel width {self.screen.width}"
-                )
+            # An auto-flowed field whose entry runs off the panel: our column math
+            # only approximates ISPDTLC's (side-by-side dir=horiz columns
+            # especially), so clamp it to the panel edge rather than abort the
+            # whole panel.
+            length = max(1, self.screen.width - fldcol - 1)
+            if length < 1 or fldcol >= self.screen.width:
+                fldcol = max(col, self.screen.width - 2)
+                length = 1
         if prompt_text:
             # The prompt/caption is a CUA element with its own role colour (green,
             # the field-prompt colour); DTL's COLOR on a <dtafld> colours the
