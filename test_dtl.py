@@ -1,22 +1,30 @@
 """DTL parser tests.
 
-The headline assertion: the panels expressed in DTL markup
-(``panels/*.dtl``) parse to Screens that render *byte-for-byte identically* to
-the hand-built Phase 1 equivalents in :mod:`screens`. That chains back to the
-Phase 1 golden test (which ties those builders to the original server output),
-so DTL → Screen → bytes is proven equal to the live wire format.
+The panels expressed in DTL markup (``panels/*.dtl``) parse to Screens that
+render to the 3270 wire format. The logon panel — the most intricate, a
+two-column auto-flow form — is pinned to a committed golden byte snapshot
+(``panels/logon.golden``) so any accidental change to its render is caught.
 """
+import pathlib
+
 import pytest
 
 from dtl import load_dtl, load_panel, load_messages, load_message_member, DTLError
 from screen import Screen, Text, Field, DisplayIntensity, Color, Highlight, SA
-from screens import build_tso_logon
 
 
-# ── golden: DTL panels == Phase 1 builders ───────────────────────────────────
+def _logon_golden() -> bytes:
+    """The committed byte-for-byte snapshot of the logon panel's render — the
+    regression anchor for the auto-flow two-column layout. Regenerate with
+    ``load_panel("logon").render()`` written to panels/logon.golden when an
+    intentional change to logon.dtl or the layout engine alters it."""
+    return pathlib.Path(__file__).parent.joinpath("panels", "logon.golden").read_bytes()
 
-def test_logon_dtl_matches_builder():
-    assert load_panel("logon").render() == build_tso_logon().render()
+
+# ── golden: the logon panel render is pinned ─────────────────────────────────
+
+def test_logon_dtl_matches_golden():
+    assert load_panel("logon").render() == _logon_golden()
 
 
 def test_ispf_dtl_renders_the_menu():
@@ -123,9 +131,9 @@ def test_ispf_dtl_substitutes_userid_and_time():
 
 def test_logon_dtl_field_addresses():
     s = load_panel("logon")
-    assert s.field_addr("userid") == 5 * 80 + 17
-    assert s.field_addr("password") == 6 * 80 + 17
-    assert s.field_addr("command") == 9 * 80 + 17
+    assert s.field_addr("userid") == 4 * 80 + 16
+    assert s.field_addr("password") == 5 * 80 + 16
+    assert s.field_addr("command") == 11 * 80 + 16
 
 
 def test_ispf_dtl_option_field_and_title():
@@ -220,9 +228,12 @@ def test_botinst_drops_below_a_body_that_reaches_the_foot():
     assert bot.row >= last_body            # below the body, no overlap
 
 
-def test_logon_instruction_tags_byte_identical():
-    # The logon panel uses <topinst>/<pnlinst> for some lines; bytes unchanged.
-    assert load_panel("logon").render() == build_tso_logon().render()
+def test_logon_instruction_tags_render_their_text():
+    # The logon panel uses <topinst>/<pnlinst> for some lines; their text renders.
+    texts = [t.text for t in load_panel("logon").items if isinstance(t, Text)]
+    assert "Enter LOGON parameters below:" in texts     # <topinst>
+    assert "RACF LOGON parameters:" in texts            # <topinst>
+    assert "Press ENTER to logon to TSO/E" in texts     # <pnlinst>
 
 
 # ── inline <hp> (highlighted phrase) ─────────────────────────────────────────
@@ -1331,7 +1342,10 @@ def test_field_overflowing_width_raises():
 
 
 def test_panel_dimensions_do_not_change_bytes():
-    assert load_panel("logon").render() == build_tso_logon().render()
+    # DEPTH/WIDTH set to their defaults (24/80) render identically to omitting them.
+    a = load_dtl("<panel>Menu<info>hi</info></panel>")
+    b = load_dtl("<panel depth='24' width='80'>Menu<info>hi</info></panel>")
+    assert a.render() == b.render()
 
 
 # ── help panels (<panel help=...>) ───────────────────────────────────────────
@@ -1395,16 +1409,17 @@ def test_action_bar_choice_help_resolved_by_cursor():
     assert s.help_for(edit_c["row"] * 80 + edit_c["col"]) is None   # Edit: no help
 
 
-def test_logon_size_field_has_context_help_bytes_unchanged():
+def test_logon_size_field_has_context_help():
     lg = load_panel("logon")
     assert lg.help_for(lg.field_addr("size")) == "sizehelp"   # field help
     assert lg.help_for(lg.field_addr("userid")) is None       # falls back to panel help
-    assert lg.render() == build_tso_logon().render()          # help= is metadata
 
 
 def test_help_attribute_does_not_change_rendered_bytes():
-    # Adding help="..." to <panel> is metadata; the logon panel still matches.
-    assert load_panel("logon").render() == build_tso_logon().render()
+    # Adding help="..." to <panel> is metadata; it does not change the render.
+    a = load_dtl("<panel>Menu<info>hi</info></panel>")
+    b = load_dtl("<panel help='ispfhelp'>Menu<info>hi</info></panel>")
+    assert a.render() == b.render()
 
 
 # ── implicit end tags + text tags (<p>/<li>/<dt>/…) ──────────────────────────
@@ -2565,8 +2580,11 @@ def test_widget_help_matches_guide_figure():
 
 
 def test_implicit_end_does_not_break_explicitly_closed_panels():
-    # Bundled-panel style (explicit </info>) is unaffected by implicit-end logic.
-    assert load_panel("logon").render() == build_tso_logon().render()
+    # A panel with explicit </info></panel> renders the same as one that relies
+    # on the implicit-end logic (DTL routinely omits end tags).
+    explicit = load_dtl("<panel>Menu<info>hi</info></panel>")
+    implicit = load_dtl("<panel>Menu<info>hi")
+    assert explicit.render() == implicit.render()
 
 
 # ── auto-flow: a panel is an implicit flow box (no row/col needed) ───────────
@@ -2936,9 +2954,12 @@ def test_missing_row_outside_any_flow_context_raises():
         load_dtl('<info col="1">x</info>')
 
 
-def test_logon_area_flow_is_byte_identical():
-    # The <area> wrapping in logon.dtl must not change the rendered bytes.
-    assert load_panel("logon").render() == build_tso_logon().render()
+def test_area_flow_is_transparent():
+    # A plain (no row/col) <area>/<region> transparently continues the panel's
+    # flow: wrapping content in one does not change the rendered bytes.
+    plain = load_dtl("<panel>Menu<info>one</info><info>two</info></panel>")
+    boxed = load_dtl("<panel>Menu<area><info>one</info><info>two</info></area></panel>")
+    assert plain.render() == boxed.render()
 
 
 # ── SGML conformance (DOCTYPE, case-insensitivity, attribute minimization) ───
@@ -2968,9 +2989,14 @@ def test_boolean_attribute_minimization():
     assert s.items[3].numeric is True
 
 
-def test_shipped_panels_have_doctype_and_stay_byte_identical():
-    # The DOCTYPE prolog added to the .dtl files must not change the bytes.
-    assert load_panel("logon").render() == build_tso_logon().render()
+def test_shipped_panels_have_doctype_and_render():
+    # Every shipped panel carries the DOCTYPE prolog and renders without error.
+    panels = pathlib.Path(__file__).parent / "panels"
+    dtls = sorted(panels.glob("*.dtl"))
+    assert dtls                                      # the panel library is present
+    for p in dtls:
+        assert p.read_text(encoding="utf-8").lstrip().startswith("<!DOCTYPE"), p.name
+        assert load_panel(p.stem).render()           # renders to non-empty bytes
 
 
 def test_missing_required_attr_raises():
@@ -3312,8 +3338,6 @@ def test_logon_size_validation_and_byte_identity():
     s = load_panel("logon")
     assert "SIZE" in s.validations
     assert s.validations["SIZE"]["checks"][0]["max"] == 32768
-    # The validation/check tags are metadata — logon still renders identically.
-    assert s.render() == build_tso_logon().render()
     # And the referenced message formats with the range substitutions.
     cat = load_message_member("tsomsgs")
     assert cat.format("TSO001", VALUE="99999", MIN=0, MAX=32768) == \

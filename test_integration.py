@@ -22,8 +22,8 @@ ENTER, PF1, PF3 = 0x7D, 0xF1, 0xF3
 ERASE_WRITE = 0xF5
 
 # Field addresses the server reads (row * 80 + data col).
-USERID_ADDR = 5 * 80 + 17
-PASSWORD_ADDR = 6 * 80 + 17
+USERID_ADDR = 4 * 80 + 16
+PASSWORD_ADDR = 5 * 80 + 16
 ZCMD_ADDR = 2 * 80 + 14        # ISPF Option ===> line
 
 

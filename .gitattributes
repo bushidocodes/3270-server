@@ -1,0 +1,3 @@
+# The logon render golden is raw 3270 wire bytes — never apply text/CRLF
+# conversion or it stops matching load_panel("logon").render().
+*.golden binary
