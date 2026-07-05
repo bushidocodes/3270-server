@@ -11,8 +11,8 @@ Relationship to authentic DTL
 We keep DTL's tag *names* and spirit. Positioning works both ways: every visible
 element may carry explicit ``row``/``col`` (predictable, and how the bundled
 panels are written), but a ``<panel>`` is also an implicit **flow box** — an
-element that omits ``row``/``col`` flows down from the top (and a ``<dtafld>``
-that omits ``fldcol`` gets its entry after the prompt). Explicit positions always
+element that omits ``row``/``col`` flows down from the top (and a ``<dtafld>``'s
+entry field follows its prompt). Explicit positions always
 win, so fully-positioned panels are unaffected. This is a pragmatic take on
 ``ISPDTLC``'s auto-layout (the genuinely hard part); the bundled panels position
 explicitly, while the conformance corpus (``tests/dtl_examples/``) exercises flow.
@@ -33,8 +33,8 @@ Supported tags
                                  and bound element positions at load time.
 ``<area row col>``               a flow box: contained elements that omit ``row``
 ``<region row col width dir>``   flow down from this origin (one line each), and
-                                 those that omit ``col`` use it. A field that omits
-                                 ``fldcol`` gets its entry one column after the
+                                 those that omit ``col`` use it. A field's entry
+                                 flows one column after its
                                  prompt. ``dir=horiz`` lays the box's children side
                                  by side instead of stacking them, and the enclosing
                                  flow resumes below the tallest column; ``width=n``
@@ -57,8 +57,8 @@ Supported tags
                                  ``<panel>`` (title text, width/depth, flow box).
 Panel title: the text after ``<panel ...>``/``<help ...>`` (before its first child)
 renders centered on row 0, with the body flowing beneath it.
-``<dtafld row col fldcol         a prompt plus an input field at ``fldcol``. The
-   datavar entwidth usage         prompt is the text of a nested ``<dtafldd>`` child
+``<dtafld row col datavar         a prompt plus an input field that follows it. The
+   entwidth usage                 prompt is the text of a nested ``<dtafldd>`` child
    pmtloc ...>``                  (authentic DTL) or the element's own text.
                                  ``usage=out`` makes it a protected display field
                                  (the variable's value); ``pmtloc=above`` puts the
@@ -67,15 +67,16 @@ renders centered on row 0, with the body flowing beneath it.
                                  (after the entry, sized by ``deswidth``) when the
                                  field has its own prompt text, else it stands in
                                  as the prompt.
-``<cmdarea row col fldcol         the command area (ISPF "Option/Command ===>"
+``<cmdarea row col                the command area (ISPF "Option/Command ===>"
    entwidth ...>``                line). Renders like ``<dtafld>``; ``datavar``
                                  defaults to ``ZCMD`` and the field is recorded
                                  as ``Screen.command_field``.
 ``<selfld row col type>``        a list of menu choices; each ``<choice>`` is laid
                                  out on its own row, auto-incrementing.
-``<choice num name match          one menu row: number, name, description. The
-   checkvar unavail>desc``        selection value (``match``, default ``num``) is
-                                 recorded in ``Screen.selections`` so the dialog can
+``<choice selchar name match      one menu row: number, name, description. The
+   checkvar unavail>desc``        selection value (``match``, default the
+                                 auto-number or ``selchar``) is recorded in
+                                 ``Screen.selections`` so the dialog can
                                  validate a typed option; ``checkvar`` lands the
                                  cursor on the current choice; ``unavail`` greys a
                                  choice out and makes it unselectable.
@@ -2198,9 +2199,7 @@ class _DTLParser(HTMLParser):
             row += 1
             if ctx is not None:
                 ctx["row"] += 1            # the field occupies a second line
-        if "fldcol" in a:
-            fldcol = int(a["fldcol"])
-        elif pmt_above:
+        if pmt_above:
             fldcol = col                   # under the prompt, at the base column
         elif pmtwidth:
             # Entry at the fixed prompt column, past the prompt's own trailing
@@ -2217,7 +2216,7 @@ class _DTLParser(HTMLParser):
         # size via the column or the variable still render.
         default_ew = (ctx.get("entwidth") if ctx else None) or 8
         length = int(a.get("entwidth", a.get("dispmaxlen", default_ew)))
-        auto = ctx is not None and "row" not in a and "fldcol" not in a
+        auto = ctx is not None and "row" not in a
         if fldcol + length > self.screen.width:
             if auto:
                 # An auto-flowed field whose entry runs off the panel: our column
@@ -2553,10 +2552,9 @@ class _DTLParser(HTMLParser):
         # SELCHAR is the standard way to override that value (a menu number/letter
         # placed in front of the choice, e.g. option 8 in a 1..5,8 menu, or X):
         # its 'char(s),n' form gives the char(s); the trailing ,n (HIDE sizing) is
-        # unused here. NUM is our non-standard equivalent, kept for the not-yet-
-        # converted bundled menus.
+        # unused here.
         sel = a.get("selchar")
-        disp = sel.split(",")[0].strip() if sel is not None else a.get("num")
+        disp = sel.split(",")[0].strip() if sel is not None else None
         auto_num = disp is None and not sf.get("multi")
         num = str(sf["count"] + 1) if auto_num else (disp or "")
         # On the first choice, a column-less single-choice field whose choices are

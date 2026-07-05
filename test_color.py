@@ -88,7 +88,7 @@ def test_dtl_dtafld_color_is_on_the_field_not_the_prompt():
     # DTL's COLOR on a <dtafld> colours the entry field; the caption/prompt is a
     # CUA element with its own (default) colour.
     s = load_panel_src(
-        '<dtafld row="1" col="1" fldcol="20" datavar="u" entwidth="8"'
+        '<dtafld row="1" col="1" datavar="u" entwidth="8"'
         ' color="turq">Name ===></dtafld>')
     prompt = next(i for i in s.items if isinstance(i, Text))
     field = next(i for i in s.items if isinstance(i, Field))
@@ -103,14 +103,14 @@ def test_dtl_color_keywords():
                      ("green", Color.GREEN), ("pink", Color.PINK),
                      ("yellow", Color.YELLOW), ("turq", Color.TURQUOISE)]:
         s = load_panel_src(
-            f'<dtafld row="1" col="1" fldcol="10" datavar="u" color="{kw}">X</dtafld>')
+            f'<dtafld row="1" col="1" datavar="u" color="{kw}">X</dtafld>')
         field = next(i for i in s.items if isinstance(i, Field))
         assert field.color is want, kw
 
 
 def test_dtl_color_percent_variable():
     # COLOR=%VAR takes its value from a dialog variable (like &VAR substitution).
-    s = load_dtl('<panel><dtafld row="1" col="1" fldcol="10" datavar="u"'
+    s = load_dtl('<panel><dtafld row="1" col="1" datavar="u"'
                  ' color="%HILITEC">X</dtafld></panel>', HILITEC="red")
     field = next(i for i in s.items if isinstance(i, Field))
     assert field.color is Color.RED
@@ -129,7 +129,7 @@ def test_dtl_info_takes_cua_colour_not_explicit_color():
 
 def test_dtl_hilite_attribute():
     s = load_panel_src(
-        '<dtafld row="1" col="1" fldcol="10" datavar="u"'
+        '<dtafld row="1" col="1" datavar="u"'
         ' color="green" hilite="reverse">X</dtafld>')
     field = next(i for i in s.items if isinstance(i, Field))
     assert field.highlight is Highlight.REVERSE
@@ -138,7 +138,7 @@ def test_dtl_hilite_attribute():
 def test_dtl_selfld_colors_choices():
     s = load_panel_src(
         '<selfld row="3" color="turq">'
-        '<choice num="1" name="A">Alpha</choice></selfld>')
+        '<choice selchar="1" name="A">Alpha</choice></selfld>')
     texts = [i for i in s.items if isinstance(i, Text)]
     assert texts and all(t.color is Color.TURQUOISE for t in texts)
 
