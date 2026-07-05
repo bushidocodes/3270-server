@@ -2,8 +2,8 @@
 <!-- ISPF 7.1.0 Primary Option Menu, in Dialog Tag Language (DTL subset). Auto-flow
      (ISPDTLC-idiomatic): <selfld type=menu> with no grid, choices carry their
      option value as SELCHAR (0, gaps at 8, and X), and the keyword+description are
-     folded into the padded choice text. The two-column User ID/Time footer keeps
-     explicit col= so the second column stays aligned regardless of &ZUSER's value.
+     folded into the padded choice text. The two-column User ID/Time footer is a
+     <region dir=horiz> of two stacked <region>s (no explicit row/col).
      &ZUSER (padded to 8) and &ZTIME are substituted at load time. -->
 <panel name="ispfmenu" help="ispfhelp">ISPF Primary Option Menu
   <cmdarea cursor="yes">Option ===></cmdarea>
@@ -28,12 +28,18 @@
     <choice selchar="X">Exit             Terminate ISPF using log/list defaults</choice>
   </selfld>
 
-  <info row="20" col="1">Enter <hp color="turq">X</hp> or <hp color="turq">PF3</hp> to terminate ISPF.</info>
-  <info row="21" col="1">User ID . . :  &ZUSER</info>
-  <info row="21" col="41">Time. . . . :  &ZTIME</info>
-  <info row="22" col="1">System ID . :  SY1     </info>
-  <info row="22" col="41">ISPF Ver. . :  7.1.0   </info>
-  <info row="23" col="0" intensity="high" fill="-" width="79"/>
+  <info>Enter <hp color="turq">X</hp> or <hp color="turq">PF3</hp> to terminate ISPF.</info>
+  <region dir="horiz">
+    <region>
+      <info>User ID . . :  &ZUSER</info>
+      <info>System ID . :  SY1</info>
+    </region>
+    <region>
+      <info>Time. . . . :  &ZTIME</info>
+      <info>ISPF Ver. . :  7.1.0</info>
+    </region>
+  </region>
+  <divider/>
 
   <keyl name="ISPFKEYS">
     <keyi key="PF1"  cmd="HELP">Help</keyi>
