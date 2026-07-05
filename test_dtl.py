@@ -2187,11 +2187,13 @@ def test_choice_reference_figure_snapshot():
         " Name . . . .  _________________________ (Last, First, M.I.)",
         " Address . .   _________________________",
         " " + "-" * 78,
+        "",                                              # blank before the selection field
         " Choose one of the following  Check valid branches",
         " __  1.  New                   _ North Branch",
         "     2.  Renewal               _ South Branch",
         "     3.  Replacement           _ East Branch",
         "                               _ West Branch",
+        "",                                              # blank before the command area
         " Enter a command  ________",
     ])
     assert _ascii_snapshot(load_dtl(_CHOICE_FIGURE_SRC)) == expected
@@ -2278,6 +2280,7 @@ def test_panel_reference_figure_snapshot():
         "     5.  Paris, TX",
         "     6.  Rome, NY",
         "     7.  Venice, FL",
+        "",                                          # blank before the command area
         "   ________",
     ])
     assert _ascii_snapshot(s) == expected
@@ -2399,6 +2402,7 @@ def test_lstfld_reference_figure_snapshot():
         " Sally            Forth            N    ____________   _",
         " Melba            Toast            T    ____________   _",
         " " + "*" * 29 + " BOTTOM OF DATA " + "*" * 29,   # table end reached
+        "",                                          # blank before the command area
         "   ________",
     ])
 
@@ -2431,6 +2435,7 @@ def test_lstgrp_nested_groups_reference_figure_snapshot():
         " Duff          Dean          T  Junior      __      __",
         " Gillihan      Dana          L  Freshman    __      __",
         " " + "*" * 24 + " BOTTOM OF DATA " + "*" * 24,
+        "",                                          # blank before the command area
         "   ________",
     ])
 
