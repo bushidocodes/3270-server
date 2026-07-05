@@ -1,13 +1,13 @@
 <!DOCTYPE DM SYSTEM>
-<!-- ISPF Browse panel. A header frame only: the title (&BRTITLE, e.g.
-     "BROWSE  ISPF.ISPPLIB(LOGON)  Line 00000001") at row 0. The server
-     (server._show_browse) injects the member's source lines below it and the
-     footer rule on the last row, sized to the terminal's screen (a taller/wider
-     alternate screen shows more lines), and pages them with PF7/PF8; PF3 exits
-     back to the entry panel. -->
-<panel name="browse" help="ispfhelp">Browse
-  <info row="0" col="0" intensity="high">&BRTITLE</info>
-
+<!-- ISPF Browse panel. A server-driven frame: server._show_browse injects the
+     header status line (verb + ISPF.ISPPLIB(member) + "Line NNNNNNNN") on row 0,
+     the member's source lines below it, and the footer rule on the last row,
+     sized to the terminal's screen (a taller/wider alternate screen shows more
+     lines), and pages them with PF7/PF8; PF3 exits back to the entry panel.
+     The header/footer are a space-padded status line the server builds and
+     positions, so this panel is title-less (TITLINE=NO) and carries only its
+     key list — no non-standard row/col of its own. -->
+<panel name="browse" titline="no" help="ispfhelp">Browse
   <keyl name="BRKEYS">
     <keyi key="PF3" cmd="EXIT">Exit</keyi>
     <keyi key="PF15" cmd="EXIT">Exit</keyi>

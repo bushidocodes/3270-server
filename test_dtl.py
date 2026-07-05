@@ -1141,15 +1141,16 @@ def test_edit_entry_and_workplace_panels_load():
 
 def test_view_entry_and_browse_panels_load():
     # Option 1 (View): the entry panel has a `member` input field and surfaces
-    # &VIEWMSG; the browse panel frames &BRTITLE/&BRFOOT with PF3=EXIT.
+    # &VIEWMSG; the browse panel is a title-less key-list frame (the server
+    # injects the header/footer status band — see _show_browse).
     entry = load_panel("viewentry", VIEWMSG="MEMBER FOO NOT FOUND")
     assert entry.field_addr("member") is not None
     assert entry.command_for("PF3") == "EXIT"
     assert "MEMBER FOO NOT FOUND" in [t.text for t in entry.items if isinstance(t, Text)]
 
-    browse = load_panel("browse", BRTITLE="BROWSE  ISPF.ISPPLIB(LOGON)", BRFOOT="PF3=Exit")
-    titles = [t.text for t in browse.items if isinstance(t, Text)]
-    assert "BROWSE  ISPF.ISPPLIB(LOGON)" in titles
+    browse = load_panel("browse")
+    assert browse.title == "Browse"                      # metadata only (TITLINE=NO)
+    assert [t for t in browse.items if isinstance(t, Text)] == []  # no on-screen body
     assert browse.command_for("PF3") == "EXIT"
 
 
