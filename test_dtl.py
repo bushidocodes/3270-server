@@ -327,15 +327,13 @@ def test_hp_surrounding_text_keeps_the_element_role():
     assert it.color is None           # field base uses the role colour, not turq
 
 
-def test_info_intensity_and_fill():
+def test_info_intensity():
     s = load_dtl(
         '<panel>'
         '<info row="0" col="0" intensity="high">hi</info>'
-        '<info row="1" col="0" fill="-" width="5"/>'
         '</panel>'
     )
     assert s.items[0] == Text(0, 0, "hi", DisplayIntensity.HIGH)
-    assert s.items[1] == Text(1, 0, "-----", DisplayIntensity.NORMAL)
 
 
 def test_dtafld_emits_prompt_then_field():
@@ -859,7 +857,7 @@ def test_ispf_panel_has_command_table():
 def test_action_bar_renders_labels_and_records_pulldowns():
     s = load_dtl(
         '<panel>'
-        '<ab row="0" col="1" gap="3">'
+        '<ab row="0" col="1">'
         '<abc>Menu<pdc>Exit<action run="exit"></pdc></abc>'
         '<abc>Help<pdc>About<action run="passthru"></pdc></abc>'
         '</ab>'
@@ -969,7 +967,7 @@ def test_pulldown_item_underlines_its_mnemonic():
 def test_action_choice_at_maps_cursor_to_choice():
     s = load_dtl(
         '<panel>'
-        '<ab row="0" col="1" gap="3">'
+        '<ab row="0" col="1">'
         '<abc>Menu<pdc>A<action run="x"></pdc></abc>'
         '<abc>Help<pdc>B<action run="y"></pdc></abc>'
         '</ab>'
@@ -2041,7 +2039,7 @@ def test_list_field_row_status_shows_and_is_suppressed_under_a_full_width_title(
     assert any(t.text == "ROW 1 TO 3 OF 3" for t in row0)     # status present
     # A full-width element on row 0 (a title rule) suppresses the status.
     s2 = load_dtl('<panel name="p" width="60"><area>'
-                  '<info row="0" col="0" fill="-" width="59"/><lstfld>'
+                  '<divider row="0" col="0"/><lstfld>'
                   '<lstcol datavar=a colwidth=4>A</lstfld></area></panel>',
                   rows=[{"a": "1"}])
     assert not any("ROW " in getattr(t, "text", "") for t in s2.items)
@@ -2636,17 +2634,17 @@ def test_explicit_position_still_wins_under_autoflow():
 
 def test_area_flows_rows_and_derives_fldcol():
     s = load_dtl(
-        '<panel><area row="5" col="1" fldgap="2">'
+        '<panel><area row="5" col="1">'
         '<dtafld datavar="userid" entwidth="8">Userid   ===></dtafld>'
         '<dtafld datavar="pw" entwidth="8">Password ===></dtafld>'
         '</area></panel>'
     )
     # Prompts at col 1 on flowing rows 5, 6; entries after the 13-char prompt
-    # plus fldgap=2 → col 16.
+    # plus the default 1-col gap → col 15.
     assert s.items[0] == Text(5, 1, "Userid   ===>", DisplayIntensity.NORMAL)
-    assert (s.items[1].row, s.items[1].col, s.items[1].name) == (5, 16, "userid")
+    assert (s.items[1].row, s.items[1].col, s.items[1].name) == (5, 15, "userid")
     assert s.items[2] == Text(6, 1, "Password ===>", DisplayIntensity.NORMAL)
-    assert (s.items[3].row, s.items[3].col, s.items[3].name) == (6, 16, "pw")
+    assert (s.items[3].row, s.items[3].col, s.items[3].name) == (6, 15, "pw")
 
 
 def test_dtacol_aligns_entries_at_a_fixed_prompt_column():
@@ -2729,8 +2727,7 @@ def test_dtafld_pmtfmt_ispf_and_none():
 def test_size_attributes_tolerate_star_and_list_forms():
     # Hardening sweep: size attributes the docs allow as * / ** / quoted-list were
     # parsed with a bare int() and crashed. They must now fall back gracefully
-    # (INFO fill WIDTH, MSGMBR WIDTH, LSTCOL COLWIDTH, SELFLD ENTWIDTH).
-    load_dtl('<panel><info row="1" col="1" fill="-" width="*"/></panel>')
+    # (MSGMBR WIDTH, LSTCOL COLWIDTH, SELFLD ENTWIDTH).
     load_dtl('<msgmbr name="m" width="*"><msg msgid="X1">hi</msg></msgmbr>')
     load_dtl('<panel><selfld row="1" col="1" entwidth="2 2"><choice>A</selfld></panel>')
     # a LSTCOL with COLWIDTH=* falls back to the heading width (no crash)
