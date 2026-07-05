@@ -3,20 +3,20 @@
      <lstfld> table is populated at runtime from the actual panel library
      (server._library_members lists panels/*.dtl as ISPPLIB members). Read-only
      (usage=out). Point-and-shoot: server._show_member_list maps the cursor row
-     to a member so Enter browses it. PF3 returns to the Utility panel. -->
+     to a member so Enter browses it. PF3 returns to the Utility panel.
+     Auto-flow (ISPDTLC-idiomatic): no row/col; the title centres itself and the
+     <lstfld> flows below the top instruction (its data rows start on row 5, which
+     the server's paging assumes). -->
 <panel name="memlist" help="ispfhelp">Library - Member List
-  <info row="0" col="0" intensity="high">--------------------------- ISPF.ISPPLIB - Member List -------------------------</info>
-  <topinst row="2" col="1">Put the cursor on a member and press Enter to browse it; PF3 returns.</topinst>
+  <topinst>Put the cursor on a member and press Enter to browse it; PF3 returns.</topinst>
 
-  <area row="4" col="2">
-    <lstfld>
-      <lstgrp headline="yes">Members
-        <lstcol datavar="mname" usage="out" colwidth="10">Name
-        <lstcol datavar="mtype" usage="out" colwidth="11">Type
-        <lstcol datavar="mdesc" usage="out" colwidth="32">Description
-      </lstgrp>
-    </lstfld>
-  </area>
+  <lstfld>
+    <lstgrp headline="yes">Members
+      <lstcol datavar="mname" usage="out" colwidth="10">Name
+      <lstcol datavar="mtype" usage="out" colwidth="11">Type
+      <lstcol datavar="mdesc" usage="out" colwidth="32">Description
+    </lstgrp>
+  </lstfld>
   <!-- The footer line (&MEMFOOT) and the rule below it are placed by the server
        (server._show_member_list) on the last two rows of whatever screen we
        render on, so a taller alternate screen lists more members per page. -->
