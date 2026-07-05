@@ -505,6 +505,8 @@ class _DTLParser(HTMLParser):
         elif tag in ("dl", "parml"):
             # A definition/parameter list carries its term-column width (tsize)
             # and break style; <dt>/<dd> (<pt>/<pd>) entries lay out against it.
+            # ISPDTLC inserts a blank line before the list (COMPACT/NOSKIP suppress).
+            self._skip_blank_before(a)
             self._lists.append({
                 "type": tag, "n": 0,
                 "tsize": int(a["tsize"]) if "tsize" in a else self._DL_TSIZE,
@@ -2078,12 +2080,14 @@ class _DTLParser(HTMLParser):
 
     def _skip_blank_before(self, a):
         """ISPDTLC block spacing: insert a leading blank line before a flowed block
-        element (paragraph, panel instruction, command area, selection field). Added
-        only when the box already holds content (so the first block gets none) and
-        the row above is not already blank (so an existing gap isn't doubled). An
-        explicit ``row`` or COMPACT suppresses it. Advances the flow row cursor."""
+        element (paragraph, panel instruction, command area, selection field,
+        definition list). Added only when the box already holds content (so the
+        first block gets none) and the row above is not already blank (so an
+        existing gap isn't doubled). An explicit ``row``, COMPACT, or NOSKIP
+        suppresses it. Advances the flow row cursor."""
         ctx = self._areas[-1] if self._areas else None
         if (ctx is not None and "row" not in a and not _bool_attr(a, "compact")
+                and not _bool_attr(a, "noskip")
                 and ctx.get("had_content") and ctx["row"] >= 1
                 and ctx["row"] + 1 < self.screen.depth   # don't push off the panel
                 and self._row_occupied(ctx["row"] - 1)):
