@@ -193,20 +193,18 @@ def test_logon_error_is_red_on_color_terminal():
 
 def test_cua_menu_colours_match_zos():
     """The ISPF menu is coloured by CUA element role, matching a real z/OS
-    Primary Option Menu: white title/numbers, turquoise keywords/entry, green
-    prompt/descriptions/text, blue separator rules."""
+    Primary Option Menu: white selection numbers, turquoise entry field, green
+    prompt/choice-text/text, blue separator rules."""
     s = load_panel("ispf", ZUSER="IBMUSER ", ZTIME="13:45")
     by_role = {}
     for it in s.items:
         r = getattr(it, "role", None)
         if r and r not in by_role:
             by_role[r] = _role_colour(it.color, it.role)
-    assert by_role["title"] is Color.WHITE
     assert by_role["prompt"] is Color.GREEN
     assert by_role["field"] is Color.TURQUOISE
-    assert by_role["num"] is Color.WHITE
-    assert by_role["name"] is Color.TURQUOISE
-    assert by_role["desc"] is Color.GREEN
+    assert by_role["num"] is Color.WHITE          # the selection number/letter
+    assert by_role["desc"] is Color.GREEN         # keyword+description choice text
     assert by_role["text"] is Color.GREEN
     assert by_role["rule"] is Color.BLUE
 

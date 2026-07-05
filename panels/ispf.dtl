@@ -1,33 +1,31 @@
 <!DOCTYPE DM SYSTEM>
-<!-- ISPF 7.1.0 Primary Option Menu, in Dialog Tag Language (DTL subset).
-     Renders byte-for-byte identically to screens.build_ispf_menu().
-     &ZUSER (padded to 8) and &ZTIME are ISPF dialog variables substituted at
-     load time; the transient short message (row 2) is injected at runtime. -->
+<!-- ISPF 7.1.0 Primary Option Menu, in Dialog Tag Language (DTL subset). Auto-flow
+     (ISPDTLC-idiomatic): <selfld type=menu> with no grid, choices carry their
+     option value as SELCHAR (0, gaps at 8, and X), and the keyword+description are
+     folded into the padded choice text. The two-column User ID/Time footer keeps
+     explicit col= so the second column stays aligned regardless of &ZUSER's value.
+     &ZUSER (padded to 8) and &ZTIME are substituted at load time. -->
 <panel name="ispfmenu" help="ispfhelp">ISPF Primary Option Menu
-  <info row="0" col="0" intensity="high">-------------------------- ISPF Primary Option Menu ---------------------------</info>
+  <cmdarea cursor="yes">Option ===></cmdarea>
 
-  <!-- Command area: the option line. datavar defaults to ZCMD (ISPF convention);
-       the server reads the typed option via Screen.command_value(). -->
-  <cmdarea row="2" col="1" fldcol="13" entwidth="6" cursor="yes">Option ===></cmdarea>
-
-  <selfld row="4" numcol="1" namecol="4" desccol="21" numwidth="2" numintensity="high">
-    <choice num="0"  name="  Settings      ">  Terminal and user parameters</choice>
-    <choice num="1"  name="  View          ">  Display source data or listings</choice>
-    <choice num="2"  name="  Edit          ">  Create or change source data</choice>
-    <choice num="3"  name="  Utilities     ">  Perform utility functions</choice>
-    <choice num="4"  name="  Foreground    ">  Interactive language processing</choice>
-    <choice num="5"  name="  Batch         ">  Submit job for language processing</choice>
-    <choice num="6"  name="  Command       ">  Enter TSO or Workstation commands</choice>
-    <choice num="7"  name="  Dialog Test   ">  Perform dialog testing</choice>
-    <choice num="9"  name="  IBM Products  ">  IBM program development products</choice>
-    <choice num="10" name="  SCLM          ">  SW Configuration Library Manager</choice>
-    <choice num="11" name="  Workplace     ">  ISPF Object/Action Workplace</choice>
-    <choice num="12" name="  z/OS System   ">  z/OS system programmer applications</choice>
-    <choice num="13" name="  z/OS User     ">  z/OS user applications</choice>
+  <selfld type="menu">
+    <choice selchar="0">Settings         Terminal and user parameters</choice>
+    <choice selchar="1">View             Display source data or listings</choice>
+    <choice selchar="2">Edit             Create or change source data</choice>
+    <choice selchar="3">Utilities        Perform utility functions</choice>
+    <choice selchar="4">Foreground       Interactive language processing</choice>
+    <choice selchar="5">Batch            Submit job for language processing</choice>
+    <choice selchar="6">Command          Enter TSO or Workstation commands</choice>
+    <choice selchar="7">Dialog Test      Perform dialog testing</choice>
+    <choice selchar="9">IBM Products     IBM program development products</choice>
+    <choice selchar="10">SCLM             SW Configuration Library Manager</choice>
+    <choice selchar="11">Workplace        ISPF Object/Action Workplace</choice>
+    <choice selchar="12">z/OS System      z/OS system programmer applications</choice>
+    <choice selchar="13">z/OS User        z/OS user applications</choice>
   </selfld>
 
-  <selfld row="18" numcol="1" namecol="4" desccol="21" numwidth="2" numintensity="high">
-    <choice num="X" name="  Exit          ">  Terminate ISPF using log/list defaults</choice>
+  <selfld type="menu">
+    <choice selchar="X">Exit             Terminate ISPF using log/list defaults</choice>
   </selfld>
 
   <info row="20" col="1">Enter <hp color="turq">X</hp> or <hp color="turq">PF3</hp> to terminate ISPF.</info>
@@ -37,25 +35,18 @@
   <info row="22" col="41">ISPF Ver. . :  7.1.0   </info>
   <info row="23" col="0" intensity="high" fill="-" width="79"/>
 
-  <!-- Keylist: PF3/PF15 exit ISPF (back to the logon panel). Metadata only. -->
   <keyl name="ISPFKEYS">
     <keyi key="PF1"  cmd="HELP">Help</keyi>
     <keyi key="PF3"  cmd="EXIT">Exit</keyi>
     <keyi key="PF15" cmd="EXIT">Exit</keyi>
   </keyl>
 
-  <!-- Command table: commands the option line recognises (vs. invalid options).
-       BYE is an alias for EXIT (leaves ISPF); KEYLIST matches from 3 chars. -->
   <cmdtbl applid="ISR">
     <cmd name="PANELID">Toggle panel id<cmdact action="passthru"></cmd>
     <cmd name="KEYLIST" altdescr="Edit keylist">KEY<t>LIST<cmdact action="passthru"></cmd>
     <cmd name="BYE">Leave ISPF<cmdact action="alias exit"></cmd>
   </cmdtbl>
 
-  <!-- )PROC: route the typed option (ZCMD) to a selection string, ISPF-style.
-       PANEL(x) enters panel x; PGM(x) runs a program; EXIT leaves ISPF. The
-       server reads Screen.selection_targets to dispatch (see #55). Renders
-       nothing. -->
   <source type="proc">
     &ZSEL = TRANS( TRUNC(&ZCMD,'.')
         0,'PANEL(settings)'

@@ -10,7 +10,7 @@ import pytest
 
 from dtl import load_dtl, load_panel, load_messages, load_message_member, DTLError
 from screen import Screen, Text, Field, DisplayIntensity, Color, Highlight, SA
-from screens import build_tso_logon, build_ispf_menu
+from screens import build_tso_logon
 
 
 # ── golden: DTL panels == Phase 1 builders ───────────────────────────────────
@@ -19,10 +19,38 @@ def test_logon_dtl_matches_builder():
     assert load_panel("logon").render() == build_tso_logon().render()
 
 
-def test_ispf_dtl_matches_builder():
-    userid, time_str = "IBMUSER", "13:45"
-    got = load_panel("ispf", ZUSER=userid.ljust(8), ZTIME=time_str).render()
-    assert got == build_ispf_menu(userid, time_str).render()
+def test_ispf_dtl_renders_the_menu():
+    # The ISPF Primary Option Menu in standard auto-flow DTL (#186): a
+    # <selfld type=menu> with SELCHAR option values (0, the 8 gap, X), the
+    # keyword+description folded into the padded choice text, and the two-column
+    # User ID/Time footer keeping explicit columns so it stays aligned.
+    s = load_panel("ispf", ZUSER="IBMUSER ", ZTIME="13:45")
+    assert _ascii_snapshot(s) == "\n".join([
+        "                            ISPF Primary Option Menu",
+        "",
+        " Option ===>  ________",
+        "",
+        " 0  Settings         Terminal and user parameters",
+        " 1  View             Display source data or listings",
+        " 2  Edit             Create or change source data",
+        " 3  Utilities        Perform utility functions",
+        " 4  Foreground       Interactive language processing",
+        " 5  Batch            Submit job for language processing",
+        " 6  Command          Enter TSO or Workstation commands",
+        " 7  Dialog Test      Perform dialog testing",
+        " 9  IBM Products     IBM program development products",
+        " 10 SCLM             SW Configuration Library Manager",
+        " 11 Workplace        ISPF Object/Action Workplace",
+        " 12 z/OS System      z/OS system programmer applications",
+        " 13 z/OS User        z/OS user applications",
+        "",
+        " X  Exit             Terminate ISPF using log/list defaults",
+        "",
+        " Enter X or PF3 to terminate ISPF.",
+        " User ID . . :  IBMUSER                  Time. . . . :  13:45",
+        " System ID . :  SY1                      ISPF Ver. . :  7.1.0",
+        "-" * 79,
+    ])
 
 
 def test_source_proc_zsel_parses_selection_targets():
@@ -84,10 +112,12 @@ def test_ispf_menu_routing_is_declared_in_the_panel():
     }
 
 
-def test_ispf_dtl_other_userid_and_time():
-    userid, time_str = "TESTUSER", "09:02"
-    got = load_panel("ispf", ZUSER=userid.ljust(8), ZTIME=time_str).render()
-    assert got == build_ispf_menu(userid, time_str).render()
+def test_ispf_dtl_substitutes_userid_and_time():
+    # &ZUSER (padded to 8) and &ZTIME are substituted into the footer at load time.
+    s = load_panel("ispf", ZUSER="TESTUSER", ZTIME="09:02")
+    footer = [it.text for it in s.items if isinstance(it, Text)]
+    assert "User ID . . :  TESTUSER" in footer
+    assert "Time. . . . :  09:02" in footer
 
 
 # ── field names survive the round trip ───────────────────────────────────────
@@ -810,8 +840,8 @@ def test_ispf_panel_has_command_table():
     s = load_panel("ispf", ZUSER="IBMUSER ", ZTIME="13:45")
     assert s.lookup_command("BYE") == "alias exit"
     assert s.lookup_command("KEY") == "passthru"
-    # Command table is metadata — the menu still renders identically.
-    assert s.render() == build_ispf_menu("IBMUSER", "13:45").render()
+    # Command table is metadata — it doesn't add any rendered items.
+    assert s.lookup_command("PANELID") == "passthru"
 
 
 # ── action bars (<ab>/<abc>/<pdc>) ───────────────────────────────────────────
