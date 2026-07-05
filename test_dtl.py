@@ -11,6 +11,7 @@ import pytest
 
 from dtl import load_dtl, load_panel, load_messages, load_message_member, DTLError
 from screen import Screen, Text, Field, DisplayIntensity, Color, Highlight, SA
+from server import to_ebcdic
 
 
 def _logon_golden() -> bytes:
@@ -1895,6 +1896,45 @@ def test_list_column_display_no_is_non_display():
     # Headings are still visible over the non-display columns.
     heads = {it.text for it in s.items if getattr(it, "role", None) == "heading"}
     assert {"User", "Pass", "Secret"} <= heads
+
+
+def test_list_column_pad_fills_empty_input_cell():
+    # #234: PAD/PADC set the fill character for an empty input cell. PADC wins over
+    # PAD; NULLS → a null fill; USER (profile pad, unavailable here) → the default
+    # space fill; %varname is resolved; a padless column stays space-filled.
+    def field(attrs, **subs):
+        s = load_dtl('<panel name="p"><area><lstfld>'
+                     f'<lstcol datavar=a colwidth=5 {attrs}>A'
+                     '</lstfld></area></panel>', **subs)
+        return next(it for it in s.items if isinstance(it, Field))
+
+    # A literal pad character fills the whole empty 5-wide cell on the wire.
+    f = field('pad="."')
+    assert f.pad == "."
+    buf = bytearray(); f.render(buf)
+    assert to_ebcdic(".....") in bytes(buf)        # displayed pad run
+
+    assert field('pad=NULLS').pad == "\x00"        # NULLS → null fill
+    assert field('pad=USER').pad is None           # profile pad unavailable
+    assert field('').pad is None                   # no PAD → default (space)
+
+    # PADC overrides PAD when both are given.
+    assert field('pad="." padc="*"').pad == "*"
+
+    # %varname resolves against the dialog variables.
+    assert field('pad="%mypad"', mypad="#").pad == "#"
+
+
+def test_list_column_pad_is_byte_identical_without_the_attribute():
+    # A <lstcol> with no PAD renders exactly as before (space fill), so the change
+    # is additive for every existing table.
+    markup = ('<panel name="p"><area><lstfld>'
+              '<lstcol datavar=a colwidth=5>A'
+              '<lstcol datavar=b colwidth=5>B'
+              '</lstfld></area></panel>')
+    data = load_dtl(markup).render()
+    # An empty input cell is space-filled: a run of EBCDIC spaces inside the field.
+    assert to_ebcdic("     ") in data
 
 
 def test_list_column_format_positions_heading_and_data():
