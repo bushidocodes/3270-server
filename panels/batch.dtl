@@ -3,8 +3,8 @@
      (not yet implemented). Driven by server._show_submenu; PF3 returns. Auto-flow
      (ISPDTLC-idiomatic): <selfld type=menu>, auto-numbered, no row/col or grid;
      the keyword+description are folded into the padded choice text. -->
-<panel name="batch" help="ispfhelp">Batch Selection Panel
-  <cmdarea cursor="yes">Option ===></cmdarea>
+<panel name="batch" help="ispfhelp" cursor="ZCMD">Batch Selection Panel
+  <cmdarea>Option ===></cmdarea>
 
   <selfld type="menu">
     <choice>Assembler        Assemble a source program as a batch job</choice>

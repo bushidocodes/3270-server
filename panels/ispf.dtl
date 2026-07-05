@@ -5,8 +5,8 @@
      folded into the padded choice text. The two-column User ID/Time footer is a
      <region dir=horiz> of two stacked <region>s (no explicit row/col).
      &ZUSER (padded to 8) and &ZTIME are substituted at load time. -->
-<panel name="ispfmenu" help="ispfhelp">ISPF Primary Option Menu
-  <cmdarea cursor="yes">Option ===></cmdarea>
+<panel name="ispfmenu" help="ispfhelp" cursor="ZCMD">ISPF Primary Option Menu
+  <cmdarea>Option ===></cmdarea>
 
   <selfld type="menu">
     <choice selchar="0">Settings         Terminal and user parameters</choice>

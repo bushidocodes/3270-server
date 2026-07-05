@@ -3,8 +3,8 @@
      (not yet implemented). Driven by server._show_submenu; PF3 returns. Auto-flow
      (ISPDTLC-idiomatic): <selfld type=menu>, auto-numbered, no row/col or grid;
      the keyword+description are folded into the padded choice text. -->
-<panel name="sclm" help="ispfhelp">SCLM Main Menu
-  <cmdarea cursor="yes">Option ===></cmdarea>
+<panel name="sclm" help="ispfhelp" cursor="ZCMD">SCLM Main Menu
+  <cmdarea>Option ===></cmdarea>
 
   <selfld type="menu">
     <choice>View             View an SCLM-controlled member</choice>

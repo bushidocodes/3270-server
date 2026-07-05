@@ -3,8 +3,8 @@
      (not yet implemented). Driven by server._show_submenu; PF3 returns. Auto-flow
      (ISPDTLC-idiomatic): <selfld type=menu>, auto-numbered, no row/col or grid;
      the keyword+description are folded into the padded choice text. -->
-<panel name="foreground" help="ispfhelp">Foreground Selection Panel
-  <cmdarea cursor="yes">Option ===></cmdarea>
+<panel name="foreground" help="ispfhelp" cursor="ZCMD">Foreground Selection Panel
+  <cmdarea>Option ===></cmdarea>
 
   <selfld type="menu">
     <choice>Assembler        Assemble a source program in the foreground</choice>
