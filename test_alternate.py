@@ -116,7 +116,7 @@ def test_member_list_default_screen_pages_on_model_2():
     server._show_member_list(fake, model=server.parse_terminal_type("IBM-3278-2"))
     screen = fake.sent[0]
     assert screen[0] == ERASE_WRITE                       # the default 24x80 space
-    assert "Member 1-16 of" in screen.decode("cp037", errors="replace")  # 24 - 8/page
+    assert "Member 1-17 of" in screen.decode("cp037", errors="replace")  # 24 - 7/page
 
 
 def test_member_list_alternate_shows_all_on_model_4():

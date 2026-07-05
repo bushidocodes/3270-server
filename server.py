@@ -1103,9 +1103,10 @@ def _show_member_list(client_socket, model=None):
 
     rows, cols = _screen_size(model)
     alternate = rows > 24 or cols > 80
-    # The <lstfld> data rows start at row 6; leave the last two rows for the
-    # footer and its rule. That's 16 rows on a model 2, more on a larger screen.
-    page = rows - 8
+    # The auto-flowed <lstfld> data rows start at row 5; leave the last two rows
+    # for the footer and its rule. That's 17 rows on a model 2, more on a larger
+    # screen.
+    page = rows - 7
     members = _library_members()
     top = 0
     while True:
