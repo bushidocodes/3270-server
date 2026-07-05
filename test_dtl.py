@@ -2408,6 +2408,7 @@ def test_dl_headers_reference_figure_snapshot():
         "                                  Prefix Help",
         "",                                          # title/body separator
         " The following list defines each of the valid prefixes.",
+        "",                                          # ISPDTLC blank line before the list
         " Prefix      Meaning",                      # dthd @ base, ddhd @ base+tsize
         "",                                          # blank between heading and items
         " AU          Automotive",
@@ -2469,6 +2470,24 @@ def test_dl_format_positions_term_within_tsize():
     assert start_t < center_t < end_t                    # term shifts right
     assert end_t + len("AP") <= end_d                    # END term stays within TSIZE
     assert start_d == end_d                              # description column unmoved
+
+
+def test_dl_leading_blank_and_noskip():
+    # #123/#210: ISPDTLC inserts a blank line before a definition list; NOSKIP
+    # (or COMPACT) suppresses it.
+    def rows(attrs):
+        s = load_dtl('<panel name=p width=40><area><info><p>Intro'
+                     f'<dl tsize=6 {attrs}><dt>A<dd>Apple</dl></info></area></panel>')
+        return [ln.rstrip() for ln in _ascii_snapshot(s).split("\n")]
+
+    plain = rows("")
+    intro = next(i for i, ln in enumerate(plain) if "Intro" in ln)
+    assert plain[intro + 1].strip() == ""              # blank line before the list
+    assert "A" in plain[intro + 2]                     # then the first term
+
+    nos = rows("noskip")
+    i2 = next(i for i, ln in enumerate(nos) if "Intro" in ln)
+    assert "A" in nos[i2 + 1]                           # no blank — term immediately after
 
 
 def test_dl_indent_shifts_the_whole_list():
