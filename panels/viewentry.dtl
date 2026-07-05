@@ -2,18 +2,18 @@
 <!-- ISPF View - Entry Panel (option 1). Prompts for a panel-library member
      name; the server (server._show_view) reads the `member` field, and if it
      names a real panels/*.dtl member opens the Browse panel on its source.
-     An unknown member is reported via &VIEWMSG. PF3 returns to the menu. -->
-<panel name="viewentry" help="ispfhelp">View - Entry Panel
-  <info row="0" col="0" intensity="high">------------------------------ View - Entry Panel ------------------------------</info>
-  <topinst row="2" col="1">Enter the name of a panel library (ISPPLIB) member to browse.</topinst>
+     An unknown member is reported via &VIEWMSG. PF3 returns to the menu.
+     Auto-flow (ISPDTLC-idiomatic): no row/col/fldcol; the entry field follows
+     its prompt and the cursor starts there via <panel cursor=member>. -->
+<panel name="viewentry" help="ispfhelp" cursor="member">View - Entry Panel
+  <topinst>Enter the name of a panel library (ISPPLIB) member to browse.</topinst>
 
-  <dtafld row="4" col="1" fldcol="18" datavar="member" entwidth="8" cursor="yes">Member name ===></dtafld>
+  <dtafld datavar="member" entwidth="8">Member name ===></dtafld>
 
-  <info row="7" col="1" intensity="high">&VIEWMSG</info>
-  <info row="9" col="1">Tip: option 3.1 (Utilities -> Library) lists the members.</info>
+  <info intensity="high">&VIEWMSG</info>
+  <info>Tip: option 3.1 (Utilities -> Library) lists the members.</info>
 
-  <info row="22" col="1">Enter a member name, or PF3 to return to the Primary Option Menu.</info>
-  <info row="23" col="0" intensity="high" fill="-" width="79"/>
+  <botinst>Enter a member name, or PF3 to return to the Primary Option Menu.</botinst>
 
   <keyl name="VIEWKEYS">
     <keyi key="PF1" cmd="HELP">Help</keyi>

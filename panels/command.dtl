@@ -3,17 +3,17 @@
      The command line is a <cmdarea> (datavar ZCMD); the server reads it with
      Screen.command_value(), runs it (server._run_tso_command), and feeds the
      response back as &CMDMSG for the next display. PF3 returns to the menu;
-     Enter runs the typed command and stays (an empty command just clears). -->
-<panel name="cmdshell" help="ispfhelp">ISPF Command Shell
-  <info row="0" col="0" intensity="high">------------------------------ ISPF Command Shell ------------------------------</info>
-  <topinst row="2" col="1">Enter a TSO command and press Enter; its response appears below.</topinst>
+     Enter runs the typed command and stays (an empty command just clears).
+     Auto-flow (ISPDTLC-idiomatic): no row/col/fldcol; the command line follows
+     its prompt and the cursor starts there via <panel cursor=ZCMD>. -->
+<panel name="cmdshell" help="ispfhelp" cursor="ZCMD">ISPF Command Shell
+  <topinst>Enter a TSO command and press Enter; its response appears below.</topinst>
 
-  <cmdarea row="4" col="1" fldcol="13" entwidth="62" cursor="yes">Command ===></cmdarea>
+  <cmdarea entwidth="62">Command ===></cmdarea>
 
-  <info row="7" col="1" intensity="high">&CMDMSG</info>
+  <info intensity="high">&CMDMSG</info>
 
-  <info row="22" col="1">Enter a command, or PF3 to return to the Primary Option Menu.</info>
-  <info row="23" col="0" intensity="high" fill="-" width="79"/>
+  <botinst>Enter a command, or PF3 to return to the Primary Option Menu.</botinst>
 
   <keyl name="CMDKEYS">
     <keyi key="PF1" cmd="HELP">Help</keyi>
