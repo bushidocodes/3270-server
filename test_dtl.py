@@ -160,8 +160,10 @@ def test_instruction_tags_flow_in_area():
         '<topinst>line one</topinst><pnlinst>line two</pnlinst>'
         '</area></panel>'
     )
+    # A blank line follows a TOPINST and precedes a PNLINST; the two coincide into a
+    # single blank between them (row 4), so the PNLINST lands on row 5.
     assert s.items[0] == Text(3, 1, "line one", DisplayIntensity.NORMAL)
-    assert s.items[1] == Text(4, 1, "line two", DisplayIntensity.NORMAL)
+    assert s.items[1] == Text(5, 1, "line two", DisplayIntensity.NORMAL)
 
 
 def test_botinst_anchors_at_the_panel_foot():
@@ -1355,10 +1357,12 @@ def test_help_attribute_does_not_change_rendered_bytes():
 # ── implicit end tags + text tags (<p>/<li>/<dt>/…) ──────────────────────────
 
 def test_paragraphs_flow_without_end_tags():
-    # DTL omits end tags; each <p> closes the previous one and flows on its line.
+    # DTL omits end tags; each <p> closes the previous one. ISPDTLC inserts a blank
+    # line before each paragraph (the first has no title above it here), so the
+    # second paragraph lands two rows below the first.
     s = load_dtl('<panel name="p"><p>First para.<p>Second para.</panel>')
     assert s.items[0] == Text(0, 1, "First para.", DisplayIntensity.NORMAL)
-    assert s.items[1] == Text(1, 1, "Second para.", DisplayIntensity.NORMAL)
+    assert s.items[1] == Text(2, 1, "Second para.", DisplayIntensity.NORMAL)
 
 
 def test_multiline_paragraph_collapses_to_one_line():
@@ -2175,7 +2179,9 @@ def test_choice_reference_figure_snapshot():
         "                           Library Card Registration",   # title on row 2
         "",
         " Type in patron's name and card number (if applicable).",
+        "",                                              # blank after each TOPINST tag
         " Then select an action bar choice.",
+        "",
         " Date . . . :",                                 # PMTFMT=CUA dots; USAGE=out colon
         " Card No . .   _______ (A 7-digit number)",
         " Name . . . .  _________________________ (Last, First, M.I.)",
@@ -2263,6 +2269,7 @@ def test_panel_reference_figure_snapshot():
         "",
         " Choose one of the following exotic locations and your",
         " preferred mode of travel, then press Enter.",
+        "",                                          # blank line after the TOPINST
         " Exotic Location:           Travel Mode:",
         " __  1.  Athens, GA         __  1.  Boxcar",
         "     2.  Berlin, CT             2.  Hitchhike",
@@ -2296,6 +2303,7 @@ def test_caution_reference_figure_snapshot():
         " CAUTION:",
         " Issuing the DELETE command permanently removes the file from storage. There is",
         " no possibility of recovery.",
+        "",                                          # blank before the closing paragraph
         " You can exit from the DELETE operation by pressing F12.",
     ])
 
@@ -2319,6 +2327,7 @@ def test_nt_reference_figure_snapshot():
         " entering the title in the entry field.",
         " Note: If the item you are trying to locate is not in stock and you would like",
         "       to reserve it, please see the librarian at the front desk.",
+        "",                                          # blank before the nested paragraph
         " If the librarian is not there, please do not yell for help. This is a library!",
     ])
 
@@ -2343,6 +2352,7 @@ def test_notel_reference_figure_snapshot():
         " 1.  If the item you are trying to locate is not in stock and you would like to",
         "     reserve it, please see the librarian at the front desk.",
         " 2.  If the librarian is not there, please do not yell for help.",
+        "",                                          # blank before the nested paragraph (Figure 145)
         "     This is a library!",
     ])
 
@@ -2379,6 +2389,7 @@ def test_lstfld_reference_figure_snapshot():
     assert _ascii_snapshot(load_dtl(src, rows=rows)) == "\n".join([
         "                              Subscriber List               ROW 1 TO 3 OF 3",
         " Enter phone number and approved indicator for each person.",
+        "",                                          # blank line after the TOPINST
         " --------- Subscriber Name ----------  Phone          Approved",
         " First Name       Last Name        MI  Number         (Y or N)",
         " Pete             Moss             P    ____________   _",
@@ -2483,8 +2494,10 @@ def test_widget_help_matches_guide_figure():
         Text(8, 5, "Use a screwdriver to turn the power drive unit on.", N),
         Text(9, 1, "3.", N),
         Text(9, 5, "Stand back and watch the fun!", N),
-        Text(10, 5, "Wake up the kids and call the neighbors, they won't", N),
-        Text(11, 5, "want to miss it!", N),
+        # A <p> after the list items gets its guide-mandated leading blank (as the
+        # nested <p> does in NOTEL Figure 145), so it lands on row 11.
+        Text(11, 5, "Wake up the kids and call the neighbors, they won't", N),
+        Text(12, 5, "want to miss it!", N),
     ]
 
 
