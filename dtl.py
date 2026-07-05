@@ -31,17 +31,17 @@ Supported tags
                                  ``help`` names a help panel; ``width``/``depth``
                                  give the presentation-space size (default 80x24)
                                  and bound element positions at load time.
-``<area row col fldgap>``        a flow box: contained elements that omit ``row``
-``<region row col fldgap dir>``  flow down from this origin (one line each), and
+``<area row col>``               a flow box: contained elements that omit ``row``
+``<region row col width dir>``   flow down from this origin (one line each), and
                                  those that omit ``col`` use it. A field that omits
-                                 ``fldcol`` gets its entry after the prompt
-                                 (``col + len(prompt) + fldgap``). ``dir=horiz`` lays
-                                 the box's children side by side instead of stacking
-                                 them, and the enclosing flow resumes below the
-                                 tallest column. Explicit positions always win, so
-                                 non-flowed panels are unaffected.
-``<info row col intensity>``     protected text (label / instruction / rule).
-                                 ``fill`` + ``width`` repeats a character (rules).
+                                 ``fldcol`` gets its entry one column after the
+                                 prompt. ``dir=horiz`` lays the box's children side
+                                 by side instead of stacking them, and the enclosing
+                                 flow resumes below the tallest column; ``width=n``
+                                 fixes a column's width. Explicit positions always
+                                 win, so non-flowed panels are unaffected.
+``<info row col intensity>``     protected text (label / instruction). A horizontal
+                                 rule is a ``<divider>``.
 ``<topinst row col>``            top / panel / bottom instruction text. Render like
 ``<pnlinst row col>``            ``<info>`` (protected text); semantic DTL tags. A
 ``<botinst row col>``            flowed ``<botinst>`` anchors at the panel foot.
@@ -633,8 +633,10 @@ class _DTLParser(HTMLParser):
             if self._cmd_chars is not None:
                 self._cmd_tpos = len("".join(self._cmd_chars).strip())
         elif tag == "ab":
+            # Action-bar choices are separated by a fixed gap (the non-standard
+            # per-bar gap= attribute has been removed).
             self._ab = {"row": int(a.get("row", 0)), "col": int(a.get("col", 1)),
-                        "gap": int(a.get("gap", 3)), "choices": []}
+                        "gap": 3, "choices": []}
         elif tag == "abc":
             if self._ab is None:
                 raise DTLError("<abc> outside of an <ab>")
@@ -765,8 +767,7 @@ class _DTLParser(HTMLParser):
             self._areas.append({
                 "row": row, "row0": row, "maxbottom": row,
                 "col": int(a["col"]) if "col" in a else (parent["col"] if parent else 1),
-                "fldgap": int(a["fldgap"]) if "fldgap" in a
-                          else (parent["fldgap"] if parent else 1),
+                "fldgap": parent["fldgap"] if parent else 1,
                 "dir": str(a.get("dir", "vert")).strip().lower(),
                 "start_idx": len(self.screen.items),
                 "explicit": "row" in a,
@@ -815,8 +816,7 @@ class _DTLParser(HTMLParser):
             self._areas.append({
                 "row": row, "row0": row, "maxbottom": row,
                 "col": base_col + (int(a["indent"]) if "indent" in a else 0),
-                "fldgap": int(a["fldgap"]) if "fldgap" in a
-                          else (parent["fldgap"] if parent else 1),
+                "fldgap": parent["fldgap"] if parent else 1,
                 "dir": str(a.get("dir", "vert")).strip().lower(),
                 "start_idx": len(self.screen.items),
                 "explicit": explicit,
@@ -1158,7 +1158,7 @@ class _DTLParser(HTMLParser):
         self._dtafldd, self._in_dtafldd = None, False
 
     def handle_startendtag(self, tag, attrs):
-        # Self-closing form, e.g. <dtafld .../> or <info fill="-" width="37"/>
+        # Self-closing form, e.g. <dtafld .../> or <divider/>
         self.handle_starttag(tag, attrs)
         if tag in _CONTENT_TAGS:
             self.handle_endtag(tag)
@@ -1977,22 +1977,15 @@ class _DTLParser(HTMLParser):
         caution = tag == "caution"
         if label and content.strip() and not caution:
             content = label + " " + content.strip()
-        # CUA role → default colour: a fill line is a separator rule; a top/panel
-        # instruction is an instruction; a high-intensity heading is the title;
-        # everything else is normal text (labels/values).
-        if "fill" in a:
-            role = "rule"
-        elif tag in _INSTRUCTION_TAGS:
+        # CUA role → default colour: a top/panel instruction is an instruction;
+        # a high-intensity heading is the title; everything else is normal text
+        # (labels/values). A horizontal rule is a <divider>, not an <info>.
+        if tag in _INSTRUCTION_TAGS:
             role = "inst"
         elif _intensity(a) is DisplayIntensity.HIGH:
             role = "title"
         else:
             role = "text"
-        if "fill" in a:
-            content = a["fill"] * self._opt_int(a.get("width"), 0)
-            row, col, _ = self._resolve_pos(a, "info")
-            self.screen.add(Text(row, col, content, _intensity(a), role=role))
-            return
         if "row" in a:
             # Explicit position: emit content exactly as written (no wrap), so
             # the bundled panels stay byte-for-byte identical (mono).
