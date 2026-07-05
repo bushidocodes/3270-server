@@ -2520,11 +2520,17 @@ class _DTLParser(HTMLParser):
             return
         row = sf["row"]
         # Auto-number: standard DTL numbers the choices 1..n, so a <choice> that
-        # omits NUM takes the running position (single-select only — a MULTI field
-        # marks choices with an input field instead of numbering them). An explicit
-        # NUM still wins, so the bundled numbered menus are byte-for-byte unchanged.
-        auto_num = a.get("num") is None and not sf.get("multi")
-        num = str(sf["count"] + 1) if auto_num else (a.get("num") or "")
+        # omits its selection value takes the running position (single-select only —
+        # a MULTI field marks choices with an input field instead of numbering them).
+        # SELCHAR is the standard way to override that value (a menu number/letter
+        # placed in front of the choice, e.g. option 8 in a 1..5,8 menu, or X):
+        # its 'char(s),n' form gives the char(s); the trailing ,n (HIDE sizing) is
+        # unused here. NUM is our non-standard equivalent, kept for the not-yet-
+        # converted bundled menus.
+        sel = a.get("selchar")
+        disp = sel.split(",")[0].strip() if sel is not None else a.get("num")
+        auto_num = disp is None and not sf.get("multi")
+        num = str(sf["count"] + 1) if auto_num else (disp or "")
         # On the first choice, a column-less single-choice field whose choices are
         # auto-numbered switches to the reference figure layout: a selection input
         # field before the first choice, and "N." (number + period) numbering.

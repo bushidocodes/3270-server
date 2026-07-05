@@ -453,6 +453,25 @@ def test_selfld_explicit_num_still_wins_and_grid_is_unchanged():
     assert s.items[2] == Text(4, 21, "  desc-a", DisplayIntensity.NORMAL)
 
 
+def test_selfld_selchar_overrides_the_auto_number():
+    # #128: SELCHAR is the standard way to set a choice's selection value in place
+    # of the auto-assigned number — a gap (option 8 in a 1,2,8 menu) or a letter (X).
+    # The choices before it still auto-number; SELCHAR drives both display and the
+    # value that selects the choice (Screen.selections).
+    s = load_dtl(
+        '<panel name="p"><selfld type="menu">'
+        '<choice>Library</choice>'
+        '<choice>Data Set</choice>'
+        "<choice selchar='8'>Outlist</choice>"
+        "<choice selchar='X'>Exit</choice>"
+        '</selfld></panel>'
+    )
+    shown = [it.text.strip() for it in s.items
+             if isinstance(it, Text) and getattr(it, "role", None) == "num"]
+    assert shown == ["1", "2", "8", "X"]              # auto 1,2 then SELCHAR 8,X
+    assert set(s.selections) == {"1", "2", "8", "X"}  # each is selectable by its value
+
+
 def test_selfld_type_multi_renders_a_mark_field_per_choice():
     # TYPE=MULTI is a multiple-selection field: each choice gets its own 1-char
     # input field to mark (in place of a number), so several can be selected.
