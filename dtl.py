@@ -507,6 +507,8 @@ class _DTLParser(HTMLParser):
                 "break": a.get("break", "none").lower(),
                 "compact": _bool_attr(a, "compact"),  # no blank after a <ddhd> header
                 "indent": self._opt_int(a.get("indent"), 0),  # shift the list right
+                # FORMAT positions the DT term within its TSIZE column.
+                "format": str(a.get("format", "start")).strip().lower(),
                 "pending": None,
             })
         if tag in ("panel", "help"):
@@ -1592,7 +1594,12 @@ class _DTLParser(HTMLParser):
         row, col, ctx = self._resolve_pos(a, tag)  # advances the flow one line
         base = col + (depth - 1) * self._LIST_INDENT + (dl["indent"] if dl else 0)
         if tag in ("dt", "pt"):
-            self.screen.add(Text(row, base, text, _intensity(a)))
+            # FORMAT positions the term within its TSIZE column (START left, the
+            # default; CENTER centred; END right). A term wider than TSIZE gets no
+            # offset (it spills into the description area, per BREAK).
+            fmt = dl["format"] if dl else "start"
+            term_col = base + self._fmt_offset(len(text), tsize, fmt)
+            self.screen.add(Text(row, term_col, text, _intensity(a)))
             # Decide where this term's description goes. With break=none/fit a
             # short term shares its line; rewind the flow cursor so the next
             # <dd> lands on the same row.
