@@ -116,4 +116,119 @@ existing menu integration tests plus a manual drive of options 1/3/6/7. This fol
   the last hardcoded submenu routing is gone. Integration test covers the interactive
   utility → Library leaf.
 - [ ] PR 4+ — `PGM PARM` passing / `CMD(...)` targets, when a panel needs them.
-- [ ] PR 3+ — submenu `)PROC`; `PGM PARM`; `CMD`.
+
+---
+
+# Phase 2 — a general `)PROC` / `)INIT` interpreter
+
+Phase 1 deliberately parses **one** idiom (`&ZSEL = TRANS(&ZCMD …)`) and treats the rest of
+every `)PROC`/`)INIT` block as an inert no-op (`dtl.py:2377` `_emit_source`). That was the
+right call for menu routing, but it leaves the rest of `#55` — the `<assign>` family and any
+non-routing panel logic — unexpressible. Phase 2 replaces the single-idiom special-case with a
+**small, bounded statement evaluator** for the ISPF panel-logic sublanguage, of which the
+Phase 1 `ZSEL = TRANS` handling becomes one path.
+
+This is explicitly **not** a general-purpose language: it is the fixed, well-documented ISPF
+`)INIT`/`)PROC`/`)REINIT`/`)ABCINIT`/`)ABCPROC` grammar, nothing more. Scope is enumerated
+below and anything outside it stays ignored-and-documented, exactly as today.
+
+## Why this is the real remainder of #55
+
+The DTL tags still marked `❌ #55` all *compile into* `)PROC`/`)INIT` statements — they are
+surface syntax for the same evaluator:
+
+| DTL tag | Compiles to | Evaluator feature needed |
+|---|---|---|
+| `<assignl destvar=X>` / `<assigni value= result=>` | `&X = TRANS(&src v,'r' …)` assignment | assignment + `TRANS` |
+| `<source type=init>` | `)INIT` statements | assignment, control vars |
+| `<source type=proc>` (beyond ZSEL) | `)PROC` statements | assignment, `VER`, `IF` |
+| `<source type=reinit\|abcinit\|abcproc>` | the matching section | section dispatch |
+| `<checkl>` / `<checki>` | `)PROC` `VER(&fld,…)` | `VER` validation |
+
+So the assignment evaluator is the missing primitive; `<assignl>`/`<assigni>` are its first
+consumer and close the last `❌ #55` display-relevant gap.
+
+## The bounded grammar (what the evaluator will cover)
+
+- **Assignment** — `&VAR = <expr>` where `<expr>` is a literal `'…'`, another `&VAR`, or a
+  built-in call.
+- **Built-ins** — `TRANS(source v,'r' … *,'d')` (the Phase 1 case, generalised to any destvar),
+  `TRUNC(&VAR,'c'|n)` (splits into head + `.TRAIL`), `LENGTH`, `LVLINE`/`PACK` *(only if a
+  panel needs them — add lazily)*.
+- **Verify** — `VER(&VAR, NB | NONBLANK | NUMERIC | ALPHA | LIST v… | RANGE lo hi | PICT 'mask',
+  MSG=id)` → drives field validation + a short message (reuses the `<checki>`/`<checkl>` path).
+- **Conditionals** — `IF (&A = 'x') … ELSE …` over the above statement forms (no nesting beyond
+  the reference's own examples initially).
+- **Control variables** — `.CURSOR`, `.MSG`, `.ALARM`, `.RESP`, `.ATTR(...)` writes only
+  (reads out of scope). These map onto the `Screen` mechanisms that already exist
+  (`Screen.help_for` cursor, short-message overlay, alarm bit).
+- **Sections** — run `)INIT` before first display, `)PROC` on Enter/PF submit, `)REINIT` on
+  redisplay, `)ABCINIT`/`)ABCPROC` around action-bar pull-downs.
+
+**Out of scope (stay ignored + documented):** `VGET`/`VPUT` profile/shared-pool I/O,
+`&Z` system variables beyond the handful we already substitute, `PANELID`/`REFRESH`, arithmetic,
+and any statement form with no host-display effect on a TN3270 *display* server.
+
+## The missing primitive: a mutable variable pool
+
+Phase 1 needs no state — it reads a static routing map. A general evaluator needs a **mutable
+per-screen variable pool**:
+
+1. `)INIT` **writes** the pool (declaratively populating what today is set Python-side before
+   `_substitute`).
+2. Display-time substitution **reads** the pool (today's `_substitute` / `&NAME` handling becomes
+   a pool read).
+3. `)PROC` **reads** modified input fields back into the pool, then evaluates — so it depends on
+   the same field read-back service that `#249` introduces for `<lstfld>` input. **`)PROC`
+   evaluation is gated on `#249`; `)INIT` assignment is not** (it runs before any input exists),
+   so `)INIT` + `<assignl>` can land first.
+
+## Incremental, non-breaking rollout
+
+Every bundled panel today carries no `)PROC` beyond `ispf.dtl`/`utility.dtl`'s `ZSEL=TRANS`, so
+each step below is **byte-identical** for the served panels until a panel is deliberately
+converted — the same discipline as Phase 1 and the menu conversions.
+
+- **PR A — variable pool + `)INIT` assignment (no `)PROC` dependency).** Introduce
+  `Screen.vars` (the pool) and an `_eval_init` that executes `&VAR = 'literal' | &other |
+  TRANS(…)` statements from `<source type=init>`, writing the pool *before* substitution.
+  No bundled panel uses `)INIT` → byte-identical. Verify with a synthetic panel + a corpus
+  `)INIT` example.
+- **PR B — `<assignl>` / `<assigni>` → assignment (closes the `❌ #55` assign family).** Parse
+  the tags into the same assignment the evaluator runs (`assignl destvar` + `assigni value→result`
+  = a `TRANS` table). Reuses PR A's evaluator; adds the surface syntax. Closes the assign gap;
+  corpus examples that use it now populate their target vars.
+- **PR C — generalise `TRANS`/`TRUNC` + fold in ZSEL.** Rewrite `_emit_source`'s ZSEL special-case
+  as `_eval_proc` producing `&ZSEL`, then read `selection_targets` from the resulting pool. Pure
+  refactor — the equivalence test from Phase 1 PR 1 is the guard (declared map unchanged).
+- **PR D — `VER` validation (gated by `#249`).** `)PROC` `VER(&fld,…)` and `<checkl>`/`<checki>`
+  drive field validation + `.MSG`; needs the input read-back path (`#249`).
+- **PR E — `IF/ELSE` + control-variable writes (`.CURSOR`/`.MSG`/`.ALARM`).** The last common
+  reference constructs; add only the forms real corpus examples exercise.
+
+## Verification strategy
+
+Per repo discipline (verify by executing the real flow): each PR ships (a) a synthetic golden
+panel exercising the new statement form, (b) any corpus example it unblocks moved from
+`DTLError`/empty to a real render, and (c) for `)PROC`/`VER` paths, a live ws3270 drive of a
+converted panel. A byte-identity render-SHA diff against the current baseline gates every
+not-yet-converted bundled panel.
+
+## Risks & mitigations
+
+- **Interpreter scope creep** — the grammar above is a *closed enumeration*; anything not listed
+  stays ignored-and-documented (same contract as Phase 1). New forms are added only when a real
+  corpus/bundled panel needs them, never speculatively.
+- **State model regression** — the pool subsumes today's ad-hoc `_substitute` inputs; PR A must
+  keep substitution byte-identical for every existing panel (they populate vars Python-side; the
+  pool is initially fed the same values).
+- **`)PROC` needs input read-back** — explicitly sequenced *after* `#249`; `)INIT` + `<assignl>`
+  (PRs A–C) have no such dependency and deliver the `#55` assign closure first.
+
+## Status
+
+- [ ] PR A — `Screen.vars` pool + `)INIT` assignment evaluator (no `)PROC` dep).
+- [ ] PR B — `<assignl>`/`<assigni>` assignment (closes the `#55` assign family).
+- [ ] PR C — generalise `TRANS`/`TRUNC`; fold Phase 1 ZSEL into `_eval_proc` (equivalence-gated).
+- [ ] PR D — `VER` validation + `<checkl>`/`<checki>` (gated by `#249`).
+- [ ] PR E — `IF/ELSE` + `.CURSOR`/`.MSG`/`.ALARM` control-variable writes.
