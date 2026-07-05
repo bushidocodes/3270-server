@@ -1044,8 +1044,12 @@ def _show_browse(client_socket, member: str, path: str, verb: str = "BROWSE",
                  + f"Line {top + 1:08d}")[:line_width]
         foot = (f"Lines {top + 1}-{shown_end} of {len(lines)}"
                 "     PF7=Up  PF8=Down  PF3=Exit")[:line_width]
-        screen = load_panel("browse", BRTITLE=title)
+        screen = load_panel("browse")
         screen.width, screen.depth, screen.alternate = cols, rows, alternate
+        # The header status line and footer rule are a space-padded status band
+        # the server positions on the first/last rows (the browse panel itself is
+        # a title-less key-list frame — see panels/browse.dtl).
+        screen.add(Text(0, 0, title, DisplayIntensity.HIGH))
         for i, ln in enumerate(lines[top:top + page]):
             # Browsed content is arbitrary; drop any byte the session's EBCDIC
             # code page can't encode so the render can never crash.
