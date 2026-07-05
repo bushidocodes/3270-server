@@ -1419,7 +1419,8 @@ class _DTLParser(HTMLParser):
         (bullet/number) on the first line. Advances the flow cursor."""
         lines = self._wrap(text, max(1, self.screen.width - (col + 1)))
         if marker is not None:
-            self.screen.add(Text(row, marker_col, marker, DisplayIntensity.NORMAL))
+            self.screen.add(Text(row, marker_col, marker, DisplayIntensity.NORMAL,
+                                 role=role))
         for i, ln in enumerate(lines):
             self.screen.add(Text(row + i, col, ln, intensity, role=role))
         if ctx is not None:
@@ -1513,8 +1514,10 @@ class _DTLParser(HTMLParser):
             marker = self._ol_marker(lst["n"], ol_depth)
         else:
             marker = self._BULLETS[min(depth - 1, len(self._BULLETS) - 1)]
+        # A list item is normal information-region text (CUA green), like a <p>;
+        # without a role it would fall back to the base protected-field colour.
         self._emit_flow_lines(text, row, bullet_col + self._LIST_INDENT, ctx,
-                              marker=marker, marker_col=bullet_col)
+                              marker=marker, marker_col=bullet_col, role="text")
 
     def _emit_defitem(self, tag, a, content):
         """Emit one definition-list entry. A term (<dt>/<pt>) sits at the list
