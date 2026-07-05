@@ -286,7 +286,8 @@ _TEXT_TAGS = ("info",) + _INSTRUCTION_TAGS + _FLOW_TEXT_TAGS
 # before a bottom instruction, which we anchor separately); COMPACT suppresses it.
 # A TOPINST instead gets a blank line AFTER it. See the P/TOPINST tag references.
 _BLANK_BEFORE_TAGS = ("p", "pnlinst")
-_CONTENT_TAGS = _TEXT_TAGS + ("dtafld", "cmdarea", "choice", "figcap")
+_CONTENT_TAGS = _TEXT_TAGS + ("dtafld", "cmdarea", "choice", "figcap",
+                              "dthd", "ddhd")
 _FIELD_TAGS = ("dtafld", "cmdarea")
 
 
@@ -504,6 +505,7 @@ class _DTLParser(HTMLParser):
                 "type": tag, "n": 0,
                 "tsize": int(a["tsize"]) if "tsize" in a else self._DL_TSIZE,
                 "break": a.get("break", "none").lower(),
+                "compact": _bool_attr(a, "compact"),  # no blank after a <ddhd> header
                 "pending": None,
             })
         if tag in ("panel", "help"):
@@ -1116,6 +1118,8 @@ class _DTLParser(HTMLParser):
             self._emit_listitem(a, content, runs)
         elif tag in ("dt", "dd", "pt", "pd"):
             self._emit_defitem(tag, a, content)
+        elif tag in ("dthd", "ddhd"):
+            self._emit_defhead(tag, a, content)
         elif tag in ("lines", "xmp"):
             # <xmp> (example) is preformatted like <lines>: authored line breaks
             # and interior spacing are significant.
@@ -1597,6 +1601,38 @@ class _DTLParser(HTMLParser):
         if dl is not None:
             dl["pending"] = None
         self._emit_flow_lines(text, row, desc_col, ctx)
+
+    def _emit_defhead(self, tag, a, content):
+        """Emit a definition-list column heading. ``<dthd>`` is the term-column
+        heading (at the list margin); ``<ddhd>`` is the description-column heading
+        (``tsize`` chars to the right, on the same row, paired after its <dthd>).
+        Per the reference, a blank line separates the heading from the list items
+        unless the enclosing <dl> carries COMPACT."""
+        text = " ".join(content.split())
+        if not text:
+            return
+        dl = next((ln for ln in reversed(self._lists)
+                   if ln["type"] in ("dl", "parml")), None)
+        tsize = dl["tsize"] if dl else self._DL_TSIZE
+        depth = max(len(self._lists), 1)
+        row, col, ctx = self._resolve_pos(a, tag)   # advances the flow one line
+        base = col + (depth - 1) * self._LIST_INDENT
+        if tag == "dthd":
+            self.screen.add(Text(row, base, text, _intensity(a), role="heading"))
+            # The paired <ddhd> shares this row (rewind, like a <dt>'s <dd>).
+            if ctx is not None:
+                ctx["row"] = row
+            if dl is not None:
+                dl["pending"] = {"desc_col": base + tsize}
+            return
+        # <ddhd>: the description-column heading, then a blank line before the
+        # items (COMPACT on the <dl> suppresses that blank).
+        desc_col = dl["pending"]["desc_col"] if dl and dl["pending"] else base + tsize
+        if dl is not None:
+            dl["pending"] = None
+        self.screen.add(Text(row, desc_col, text, _intensity(a), role="heading"))
+        if ctx is not None and not (dl and dl.get("compact")):
+            ctx["row"] = row + 2                     # heading row + one blank line
 
     def _emit_lines(self, a, content):
         """Emit a <lines> block: preformatted text whose authored line breaks

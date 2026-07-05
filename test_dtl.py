@@ -2365,6 +2365,42 @@ def test_panel_reference_figure_snapshot():
 # figures were displayed narrower, so the wrap points differ but the admonition
 # *format* matches. The runtime F-key area is ISPF chrome, not markup.
 
+def test_dl_headers_reference_figure_snapshot():
+    """DDHD-reference Figure 102 (Prefix Help): <dthd>/<ddhd> render a heading
+    row — term heading at the margin, description heading at TSIZE — followed by a
+    blank line before the items. (Our list items are tight, as everywhere; the
+    figure's inter-item blanks are ISPDTLC list spacing, not part of #120.)"""
+    src = ("<!DOCTYPE DM SYSTEM>\n<HELP NAME=ddhd DEPTH=18>Prefix Help\n<AREA>\n<INFO>\n"
+           "<P>The following list defines each of the valid prefixes.\n"
+           "<DL TSIZE=12>\n"
+           "<DTHD>Prefix\n<DDHD>Meaning\n"
+           "<DT>AU\n<DD>Automotive\n<DT>HB\n<DD>Health and beauty\n"
+           "<DT>LG\n<DD>Lawn and garden\n<DT>SG\n<DD>Sporting goods\n"
+           "</DL>\n</INFO>\n</AREA>\n</HELP>")
+    assert _ascii_snapshot(load_dtl(src)) == "\n".join([
+        "                                  Prefix Help",
+        "",                                          # title/body separator
+        " The following list defines each of the valid prefixes.",
+        " Prefix      Meaning",                      # dthd @ base, ddhd @ base+tsize
+        "",                                          # blank between heading and items
+        " AU          Automotive",
+        " HB          Health and beauty",
+        " LG          Lawn and garden",
+        " SG          Sporting goods",
+    ])
+
+
+def test_dl_headers_compact_suppresses_blank():
+    # COMPACT on the <dl> drops the blank line between the heading and the items.
+    src = ("<panel name=p width=40><area><info>"
+           "<dl tsize=8 compact><dthd>Code<ddhd>Name"
+           "<dt>AP<dd>Appliances</dl></info></area></panel>")
+    lines = _ascii_snapshot(load_dtl(src)).split("\n")
+    hdr = next(i for i, ln in enumerate(lines) if "Code" in ln)
+    assert "Name" in lines[hdr]                      # heading row
+    assert "AP" in lines[hdr + 1]                    # item immediately follows (no blank)
+
+
 def test_caution_reference_figure_snapshot():
     """CAUTION-reference Figure 1: "CAUTION:" on its own line, emphasised body."""
     src = ("<!DOCTYPE DM SYSTEM>\n<HELP NAME=caution DEPTH=20>Help for DELETE Command\n"
