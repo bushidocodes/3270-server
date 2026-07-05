@@ -766,14 +766,18 @@ _CREDENTIALS = {
 }
 # Passwords are stored and compared uppercase (default RACF behavior without MIXEDCASE option)
 
-# Field addresses (row * 80 + col_after_sf) for fields the server reads back
-# TSO logon panel: input fields start at col 17, SF is at col 16
-LOGON_USERID_SF_COL = 16
-LOGON_USERID_ROW = 5
-LOGON_PASSWORD_SF_COL = 16
-LOGON_PASSWORD_ROW = 6
-LOGON_PROC_SF_COL = 16
-LOGON_PROC_ROW = 7
+# Field addresses (row * 80 + col_after_sf) for fields the server reads back.
+# TSO logon panel (auto-flow, panels/logon.dtl): the LOGON-parameter entry fields
+# are in the left column with the SF (attribute) byte at col 15, data at col 16 —
+# Userid on row 4, Password row 5, Procedure row 6. These must track logon.dtl;
+# they are also what redact_fields() masks, so a stale password address would leak
+# the password into the debug log.
+LOGON_USERID_SF_COL = 15
+LOGON_USERID_ROW = 4
+LOGON_PASSWORD_SF_COL = 15
+LOGON_PASSWORD_ROW = 5
+LOGON_PROC_SF_COL = 15
+LOGON_PROC_ROW = 6
 
 LOGON_USERID_ADDR = LOGON_USERID_ROW * 80 + (LOGON_USERID_SF_COL + 1)
 LOGON_PASSWORD_ADDR = LOGON_PASSWORD_ROW * 80 + (LOGON_PASSWORD_SF_COL + 1)

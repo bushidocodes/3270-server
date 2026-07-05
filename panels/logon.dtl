@@ -1,8 +1,13 @@
 <!DOCTYPE DM SYSTEM>
-<!-- z/OS V2R5.0 TSO/E LOGON panel, in Dialog Tag Language (DTL subset).
-     Renders byte-for-byte identically to screens.build_tso_logon().
-     The transient error message (row 19) is injected at runtime, not here. -->
-<panel name="tsologon" help="tsohelp">z/OS V2R5.0 TSO/E LOGON
+<!-- z/OS V2R5.0 TSO/E LOGON panel, in standard auto-flow DTL. The two-column
+     form (LOGON parameters | RACF parameters) is a <region dir=horiz> of two
+     WIDTH-capped <region>s, so each column's rule spans its own width and the
+     RACF column sits to the right without absolute positioning. The wide
+     Command / PDS-E Dsname fields flow full width below the two columns.
+     Cursor starts in Userid via <panel cursor=userid>; SIZE/PERFORM are typed
+     via <varclass>. The transient logon error message is injected at runtime by
+     server.send_tso_logon, not here. -->
+<panel name="tsologon" cursor="userid" help="tsohelp">z/OS V2R5.0 TSO/E LOGON
   <!-- Typed variables: SIZE and PERFORM are numeric. Declaring them via a
        <varclass> lets their <dtafld>s omit numeric="yes" and inherit the type.
        SIZE additionally carries a range check; the server rejects out-of-range
@@ -18,42 +23,42 @@
     <vardcl name="perform" varclass="NUMFLD"/>
   </varlist>
 
-  <!-- Colour: DTL's COLOR attribute is carried by field elements (<dtafld>,
-       <selfld>, <lstcol>, ...), not by <info>/<topinst> text — those take their
-       colour from their CUA element type. So the entry fields below are given
-       COLOR=WHITE (the field, per the DTL semantics); it is emitted only to
-       colour-capable terminals, and a mono terminal renders byte-for-byte as
-       before. Colouring the info-text title/rules/warning by CUA type is a
-       separate step. -->
-  <info row="0" col="18" intensity="high">--------  z/OS V2R5.0 TSO/E LOGON  --------</info>
+  <!-- The two-column parameter form. Each <region width=n> fixes its column so
+       the divider rule spans that column and the RACF column starts to its
+       right. COLOR=WHITE colours the entry field (mono renders unchanged). -->
+  <region dir="horiz">
+    <region width="39">
+      <topinst>Enter LOGON parameters below:</topinst>
+      <divider/>
+      <dtafld datavar="userid"    entwidth="8" color="white">Userid   ===></dtafld>
+      <dtafld datavar="password"  entwidth="8" display="no">Password ===></dtafld>
+      <dtafld datavar="procedure" entwidth="8" init="IKJACCNT" color="white">Procedure===></dtafld>
+      <dtafld datavar="size"      entwidth="5" init="00150" color="white" help="sizehelp">Size     ===></dtafld>
+    </region>
+    <region width="37">
+      <topinst>RACF LOGON parameters:</topinst>
+      <divider/>
+      <!-- The RACF column starts two rows lower so Acct/Perform align with
+           Procedure/Size, matching the real TSO screen. It also keeps Userid
+           and Password adjacent in buffer order, so Tab moves Userid -> Password
+           (nothing from the right column sits between them). -->
+      <divider type="blank"/>
+      <divider type="blank"/>
+      <dtafld datavar="acct"    entwidth="8" color="white">Acct Nmbr    ===></dtafld>
+      <dtafld datavar="perform" entwidth="8" color="white">Perform      ===></dtafld>
+      <info>Mail      ===> Yes</info>
+      <info>Reconnect ===> Auto</info>
+      <info>OIDcard   ===> None</info>
+    </region>
+  </region>
 
-  <topinst row="2" col="1">Enter LOGON parameters below:</topinst>
-  <topinst row="2" col="42">RACF LOGON parameters:</topinst>
-  <info row="3" col="1" fill="-" width="37"/>
-  <info row="3" col="42" fill="-" width="37"/>
+  <dtafld datavar="command" entwidth="62" color="white">Command  ===></dtafld>
+  <dtafld datavar="dsname"  entwidth="59" color="white">PDS/E Dsname ===></dtafld>
 
-  <!-- Flow box: these three fields flow down from row 5, col 1; with 13-char
-       prompts and fldgap=2 their entries land at col 16 -- the same positions the
-       explicit row/fldcol attributes used to give (proven by the golden test). -->
-  <area row="5" col="1" fldgap="2">
-    <dtafld datavar="userid" entwidth="8" cursor="yes" color="white">Userid   ===></dtafld>
-    <dtafld datavar="password" entwidth="8" display="no">Password ===></dtafld>
-    <dtafld datavar="procedure" entwidth="8" init="IKJACCNT" color="white">Procedure===></dtafld>
-  </area>
-  <dtafld row="7" col="42" fldcol="60" datavar="acct" entwidth="8" color="white">Acct Nmbr    ===></dtafld>
-  <dtafld row="8" col="1" fldcol="16" datavar="size" entwidth="5" init="00150" color="white" help="sizehelp">Size     ===></dtafld>
-  <dtafld row="8" col="42" fldcol="60" datavar="perform" entwidth="8" color="white">Perform      ===></dtafld>
-  <dtafld row="9" col="1" fldcol="16" datavar="command" entwidth="62" color="white">Command  ===></dtafld>
-  <dtafld row="11" col="1" fldcol="19" datavar="dsname" entwidth="59" color="white">PDS/E Dsname ===></dtafld>
-
-  <info row="12" col="42">Mail      ===> Yes</info>
-  <info row="13" col="42">Reconnect ===> Auto</info>
-  <info row="14" col="42">OIDcard   ===> None</info>
-
-  <info row="15" col="1" intensity="highlighted">*** Authorized users only. Unauthorized access is prohibited. ***</info>
-  <pnlinst row="16" col="1">Press ENTER to logon to TSO/E</pnlinst>
-  <info row="17" col="1">PF1=HELP   PF3=LOGOFF</info>
-  <info row="21" col="1">ENTER AN END COMMAND TO LOGOFF</info>
+  <info intensity="highlighted">*** Authorized users only. Unauthorized access is prohibited. ***</info>
+  <pnlinst>Press ENTER to logon to TSO/E</pnlinst>
+  <info>PF1=HELP   PF3=LOGOFF</info>
+  <info>ENTER AN END COMMAND TO LOGOFF</info>
 
   <!-- Keylist: PF3/PF15 leave the panel (logoff). Metadata only -- the visible
        "PF1=HELP PF3=LOGOFF" line above is the displayed function-key area. -->

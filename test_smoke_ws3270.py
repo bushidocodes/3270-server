@@ -673,7 +673,7 @@ def test_ws3270_field_level_help_on_the_size_field():
     port = _serve_one_client()
     out = _drive(port, [
         "Wait(20,InputField)",
-        "MoveCursor(8,17)",     # into the Size field (row 8, data col 17)
+        "MoveCursor(7,16)",     # into the Size field (row 7, data col 16)
         "PF(1)",                # HELP
         "Wait(10,Output)",
         "Ascii()",              # the field-help panel

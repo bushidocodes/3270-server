@@ -13,7 +13,6 @@ import pytest
 
 import server
 from screen import Screen, Text, Field, DisplayIntensity
-from screens import build_tso_logon
 from dtl import load_panel
 
 
@@ -39,15 +38,18 @@ def frozen_clock(monkeypatch):
 
 # ── logon panel ──────────────────────────────────────────────────────────────
 
-def test_logon_matches_legacy_bytes():
-    expected = _capture(server.send_tso_logon)
-    assert build_tso_logon().render() == bytes(expected)
+def test_logon_server_sends_the_dtl_panel():
+    sent = _capture(server.send_tso_logon)
+    assert bytes(sent) == load_panel("logon").render()
 
 
-def test_logon_with_error_matches_legacy_bytes():
+def test_logon_server_overlays_the_error_message():
     msg = "IKJ56425I PASSWORD NOT CORRECT FOR IBMUSER"
-    expected = _capture(server.send_tso_logon, msg)
-    assert build_tso_logon(error_msg=msg).render() == bytes(expected)
+    sent = _capture(server.send_tso_logon, msg)
+    expected = load_panel("logon")
+    col = max(0, (80 - len(msg)) // 2)
+    expected.add(Text(19, col, msg, DisplayIntensity.HIGH))
+    assert bytes(sent) == expected.render()
 
 
 # ── ISPF menu ────────────────────────────────────────────────────────────────
@@ -80,9 +82,9 @@ def test_ispf_server_substitutes_a_longer_userid(frozen_clock):
 # ── model semantics ──────────────────────────────────────────────────────────
 
 def test_field_addr_maps_named_fields():
-    s = build_tso_logon()
-    assert s.field_addr("userid") == 5 * 80 + 17
-    assert s.field_addr("password") == 6 * 80 + 17
+    s = load_panel("logon")
+    assert s.field_addr("userid") == 4 * 80 + 16
+    assert s.field_addr("password") == 5 * 80 + 16
     assert s.field_addr("missing") is None
 
 
@@ -92,15 +94,15 @@ def test_ispf_option_addr_matches_legacy_constant():
 
 
 def test_parse_maps_addresses_to_names():
-    s = build_tso_logon()
-    raw = {5 * 80 + 17: "IBMUSER", 6 * 80 + 17: "SYS1", 999: "ignored"}
+    s = load_panel("logon")
+    raw = {4 * 80 + 16: "IBMUSER", 5 * 80 + 16: "SYS1", 999: "ignored"}
     aid, named = s.parse(0x7D, raw)
     assert aid == 0x7D
     assert named == {"userid": "IBMUSER", "password": "SYS1"}
 
 
 def test_render_starts_with_erase_write_and_wcc():
-    data = build_tso_logon().render()
+    data = load_panel("logon").render()
     assert data[0] == 0xF5  # ERASE_WRITE
     assert data[1] == 0x43  # WCC: reset + keyboard-restore + reset-MDT
     assert data[-2:] == bytes([server.IAC, server.EOR])

@@ -792,7 +792,10 @@ class _DTLParser(HTMLParser):
                 # TYPE=NONE/BLANK is a blank spacer (consumes the row but draws no
                 # rule); SOLID (the default) / DASH draw a horizontal rule.
                 if str(a.get("type", "solid")).strip().lower() not in ("none", "blank"):
-                    width = max(1, self.screen.width - col - 1)
+                    if ctx is not None and ctx.get("width"):
+                        width = ctx["width"]          # span the box's fixed width
+                    else:
+                        width = max(1, self.screen.width - col - 1)
                     # A CUA rule (role=rule → blue on a colour terminal, mono
                     # unchanged). The standard replacement for the non-standard
                     # <info fill=->.
@@ -818,6 +821,11 @@ class _DTLParser(HTMLParser):
                 "start_idx": len(self.screen.items),
                 "explicit": explicit,
                 "parent": parent,
+                # WIDTH=n fixes the box's column width: a rule inside it spans
+                # exactly WIDTH, and a horiz sibling starts WIDTH+gap to its right
+                # regardless of the box's actual content (so a full-width divider
+                # inside a left column doesn't shove the right column off-screen).
+                "width": self._opt_int(a.get("width")) if "width" in a else None,
                 # A box that transparently continues the parent's flow inherits its
                 # content state, so the first paragraph below a panel title still
                 # gets the CUA title/body separator. An explicitly-positioned box
@@ -1022,10 +1030,16 @@ class _DTLParser(HTMLParser):
                                     if ctx.get("dir") == "horiz" else ctx["row"])
                     if parent.get("dir") == "horiz":
                         # Side-by-side: advance the parent's column past this child
-                        # box and keep the parent on its origin row.
-                        _, right = self._box_extent(ctx["start_idx"])
-                        if right is not None:
-                            parent["col"] = right + self._HGAP
+                        # box and keep the parent on its origin row. A WIDTH-capped
+                        # box advances by its declared width (so its content, e.g. a
+                        # full-width rule, can't shove the next column off-screen);
+                        # otherwise fall back to the box's actual right extent.
+                        if ctx.get("width"):
+                            parent["col"] = ctx["col"] + ctx["width"] + self._HGAP
+                        else:
+                            _, right = self._box_extent(ctx["start_idx"])
+                            if right is not None:
+                                parent["col"] = right + self._HGAP
                         parent["maxbottom"] = max(parent.get("maxbottom", parent["row0"]),
                                                   child_bottom)
                         parent["row"] = parent["row0"]

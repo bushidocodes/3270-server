@@ -34,8 +34,8 @@ ENTER = 0x7D
 ERASE_WRITE = 0xF5
 HEADER = bytes([0x00, 0x00, 0x00, 0x00, 0x00])   # expected outbound data header
 
-USERID_ADDR = 5 * 80 + 17
-PASSWORD_ADDR = 6 * 80 + 17
+USERID_ADDR = 4 * 80 + 16
+PASSWORD_ADDR = 5 * 80 + 16
 ZCMD_ADDR = 2 * 80 + 14
 
 

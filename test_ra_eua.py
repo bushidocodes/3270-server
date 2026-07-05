@@ -74,12 +74,9 @@ def test_space_fill_uses_ra():
     assert out[ra + 3] == 0x40                  # RA fills with EBCDIC space
 
 
-def test_ra_keeps_dtl_panels_byte_identical_to_the_builders():
-    # Both the DTL parser and the screens.py logon builder go through Text.render,
-    # so RA is applied to both — the golden equivalence is preserved.
-    from screens import build_tso_logon
-    assert load_panel("logon").render() == build_tso_logon().render()
-    # ...and the logon panel really does emit RA for its rule lines.
+def test_ra_compacts_the_logon_rule_lines():
+    # The logon panel's column divider rules are long repeated-dash runs, so the
+    # render compacts them with RA (Repeat to Address) rather than literal bytes.
     assert RA in load_panel("logon").render()
 
 

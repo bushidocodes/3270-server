@@ -16,8 +16,8 @@ import pytest
 import server
 from test_tn3270e import _negotiate_e, _read_record   # reuse the TN3270E client
 
-USERID_ADDR = 5 * 80 + 17
-PASSWORD_ADDR = 6 * 80 + 17
+USERID_ADDR = 4 * 80 + 16
+PASSWORD_ADDR = 5 * 80 + 16
 
 
 def _client_tls_context():

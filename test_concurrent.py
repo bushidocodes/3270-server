@@ -105,9 +105,9 @@ def negotiate(sock):
 
 def build_aid(userid, password):
     """Build a minimal Enter AID response with userid + password fields."""
-    # Field addresses from server.py
-    # Userid field: row 5, col 17 (SF at col 16, data at col 17) → addr = 5*80+17 = 417
-    # Password field: row 6, col 17 → addr = 6*80+17 = 497
+    # Field addresses from panels/logon.dtl (auto-flow two-column form)
+    # Userid field: row 4, col 16 (SF at col 15, data at col 16) → addr = 4*80+16 = 336
+    # Password field: row 5, col 16 → addr = 5*80+16 = 416
     # Address encoding: same as server's encode_pack_addr
     def pack_addr(addr):
         hi = ((addr >> 6) & 0x3F) | 0xC0
@@ -123,16 +123,16 @@ def build_aid(userid, password):
 
     # Cursor position (required after AID)
     buf.append(SBA)
-    buf.extend(pack_addr(417))
+    buf.extend(pack_addr(336))
 
     # Userid field
     buf.append(SBA)
-    buf.extend(pack_addr(417))
+    buf.extend(pack_addr(336))
     buf.extend(to_ebcdic(userid))
 
     # Password field
     buf.append(SBA)
-    buf.extend(pack_addr(497))
+    buf.extend(pack_addr(416))
     buf.extend(to_ebcdic(password))
 
     buf.extend([IAC, EOR])
