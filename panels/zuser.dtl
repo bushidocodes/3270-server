@@ -3,8 +3,8 @@
      (not yet implemented). Driven by server._show_submenu; PF3 returns. Auto-flow
      (ISPDTLC-idiomatic): <selfld type=menu>, auto-numbered, no row/col or grid;
      the keyword+description are folded into the padded choice text. -->
-<panel name="zuser" help="ispfhelp">z/OS User Applications
-  <cmdarea cursor="yes">Option ===></cmdarea>
+<panel name="zuser" help="ispfhelp" cursor="ZCMD">z/OS User Applications
+  <cmdarea>Option ===></cmdarea>
 
   <selfld type="menu">
     <choice>Info Center      Information Center Facility</choice>

@@ -7,8 +7,8 @@
      Auto-flow (ISPDTLC-idiomatic): no row/col and no manual number/keyword grid;
      the menu auto-numbers, SELCHAR gives Outlist its 8, and the keyword+description
      are folded into the choice text (padded so the descriptions line up). -->
-<panel name="utility" help="ispfhelp">Utility Selection Panel
-  <cmdarea cursor="yes">Option ===></cmdarea>
+<panel name="utility" help="ispfhelp" cursor="ZCMD">Utility Selection Panel
+  <cmdarea>Option ===></cmdarea>
 
   <selfld type="menu">
     <choice>Library          Compress or print data set; rename/delete members</choice>
