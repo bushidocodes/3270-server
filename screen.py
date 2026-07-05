@@ -140,6 +140,7 @@ _CUA_COLORS = {
     "title":   Color.WHITE,      # panel title (centred heading)
     "rule":    Color.BLUE,       # separator / fill lines
     "inst":    Color.WHITE,      # top/panel instructions
+    "emphasis": Color.WHITE,     # an emphasised line/phrase (<hp>) — high intensity
     "text":    Color.GREEN,      # normal text, field/status labels
     "prompt":  Color.GREEN,      # field prompt ("Option ===>")
     "field":   Color.TURQUOISE,  # unprotected entry field
