@@ -793,7 +793,10 @@ class _DTLParser(HTMLParser):
                 # rule); SOLID (the default) / DASH draw a horizontal rule.
                 if str(a.get("type", "solid")).strip().lower() not in ("none", "blank"):
                     width = max(1, self.screen.width - col - 1)
-                    self.screen.add(Text(row, col, "-" * width))
+                    # A CUA rule (role=rule → blue on a colour terminal, mono
+                    # unchanged). The standard replacement for the non-standard
+                    # <info fill=->.
+                    self.screen.add(Text(row, col, "-" * width, role="rule"))
         elif tag in ("area", "region"):
             # A flow box. With explicit row/col it is a positioned sub-box; with
             # neither it transparently continues the enclosing flow (so its

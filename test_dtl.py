@@ -23,7 +23,7 @@ def test_ispf_dtl_renders_the_menu():
     # The ISPF Primary Option Menu in standard auto-flow DTL (#186): a
     # <selfld type=menu> with SELCHAR option values (0, the 8 gap, X), the
     # keyword+description folded into the padded choice text, and the two-column
-    # User ID/Time footer keeping explicit columns so it stays aligned.
+    # User ID/Time footer as a <region dir=horiz> of two stacked <region>s.
     s = load_panel("ispf", ZUSER="IBMUSER ", ZTIME="13:45")
     assert _ascii_snapshot(s) == "\n".join([
         "                            ISPF Primary Option Menu",
@@ -45,11 +45,10 @@ def test_ispf_dtl_renders_the_menu():
         " 13 z/OS User        z/OS user applications",
         "",
         " X  Exit             Terminate ISPF using log/list defaults",
-        "",
         " Enter X or PF3 to terminate ISPF.",
-        " User ID . . :  IBMUSER                  Time. . . . :  13:45",
-        " System ID . :  SY1                      ISPF Ver. . :  7.1.0",
-        "-" * 79,
+        " User ID . . : IBMUSER  Time. . . . : 13:45",
+        " System ID . : SY1      ISPF Ver. . : 7.1.0",
+        " " + "-" * 78,
     ])
 
 
@@ -116,8 +115,8 @@ def test_ispf_dtl_substitutes_userid_and_time():
     # &ZUSER (padded to 8) and &ZTIME are substituted into the footer at load time.
     s = load_panel("ispf", ZUSER="TESTUSER", ZTIME="09:02")
     footer = [it.text for it in s.items if isinstance(it, Text)]
-    assert "User ID . . :  TESTUSER" in footer
-    assert "Time. . . . :  09:02" in footer
+    assert "User ID . . : TESTUSER" in footer
+    assert "Time. . . . : 09:02" in footer
 
 
 # ── field names survive the round trip ───────────────────────────────────────
