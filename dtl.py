@@ -1574,9 +1574,24 @@ class _DTLParser(HTMLParser):
             "autotab": a.get("autotab", "").lower() == "yes",
             "line": int(a.get("line", 1)),
             "align": a.get("align", "start").lower(),
-            "color": self._color(a),   # DTL COLOR on a <lstcol> colours its cells
+            # DTL COLOR / INTENS / HILITE on a <lstcol> style its cells, exactly as
+            # on a <dtafld>: colour, intensity (HIGH / LOW→normal / NON→non-display)
+            # and highlight (underscore / blink / reverse).
+            "color": self._color(a),
+            "intensity": self._cell_intensity(a.get("intens")),
+            "highlight": self._hilite(a),
             "group": self._lstgrp,
         })
+
+    @staticmethod
+    def _cell_intensity(value):
+        """A <lstcol>/<dtafld> INTENS value → the screen intensity. 3270 has no
+        sub-normal level, so LOW maps to NORMAL; NON is non-display."""
+        return {
+            "high": DisplayIntensity.HIGH,
+            "low": DisplayIntensity.NORMAL,
+            "non": DisplayIntensity.NON_DISPLAY,
+        }.get(str(value or "").strip().lower(), DisplayIntensity.NORMAL)
 
     def _add_group_heading(self, g, start, span, row, ncols):
         """Draw a <lstgrp> heading over its column span at ``(row, start)``.
@@ -1716,15 +1731,23 @@ class _DTLParser(HTMLParser):
                 cy = row + (c["line"] - 1)
                 raw = "" if entry is None else str(entry.get(c["datavar"], ""))
                 value = self._align(raw, c["width"], c["align"])
+                intensity = c.get("intensity", DisplayIntensity.NORMAL)
+                hidden = intensity is DisplayIntensity.NON_DISPLAY
                 if c["usage"] == "out":
-                    self.screen.add(Text(cy, c["x"], value, DisplayIntensity.NORMAL,
-                                         color=c.get("color"), role="cell"))
+                    self.screen.add(Text(cy, c["x"], value, intensity,
+                                         color=c.get("color"),
+                                         highlight=c.get("highlight"), role="cell"))
                 else:
                     self.screen.add(Field(
                         row=cy, col=c["x"], length=c["width"],
                         name=c["datavar"] or None, default=value,
                         terminator=id(c) in last_in_ids,
-                        color=c.get("color"), role="cell",
+                        # INTENS=NON → a non-display input cell (Field.hidden);
+                        # otherwise carry HIGH/normal intensity onto the field.
+                        intensity=DisplayIntensity.NORMAL if hidden else intensity,
+                        hidden=hidden,
+                        color=c.get("color"), highlight=c.get("highlight"),
+                        role="cell",
                     ))
             if div_fill:   # None (no divider) or "" (blank spacer) draw nothing
                 col0 = cols[0]["x"]

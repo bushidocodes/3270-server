@@ -1694,6 +1694,48 @@ def test_list_group_heading_alignment():
     assert gpos(two.replace("<lstgrp>", "<lstgrp align=start>")) == {"Wk": 1}
 
 
+def test_list_column_intens_and_hilite_style_cells():
+    # #233: INTENS (HIGH / LOW→normal / NON→non-display) and HILITE
+    # (USCORE/BLINK/REVERSE) on a <lstcol> style its cells, like a <dtafld>.
+    s = load_dtl(
+        '<panel name="p"><area><lstfld>'
+        '<lstcol datavar=a colwidth=6 usage=out intens=high>A'
+        '<lstcol datavar=b colwidth=6 usage=out intens=low hilite=uscore>B'
+        '<lstcol datavar=c colwidth=6 usage=out intens=non>C'
+        '<lstcol datavar=d colwidth=6 intens=high hilite=reverse>D'
+        '</lstfld></area></panel>',
+        rows=[{"a": "aa", "b": "bb", "c": "cc", "d": "dd"}])
+    cells = {it.text if isinstance(it, Text) else it.name: it
+             for it in s.items if getattr(it, "role", None) == "cell"}
+    H, N, NON = (DisplayIntensity.HIGH, DisplayIntensity.NORMAL,
+                 DisplayIntensity.NON_DISPLAY)
+    # Output cells carry intensity + highlight directly.
+    assert cells["aa"].intensity is H
+    assert cells["bb"].intensity is N and cells["bb"].highlight is Highlight.UNDERSCORE
+    assert cells["cc"].intensity is NON                      # INTENS=NON → non-display
+    # An input cell: INTENS/HILITE thread onto the Field.
+    assert cells["d"].intensity is H and cells["d"].highlight is Highlight.REVERSE
+    assert cells["d"].hidden is False
+    # A plain column (no INTENS/HILITE) is unchanged: normal, no highlight.
+    plain = load_dtl('<panel name="p"><area><lstfld>'
+                     '<lstcol datavar=x colwidth=4 usage=out>X</lstfld></area></panel>',
+                     rows=[{"x": "1"}])
+    cell = next(it for it in plain.items if getattr(it, "role", None) == "cell"
+                and isinstance(it, Text))
+    assert cell.intensity is N and cell.highlight is None
+
+
+def test_list_column_intens_non_input_cell_is_hidden():
+    # INTENS=NON on an INPUT column makes the field non-display (Field.hidden),
+    # so the render suppresses its data/colour like a password field.
+    s = load_dtl('<panel name="p"><area><lstfld>'
+                 '<lstcol datavar=pw colwidth=8 intens=non>Secret'
+                 '</lstfld></area></panel>', rows=[{"pw": "hunter2"}])
+    fld = next(it for it in s.items
+               if isinstance(it, Field) and it.role == "cell")
+    assert fld.hidden is True
+
+
 def test_list_field_display_column_and_data_rows():
     # usage=out renders protected text; input columns are pre-filled from the
     # supplied rows; one model entry per row.
