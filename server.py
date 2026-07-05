@@ -1134,6 +1134,10 @@ def _show_member_list(client_socket, model=None):
             top += page
         elif aid_str in ("PF7", "PF19"):
             top -= page
+        elif aid_str == "PF1":   # HELP: the member cell's <lstcol help=>, else panel
+            help_panel = screen.help_for(cursor) or screen.help
+            if help_panel:
+                _show_overlay(client_socket, help_panel)
         elif aid_str == "Enter" and cursor is not None:
             member = member_by_row.get(cursor // cols)   # width-aware row decode
             if member:

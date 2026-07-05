@@ -301,6 +301,15 @@ class Text:
     # field independently via SA orders (see :meth:`rich`). ``None`` means a plain
     # field whose whole text uses the base attribute.
     runs: Optional[list] = None
+    # Field-level help panel (DTL <lstcol help=...> on a display column): shown when
+    # the cursor is on this cell and HELP is pressed. Metadata — not part of identity.
+    help: Optional[str] = _dc_field(default=None, compare=False)
+
+    @property
+    def data_addr(self) -> int:
+        """Linear buffer address (row*80 + col+1) where this text's data starts;
+        the field-attribute byte occupies ``col``."""
+        return self.row * 80 + (self.col + 1)
 
     @classmethod
     def rich(cls, row, col, runs, *, intensity=DisplayIntensity.NORMAL,
@@ -656,6 +665,11 @@ class Screen:
         for f in self.items:
             if isinstance(f, Field) and f.help and \
                     f.data_addr <= cursor_addr < f.data_addr + f.length:
+                return f.help
+            # A display cell (e.g. an output <lstcol help=...>) can also carry
+            # field-level help; its data spans data_addr .. +len(text).
+            if isinstance(f, Text) and f.help and \
+                    f.data_addr <= cursor_addr < f.data_addr + len(f.text):
                 return f.help
         for choice in self.action_bar:
             start = choice["row"] * 80 + choice["col"]
