@@ -1616,7 +1616,8 @@ def test_note_list_renders_heading_and_numbered_items():
 # ── list/table fields (<lstfld>/<lstcol>/<lstgrp>) ───────────────────────────
 
 def test_list_field_columns_laid_out_with_headings():
-    # Columns flow left to right by colwidth plus a one-column gap; their
+    # Columns flow left to right by colwidth plus the CUA attribute-byte gutter
+    # (an input column reserves +3: lead attr, trail attr, trailing blank); their
     # headings render on one row, with an (empty) input model row beneath.
     s = load_dtl(
         '<panel name="p"><area>'
@@ -1625,9 +1626,9 @@ def test_list_field_columns_laid_out_with_headings():
     )
     H = DisplayIntensity.HIGH
     assert s.items == [
-        Text(0, 1, "Mon", H), Text(0, 7, "Tue", H),
+        Text(0, 1, "Mon", H), Text(0, 9, "Tue", H),
         Field(row=1, col=1, length=5, name="a", terminator=False),
-        Field(row=1, col=7, length=5, name="b", terminator=True),
+        Field(row=1, col=9, length=5, name="b", terminator=True),
     ]
 
 
@@ -1643,10 +1644,10 @@ def test_list_field_group_headline_dashes_over_columns():
     )
     H = DisplayIntensity.HIGH
     assert s.items == [
-        Text(0, 1, "--- Wk ----", H),              # dashed rule over cols 1..11
-        Text(1, 1, "Mon", H), Text(1, 7, "Tue", H),
+        Text(0, 1, "---- Wk -----", H),             # dashed rule over cols 1..13
+        Text(1, 1, "Mon", H), Text(1, 9, "Tue", H),
         Field(row=2, col=1, length=5, name="a", terminator=False),
-        Field(row=2, col=7, length=5, name="b", terminator=True),
+        Field(row=2, col=9, length=5, name="b", terminator=True),
     ]
 
 
@@ -1679,9 +1680,9 @@ def test_list_field_display_column_and_data_rows():
     )
     H, N = DisplayIntensity.HIGH, DisplayIntensity.NORMAL
     assert s.items == [
-        Text(0, 1, "Time", H), Text(0, 6, "Who", H),
-        Text(1, 1, "8:00", N),  Field(row=1, col=6, length=6, name="who", default="Acme", terminator=True),
-        Text(2, 1, "9:00", N),  Field(row=2, col=6, length=6, name="who", default="Globex", terminator=True),
+        Text(0, 1, "Time", H), Text(0, 7, "Who", H),   # Time is usage=out → +2 gutter
+        Text(1, 1, "8:00", N),  Field(row=1, col=7, length=6, name="who", default="Acme", terminator=True),
+        Text(2, 1, "9:00", N),  Field(row=2, col=7, length=6, name="who", default="Globex", terminator=True),
         Text(3, 1, "*" * 31 + " BOTTOM OF DATA " + "*" * 31, H, role="heading"),
         Text(0, 64, "ROW 1 TO 2 OF 2", H, role="status"),   # scroll status, right of title row
     ]
@@ -1729,10 +1730,45 @@ def test_list_field_line_attribute_stacks_columns():
     )
     H = DisplayIntensity.HIGH
     assert s.items == [
-        Text(0, 1, "A", H), Text(0, 7, "B", H),
+        Text(0, 1, "A", H), Text(0, 9, "B", H),
         Field(row=1, col=1, length=5, name="a", terminator=True),
-        Field(row=2, col=7, length=5, name="b", terminator=True),
+        Field(row=2, col=9, length=5, name="b", terminator=True),
     ]
+
+
+def test_list_field_div_divider_after_each_model_set():
+    # #221: LSTFLD DIV=NONE|BLANK|SOLID|DASH|char draws a divider as the last line
+    # of each model set. Under NOGRAPHIC (a text terminal) SOLID and DASH both
+    # render as a dashed rule; BLANK is a spacer row; a literal char/string is
+    # replicated to the panel width with its case preserved.
+    src = ('<panel name="p" width="40"><area><lstfld div=%s>'
+           '<lstcol datavar=a colwidth=6 usage=out>Name'
+           '<lstcol datavar=b colwidth=3 usage=out>Age</lstfld></area></panel>')
+    rows = [{"a": "Pete", "b": "41"}, {"a": "Sally", "b": "39"}]
+
+    solid = load_dtl(src % "solid", rows=rows)
+    rules = [t for t in solid.items if getattr(t, "role", None) == "rule"]
+    assert [r.row for r in rules] == [2, 4]                 # after each of 2 entries
+    assert all(set(r.text) == {"-"} and len(r.text) == 38 for r in rules)
+
+    # DASH renders identically to SOLID on a text terminal.
+    dash = load_dtl(src % "dash", rows=rows)
+    assert [t.text for t in dash.items if getattr(t, "role", None) == "rule"] \
+        == [r.text for r in rules]
+
+    # BLANK reserves a spacer row (the next entry is pushed down) but draws nothing.
+    blank = load_dtl(src % "blank", rows=rows)
+    assert not [t for t in blank.items if getattr(t, "role", None) == "rule"]
+    assert [t.row for t in blank.items if getattr(t, "text", "") == "Sally"] == [3]
+
+    # A literal character is replicated to the width, case preserved.
+    star = load_dtl(src % '"="', rows=rows)
+    star_rules = [t for t in star.items if getattr(t, "role", None) == "rule"]
+    assert all(set(r.text) == {"="} for r in star_rules)
+
+    # NONE (the default) draws no divider.
+    none = load_dtl(src % "none", rows=rows)
+    assert not [t for t in none.items if getattr(t, "role", None) == "rule"]
 
 
 def test_list_column_outside_list_field_raises():
@@ -2060,10 +2096,11 @@ def test_lstfld_reference_figure_snapshot():
     plain, column headings are not truncated to COLWIDTH, the data/model rows, then
     a "BOTTOM OF DATA" line spanning the table.
 
-    Deltas from the IBM figure (documented): the column gutter is 1 (the figure
-    reserves 2-3 for CUA attribute bytes, #221); input/BOTH cells show as blank
-    fields here (the snapshot renders fields as underscores); the F-key area is
-    ISPF chrome."""
+    Each column reserves the CUA attribute-byte gutter (#221): an output column
+    +2 (lead+trail attr), a non-autotab input column +3 (lead+trail attr + a
+    trailing blank), per the LSTCOL COLSPACE definition. Deltas from the IBM
+    figure (documented): input/BOTH cells show as blank fields here (the snapshot
+    renders fields as underscores); the F-key area is ISPF chrome."""
     src = ("<PANEL NAME=lstcola WIDTH=76>Subscriber List\n"
            "<TOPINST>Enter phone number and approved indicator for each person.\n"
            "<AREA>\n  <LSTFLD>\n"
@@ -2084,11 +2121,11 @@ def test_lstfld_reference_figure_snapshot():
     assert _ascii_snapshot(load_dtl(src, rows=rows)) == "\n".join([
         "                              Subscriber List               ROW 1 TO 3 OF 3",
         " Enter phone number and approved indicator for each person.",
-        " -------- Subscriber Name ---------    Phone     Approved",
-        " First Name      Last Name       MI Number       (Y or N)",
-        " Pete            Moss            P   ____________ _",
-        " Sally           Forth           N   ____________ _",
-        " Melba           Toast           T   ____________ _",
+        " --------- Subscriber Name ----------     Phone       Approved",
+        " First Name       Last Name        MI  Number         (Y or N)",
+        " Pete             Moss             P    ____________   _",
+        " Sally            Forth            N    ____________   _",
+        " Melba            Toast            T    ____________   _",
         " " + "*" * 29 + " BOTTOM OF DATA " + "*" * 29,   # table end reached
         "   ________",
     ])

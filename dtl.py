@@ -691,6 +691,7 @@ class _DTLParser(HTMLParser):
                 "cols": [], "groups": [], "ctx": ctx,
                 "row": int(a["row"]) if "row" in a else (ctx["row"] if ctx else 0),
                 "col": int(a["col"]) if "col" in a else (ctx["col"] if ctx else 1),
+                "div": a.get("div", "none"),   # divider after each model set (raw)
             }
             self._lstgrp = None
         elif tag == "lstgrp":
@@ -1554,6 +1555,7 @@ class _DTLParser(HTMLParser):
             "datavar": a.get("datavar", ""),
             # A column is an input field unless it is explicitly display-only.
             "usage": "out" if a.get("usage", "").lower() == "out" else "in",
+            "autotab": a.get("autotab", "").lower() == "yes",
             "line": int(a.get("line", 1)),
             "align": a.get("align", "start").lower(),
             "color": self._color(a),   # DTL COLOR on a <lstcol> colours its cells
@@ -1572,7 +1574,10 @@ class _DTLParser(HTMLParser):
         x = fld["col"]
         for c in cols:
             c["x"] = x
-            x += c["fmt"] + 1  # column formatting width + a one-column gap
+            # Each column reserves its formatting width plus the CUA attribute-byte
+            # space: OUT (or IN/BOTH with AUTOTAB) → +2 (lead+trail attr); a plain
+            # input column (AUTOTAB=NO) → +3 (lead+trail attr + a trailing blank).
+            x += c["fmt"] + (2 if c["usage"] == "out" or c["autotab"] else 3)
         row = fld["row"]
         H = DisplayIntensity.HIGH
         # The group-heading row shows every group that has a heading; HEADLINE=yes
@@ -1630,11 +1635,26 @@ class _DTLParser(HTMLParser):
             if c["usage"] == "in":
                 last_in[c["line"]] = c
         last_in_ids = {id(c) for c in last_in.values()}
+        # DIV draws a divider as the last line of each model set. Under NOGRAPHIC
+        # (a text terminal) SOLID and DASH both fall back to a rule of dashes;
+        # BLANK is a spacer line; any other value is that literal character (or
+        # string) replicated to the available width.
+        div = self._lstfld.get("div", "none")
+        divkey = div.lower()
+        if divkey in ("none", ""):
+            div_fill = None       # no divider
+        elif divkey == "blank":
+            div_fill = ""         # a blank spacer row
+        elif divkey in ("solid", "dash"):
+            div_fill = "-"
+        else:
+            div_fill = div        # literal char/string, case preserved
+        div_rows = 0 if div_fill is None else 1
         data = self._rows if self._rows else [None]
         clipped = False
         shown = 0
         for entry in data:
-            if row + entry_height > self.screen.depth - 1:
+            if row + entry_height + div_rows > self.screen.depth - 1:
                 clipped = True
                 break  # leave room; don't overrun the panel
             if entry is not None:
@@ -1653,7 +1673,13 @@ class _DTLParser(HTMLParser):
                         terminator=id(c) in last_in_ids,
                         color=c.get("color"), role="cell",
                     ))
-            row += entry_height
+            if div_fill:   # None (no divider) or "" (blank spacer) draw nothing
+                col0 = cols[0]["x"]
+                span = max(1, self.screen.width - col0 - 1)
+                line = (div_fill * (span // len(div_fill) + 1))[:span]
+                self.screen.add(Text(row + entry_height, col0, line,
+                                     DisplayIntensity.NORMAL, role="rule"))
+            row += entry_height + div_rows
         # When the end of the table is on screen (rows supplied, not clipped by a
         # deeper page), ISPF draws a "BOTTOM OF DATA" line spanning the table.
         if self._rows is not None and not clipped and cols \
