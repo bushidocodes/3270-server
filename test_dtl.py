@@ -2417,6 +2417,25 @@ def test_dl_headers_reference_figure_snapshot():
     ])
 
 
+def test_dl_format_positions_term_within_tsize():
+    # #123: <dl format=> places the DT term within its TSIZE column (START left,
+    # CENTER centred, END right); the description column stays at base+TSIZE.
+    def cols(fmt):
+        s = load_dtl(f'<panel name=p width=40><area><info><dl tsize=8 format={fmt}>'
+                     '<dt>AP<dd>Apple</dl></info></area></panel>')
+        term = next(it.col for it in s.items if isinstance(it, Text) and it.text == "AP")
+        desc = next(it.col for it in s.items
+                    if isinstance(it, Text) and it.text.strip() == "Apple")
+        return term, desc
+
+    start_t, start_d = cols("start")
+    center_t, _ = cols("center")
+    end_t, end_d = cols("end")
+    assert start_t < center_t < end_t                    # term shifts right
+    assert end_t + len("AP") <= end_d                    # END term stays within TSIZE
+    assert start_d == end_d                              # description column unmoved
+
+
 def test_dl_indent_shifts_the_whole_list():
     # #123: <dl indent=n> indents the whole definition list from the left margin —
     # headers, terms, descriptions, and dividers all shift right by n columns.
