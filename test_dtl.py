@@ -1668,6 +1668,32 @@ def test_list_column_heading_not_truncated_and_all_groups_shown():
     assert "Phone" in texts                           # headline=no group still shown
 
 
+def test_list_group_heading_alignment():
+    # #221 follow-up: LSTGRP ALIGN. The default (CENTER) centres a heading over
+    # MULTIPLE columns but LEFT-justifies it over a SINGLE column, so a one-column
+    # group heading sits directly above its column (not floated to the centre).
+    def gpos(markup):
+        s = load_dtl('<panel name="p" width="60"><area><lstfld>'
+                     + markup + '</lstfld></area></panel>')
+        return {t.text: t.col for t in s.items
+                if getattr(t, "row", None) == 0 and hasattr(t, "text")}
+
+    one = '<lstgrp>Phone<lstcol datavar=p colwidth=12>Number</lstgrp>'
+    # Single column: Phone (default center) is left-justified over col x=1.
+    assert gpos(one) == {"Phone": 1}
+    # ALIGN=CENTER explicitly is still left-justified over a single column.
+    assert gpos(one.replace("<lstgrp>", "<lstgrp align=center>")) == {"Phone": 1}
+    # ALIGN=END right-justifies within the 12-wide column span (1 + 12 - 5 = 8).
+    assert gpos(one.replace("<lstgrp>", "<lstgrp align=end>")) == {"Phone": 8}
+
+    two = ('<lstgrp>Wk<lstcol datavar=a colwidth=5>Mon'
+           '<lstcol datavar=b colwidth=5>Tue</lstgrp>')
+    # Multiple columns: Wk (default) is centred over the two-column span.
+    assert gpos(two) == {"Wk": 6}
+    # ALIGN=START left-justifies even over multiple columns.
+    assert gpos(two.replace("<lstgrp>", "<lstgrp align=start>")) == {"Wk": 1}
+
+
 def test_list_field_display_column_and_data_rows():
     # usage=out renders protected text; input columns are pre-filled from the
     # supplied rows; one model entry per row.
@@ -2092,8 +2118,9 @@ def test_notel_reference_figure_snapshot():
 
 def test_lstfld_reference_figure_snapshot():
     """LSTFLD/LSTCOL reference Figure 1 (Subscriber List): a grouped table — the
-    HEADLINE=yes group is a dashed rule around its heading, other groups show
-    plain, column headings are not truncated to COLWIDTH, the data/model rows, then
+    HEADLINE=yes group is a dashed rule around its centered heading; a single-column
+    group (Phone, Approved) is left-justified over its column per the LSTGRP ALIGN
+    default; column headings are not truncated to COLWIDTH; the data/model rows, then
     a "BOTTOM OF DATA" line spanning the table.
 
     Each column reserves the CUA attribute-byte gutter (#221): an output column
@@ -2121,7 +2148,7 @@ def test_lstfld_reference_figure_snapshot():
     assert _ascii_snapshot(load_dtl(src, rows=rows)) == "\n".join([
         "                              Subscriber List               ROW 1 TO 3 OF 3",
         " Enter phone number and approved indicator for each person.",
-        " --------- Subscriber Name ----------     Phone       Approved",
+        " --------- Subscriber Name ----------  Phone          Approved",
         " First Name       Last Name        MI  Number         (Y or N)",
         " Pete             Moss             P    ____________   _",
         " Sally            Forth            N    ____________   _",

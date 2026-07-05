@@ -698,10 +698,13 @@ class _DTLParser(HTMLParser):
             if self._lstfld is None:
                 raise DTLError("<lstgrp> outside of a <lstfld>")
             hv = a.get("headline")
+            # HEADLINE=YES|DASH both draw the group's dashed rule (under NOGRAPHIC
+            # they are identical); NO / absent draws the heading text alone.
             headline = "headline" in a and (
-                hv is None or str(hv).lower() in ("yes", "true", "1", "headline")
+                hv is None or str(hv).lower() in ("yes", "dash", "true", "1", "headline")
             )
-            self._lstgrp = {"heading": "", "headline": headline}
+            align = a.get("align", "center").lower()
+            self._lstgrp = {"heading": "", "headline": headline, "align": align}
             self._lstfld["groups"].append(self._lstgrp)
             self._tag, self._attrs, self._chars = "lstgrp", a, []  # capture heading
         elif tag == "lstcol":
@@ -1590,15 +1593,35 @@ class _DTLParser(HTMLParser):
                     continue
                 start = gcols[0]["x"]
                 span = max(1, gcols[-1]["x"] + gcols[-1]["fmt"] - start)
-                if g["headline"]:              # dashes around the centered heading
+                # ALIGN: START=left, END=right, CENTER (default) centres over
+                # multiple columns but LEFT-justifies over a single column, so a
+                # one-column group heading sits directly above its column.
+                align = g["align"]
+                if align == "start" or (align != "end" and len(gcols) == 1):
+                    just = "start"
+                elif align == "end":
+                    just = "end"
+                else:
+                    just = "center"
+                if g["headline"]:              # dashed rule around the heading
                     inner = f" {g['heading']} " if g["heading"] else "-"
                     pad = max(0, span - len(inner))
-                    text = ("-" * (pad // 2) + inner + "-" * (pad - pad // 2))[:span]
+                    if just == "start":
+                        text = (inner + "-" * pad)[:span]
+                    elif just == "end":
+                        text = ("-" * pad + inner)[:span]
+                    else:
+                        text = ("-" * (pad // 2) + inner + "-" * (pad - pad // 2))[:span]
                     self.screen.add(Text(row, start, text, H, role="heading"))
                 else:
                     text = g["heading"][:span]
-                    gx = start + max(0, (span - len(text)) // 2)
-                    self.screen.add(Text(row, gx, text, H, role="heading"))
+                    if just == "start":
+                        off = 0
+                    elif just == "end":
+                        off = max(0, span - len(text))
+                    else:
+                        off = max(0, (span - len(text)) // 2)
+                    self.screen.add(Text(row, start + off, text, H, role="heading"))
             row += 1
         for c in cols:
             if c["heading"]:
