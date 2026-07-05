@@ -2390,6 +2390,29 @@ def test_dl_headers_reference_figure_snapshot():
     ])
 
 
+def test_dl_list_divider_types():
+    # #120: <dldiv> draws a horizontal divider across a definition list. TYPE=NONE
+    # (default) is a blank spacer; SOLID/DASH a dashed rule; TEXT lays out the
+    # divider text (FORMAT positions it). <pldiv> is the <parml> equivalent.
+    def rows(markup):
+        s = load_dtl('<panel name=p width=40><area><info><dl tsize=6>'
+                     + markup + '</dl></info></area></panel>')
+        return _ascii_snapshot(s).split("\n")
+
+    dash = rows('<dt>A<dd>Apple<dldiv type=dash><dt>B<dd>Berry')
+    rule = next(ln for ln in dash if set(ln.strip()) == {"-"})   # a dashed rule row
+    assert len(rule.strip()) > 5
+
+    text = rows('<dt>A<dd>Apple<dldiv type=text format=center>More<dt>B<dd>Berry')
+    assert any(ln.strip() == "More" for ln in text)              # divider text shown
+
+    # TYPE=NONE (default) draws nothing — a blank spacer between the two entries.
+    none = rows('<dt>A<dd>Apple<dldiv><dt>B<dd>Berry')
+    assert not any(set(ln.strip()) == {"-"} for ln in none)      # no rule drawn
+    a_row = next(i for i, ln in enumerate(none) if "Apple" in ln)
+    assert none[a_row + 1].strip() == ""                         # blank spacer row
+
+
 def test_dl_headers_compact_suppresses_blank():
     # COMPACT on the <dl> drops the blank line between the heading and the items.
     src = ("<panel name=p width=40><area><info>"
