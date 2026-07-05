@@ -282,6 +282,10 @@ _FLOW_TEXT_TAGS = ("p", "li", "dt", "dd", "pt", "pd", "lp", "lines", "xmp") + tu
 # <pnlinst> (panel), and <botinst> (bottom) instructions.
 _INSTRUCTION_TAGS = ("topinst", "pnlinst", "botinst")
 _TEXT_TAGS = ("info",) + _INSTRUCTION_TAGS + _FLOW_TEXT_TAGS
+# ISPDTLC inserts a blank line BEFORE a flowed paragraph or panel instruction (and
+# before a bottom instruction, which we anchor separately); COMPACT suppresses it.
+# A TOPINST instead gets a blank line AFTER it. See the P/TOPINST tag references.
+_BLANK_BEFORE_TAGS = ("p", "pnlinst")
 _CONTENT_TAGS = _TEXT_TAGS + ("dtafld", "cmdarea", "choice", "figcap")
 _FIELD_TAGS = ("dtafld", "cmdarea")
 
@@ -1186,6 +1190,8 @@ class _DTLParser(HTMLParser):
             # (dir=horiz) column math only approximates ISPDTLC's, so clamp to the
             # edge rather than abort the whole panel (as the width clamp does too).
             col = max(0, self.screen.width - 2)
+        if ctx is not None:
+            ctx["had_content"] = True   # real content — a later block skips before it
         return row, col, ctx
 
     # Unordered-list bullets by nesting depth (ISPF: o, then -, then --, …).
@@ -1323,6 +1329,10 @@ class _DTLParser(HTMLParser):
         self._title_item = item
         if self._areas and self._areas[-1]["row"] < flow_row:
             self._areas[-1]["row"] = flow_row  # flow starts below the title
+        # The title is content in the panel box, so the first flowed paragraph
+        # skips a blank line below it — the CUA title/body separator.
+        if self._areas:
+            self._areas[-1]["had_content"] = True
 
     def _retract_title_if_collision(self):
         """Drop an auto title (and its action-bar separator rule) that collides
@@ -1874,6 +1884,11 @@ class _DTLParser(HTMLParser):
             return text.center(width)
         return text  # start/left: no padding (an input field fills its own width)
 
+    def _row_occupied(self, row):
+        """Whether any screen item sits on ``row`` — used to decide if a block's
+        leading blank line is needed (skip it when the row above is already blank)."""
+        return any(getattr(it, "row", None) == row for it in self.screen.items)
+
     def _emit_info(self, a, content, tag="info", runs=None):
         # ``runs`` (from inline <hp>) is a list of (text, color, highlight); the
         # concatenation is the field's plain text, so mono renders identically.
@@ -1923,6 +1938,17 @@ class _DTLParser(HTMLParser):
         text = " ".join(content.split())
         if not text:
             return
+        # ISPDTLC block spacing: a blank line precedes a flowed paragraph or panel
+        # instruction (COMPACT suppresses it). It is added only when the box already
+        # holds real content (``had_content`` — so the first block in a box, and the
+        # first content inside a figure's framing rules, get no leading blank) AND
+        # the row above is not already blank (so a TOPINST's trailing blank, or the
+        # title/body gap, is not doubled).
+        ctx0 = self._areas[-1] if self._areas else None
+        if (ctx0 is not None and "row" not in a and tag in _BLANK_BEFORE_TAGS
+                and not _bool_attr(a, "compact") and ctx0.get("had_content")
+                and ctx0["row"] >= 1 and self._row_occupied(ctx0["row"] - 1)):
+            ctx0["row"] += 1
         row, col, ctx = self._resolve_pos(a, "info")
         if self._lists:
             # A paragraph inside a list aligns with the list's item text.
@@ -1953,6 +1979,9 @@ class _DTLParser(HTMLParser):
             self._emit_flow_runs(runs, row, col, ctx, role)
             return
         self._emit_flow_lines(text, row, col, ctx, role=role)
+        # A TOPINST is followed by a blank line (COMPACT suppresses it).
+        if tag == "topinst" and ctx is not None and not _bool_attr(a, "compact"):
+            ctx["row"] += 1
 
     def _emit_note(self, tag, a, content):
         """Render a <note>/<nt>. The heading (``TEXT=`` override, else ``Note:``)
