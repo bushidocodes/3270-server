@@ -10,7 +10,7 @@
 
   <dtafld datavar="member" entwidth="8">Member name ===></dtafld>
 
-  <info intensity="high">&VIEWMSG</info>
+  <info><hp>&VIEWMSG</hp></info>
   <info>Note: this demo opens the member for display; editing is not saved.</info>
 
   <botinst>Enter a member name, or PF3 to return to the Primary Option Menu.</botinst>

@@ -15,7 +15,7 @@
     <choice>Member list      Display a member parts list</choice>
   </selfld>
 
-  <info intensity="high">&SELMSG</info>
+  <info><hp>&SELMSG</hp></info>
   <botinst>Enter an option, or PF3 to return to the Primary Option Menu.</botinst>
 
   <keyl name="FGNDKEYS">

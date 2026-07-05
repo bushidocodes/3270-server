@@ -40,8 +40,9 @@ Supported tags
                                  flow resumes below the tallest column; ``width=n``
                                  fixes a column's width. Explicit positions always
                                  win, so non-flowed panels are unaffected.
-``<info row col intensity>``     protected text (label / instruction). A horizontal
-                                 rule is a ``<divider>``.
+``<info row col>``               protected text (label / instruction). A whole-line
+                                 ``<hp>`` is CUA emphasis (high intensity + white);
+                                 a horizontal rule is a ``<divider>``.
 ``<topinst row col>``            top / panel / bottom instruction text. Render like
 ``<pnlinst row col>``            ``<info>`` (protected text); semantic DTL tags. A
 ``<botinst row col>``            flowed ``<botinst>`` anchors at the panel foot.
@@ -129,7 +130,7 @@ length), ``display`` (``display=no`` is non-display, e.g. password), ``numeric``
 ``init`` (initial value),
 ``required`` (``required=yes`` must be non-empty on submit; ``msg`` names the error),
 ``deswidth`` (width of a trailing ``<dtafldd>`` description),
-``cursor`` (place the cursor here), ``mdt`` (default yes), ``intensity`` (prompt).
+``cursor`` (place the cursor here), ``mdt`` (default yes), ``intens`` (prompt).
 
 Variable substitution: dialog-variable references are written ISPF-style with a
 leading ``&`` (e.g. ``&ZUSER``, ``&ZTIME``) and resolved from the keyword
@@ -312,7 +313,9 @@ def _bool_attr(attrs, key, default=False):
     return _truthy(value) or str(value).strip().lower() == key
 
 
-def _intensity(attrs, key="intensity", default=DisplayIntensity.NORMAL):
+def _intensity(attrs, key="intens", default=DisplayIntensity.NORMAL):
+    # The standard DTL attribute is INTENS (valid on field/selection elements);
+    # the non-standard ``intensity`` is no longer read (emphasis is <hp>).
     return _INTENSITY.get(str(attrs.get(key, "")).lower(), default)
 
 
@@ -1985,6 +1988,17 @@ class _DTLParser(HTMLParser):
             role = "title"
         else:
             role = "text"
+        # A whole line that is a single <hp> (its entire content emphasised, e.g.
+        # <info><hp>&SELMSG</hp></info>) is a high-intensity white line — CUA
+        # emphasis on both mono (intensified field) and colour (white). A <hp>
+        # *phrase within* a line keeps its SA colour/highlight run (mixed → >1 run).
+        whole_hp = runs is not None and len(runs) == 1
+        if whole_hp:
+            role = "emphasis"
+            runs = None                       # render as a plain emphasised Text
+            emph = DisplayIntensity.HIGH
+        else:
+            emph = _intensity(a)
         if "row" in a:
             # Explicit position: emit content exactly as written (no wrap), so
             # the bundled panels stay byte-for-byte identical (mono).
@@ -1999,9 +2013,9 @@ class _DTLParser(HTMLParser):
                 # and whose <hp> phrase carries its own colour/highlight. Mono
                 # renders as the plain concatenation, byte-for-byte unchanged.
                 self.screen.add(Text.rich(row, col, runs,
-                                          intensity=_intensity(a), role=role))
+                                          intensity=emph, role=role))
             else:
-                self.screen.add(Text(row, col, content, _intensity(a), role=role))
+                self.screen.add(Text(row, col, content, emph, role=role))
             return
         # Flowed text: normalize whitespace and word-wrap to the panel width.
         text = " ".join(content.split())
@@ -2041,7 +2055,7 @@ class _DTLParser(HTMLParser):
             # across the word-wrap (SA runs per line), instead of dropping to plain.
             self._emit_flow_runs(runs, row, col, ctx, role)
             return
-        self._emit_flow_lines(text, row, col, ctx, role=role)
+        self._emit_flow_lines(text, row, col, ctx, role=role, intensity=emph)
         # A TOPINST is followed by a blank line (COMPACT suppresses it).
         if tag == "topinst" and ctx is not None and not _bool_attr(a, "compact"):
             ctx["row"] += 1

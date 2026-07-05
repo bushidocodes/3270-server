@@ -175,12 +175,12 @@ def test_instruction_tags_render_like_info():
     s = load_dtl(
         '<panel>'
         '<topinst row="2" col="1">Enter parameters:</topinst>'
-        '<pnlinst row="16" col="1" intensity="high">Press ENTER</pnlinst>'
+        '<pnlinst row="16" col="1">Press ENTER</pnlinst>'
         '<botinst row="23" col="1">PF3=Exit</botinst>'
         '</panel>'
     )
     assert s.items[0] == Text(2, 1, "Enter parameters:", DisplayIntensity.NORMAL)
-    assert s.items[1] == Text(16, 1, "Press ENTER", DisplayIntensity.HIGH)
+    assert s.items[1] == Text(16, 1, "Press ENTER", DisplayIntensity.NORMAL)
     assert s.items[2] == Text(23, 1, "PF3=Exit", DisplayIntensity.NORMAL)
 
 
@@ -327,13 +327,14 @@ def test_hp_surrounding_text_keeps_the_element_role():
     assert it.color is None           # field base uses the role colour, not turq
 
 
-def test_info_intensity():
+def test_info_hp_emphasis():
+    # A whole-line <hp> is CUA emphasis: high intensity (mono) + white (colour).
     s = load_dtl(
         '<panel>'
-        '<info row="0" col="0" intensity="high">hi</info>'
+        '<info row="0" col="0"><hp>hi</hp></info>'
         '</panel>'
     )
-    assert s.items[0] == Text(0, 0, "hi", DisplayIntensity.HIGH)
+    assert s.items[0] == Text(0, 0, "hi", DisplayIntensity.HIGH, role="emphasis")
 
 
 def test_dtafld_emits_prompt_then_field():
@@ -2975,8 +2976,8 @@ def test_doctype_prolog_is_tolerated():
 
 
 def test_tag_and_attribute_names_are_case_insensitive():
-    s = load_dtl('<PANEL><INFO ROW="1" COL="2" INTENSITY="high">hi</INFO></PANEL>')
-    assert s.items == [Text(1, 2, "hi", DisplayIntensity.HIGH)]
+    s = load_dtl('<PANEL><INFO ROW="1" COL="2"><HP>hi</HP></INFO></PANEL>')
+    assert s.items == [Text(1, 2, "hi", DisplayIntensity.HIGH, role="emphasis")]
 
 
 def test_boolean_attribute_minimization():

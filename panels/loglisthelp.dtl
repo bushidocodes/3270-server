@@ -10,7 +10,7 @@
        session <hp>log</hp> - the running record of your ISPF activity - when you
        exit.</p>
 
-    <p intensity="high">Process option:</p>
+    <p><hp>Process option:</hp></p>
     <ul>
       <li><hp>Print</hp> and delete the data set.</li>
       <li><hp>Delete</hp> the data set without printing.</li>

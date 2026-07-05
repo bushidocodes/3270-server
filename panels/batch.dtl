@@ -14,7 +14,7 @@
     <choice>C/C++            Compile a C or C++ source program (batch)</choice>
   </selfld>
 
-  <info intensity="high">&SELMSG</info>
+  <info><hp>&SELMSG</hp></info>
   <botinst>Enter an option, or PF3 to return to the Primary Option Menu.</botinst>
 
   <keyl name="BATCHKEYS">

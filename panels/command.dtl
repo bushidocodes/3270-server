@@ -11,7 +11,7 @@
 
   <cmdarea entwidth="62">Command ===></cmdarea>
 
-  <info intensity="high">&CMDMSG</info>
+  <info><hp>&CMDMSG</hp></info>
 
   <botinst>Enter a command, or PF3 to return to the Primary Option Menu.</botinst>
 

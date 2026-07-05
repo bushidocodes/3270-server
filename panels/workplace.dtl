@@ -9,7 +9,7 @@
            an action, rather than navigating the option menus.</topinst>
 
   <info>
-    <p intensity="high">Objects you can work with:</p>
+    <p><hp>Objects you can work with:</hp></p>
     <ul>
       <li>Data sets and libraries</li>
       <li>Library members</li>

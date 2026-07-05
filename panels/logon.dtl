@@ -55,7 +55,7 @@
   <dtafld datavar="command" entwidth="62" color="white">Command  ===></dtafld>
   <dtafld datavar="dsname"  entwidth="59" color="white">PDS/E Dsname ===></dtafld>
 
-  <info intensity="highlighted">*** Authorized users only. Unauthorized access is prohibited. ***</info>
+  <info><hp>*** Authorized users only. Unauthorized access is prohibited. ***</hp></info>
   <pnlinst>Press ENTER to logon to TSO/E</pnlinst>
   <info>PF1=HELP   PF3=LOGOFF</info>
   <info>ENTER AN END COMMAND TO LOGOFF</info>

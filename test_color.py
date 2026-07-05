@@ -127,6 +127,18 @@ def test_dtl_info_takes_cua_colour_not_explicit_color():
     assert SFE not in s.render(color=False)                      # mono unchanged
 
 
+def test_whole_line_hp_is_cua_emphasis():
+    # A whole-line <hp> (its entire content emphasised, e.g. a &SELMSG message or
+    # a "Rules:" heading) is CUA emphasis: high intensity on mono AND white on a
+    # colour terminal — the standard replacement for the old non-standard
+    # intensity="high"/"highlighted".
+    s = load_panel_src('<info row="1" col="1"><hp>OPTION NOT IMPLEMENTED</hp></info>')
+    from screen import DisplayIntensity, Text
+    it = next(i for i in s.items if isinstance(i, Text))
+    assert it.intensity is DisplayIntensity.HIGH and it.role == "emphasis"
+    assert bytes([XA_FOREGROUND, Color.WHITE.value]) in s.render(color=True)
+
+
 def test_dtl_hilite_attribute():
     s = load_panel_src(
         '<dtafld row="1" col="1" datavar="u"'

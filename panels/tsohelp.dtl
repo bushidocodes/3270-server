@@ -7,7 +7,7 @@
   <info>
     <p>The TSO/E LOGON panel signs you on to TSO under the z/OS system.</p>
 
-    <p intensity="high">Fields:</p>
+    <p><hp>Fields:</hp></p>
     <dl tsize="10">
       <dt>Userid<dd>Your RACF user identifier (1-8 characters).
       <dt>Password<dd>Your RACF password. It is not displayed as you type.
@@ -18,7 +18,7 @@
 
     <p>Type your userid and password, then press ENTER to log on.</p>
 
-    <p intensity="highlighted">Demo users: IBMUSER / SYS1 and TESTUSER / RACF.</p>
+    <p><hp>Demo users: IBMUSER / SYS1 and TESTUSER / RACF.</hp></p>
   </info>
 
   <botinst>PF3=Return</botinst>
