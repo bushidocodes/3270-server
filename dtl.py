@@ -530,6 +530,11 @@ class _DTLParser(HTMLParser):
             self._panel_title = []  # capture the title text that follows
         elif tag == "selfld":
             ctx = self._areas[-1] if self._areas else None
+            # ISPDTLC block spacing: a flowed selection field gets a leading blank
+            # line (like a paragraph), then counts as content for the next block.
+            self._skip_blank_before(a)
+            if ctx is not None:
+                ctx["had_content"] = True
             # NUMCOL/NAMECOL/DESCCOL are columns *within* the selection field, so
             # they are offsets from its origin column: an explicit COL, else the
             # enclosing flow box's column (so a flowed <selfld> — e.g. a dir=horiz
@@ -1167,7 +1172,8 @@ class _DTLParser(HTMLParser):
         ``<area>``/``<region>`` (the row cursor advances one line per element).
         Outside any flow box, ``row``/``col`` are required."""
         ctx = self._areas[-1] if self._areas else None
-        if "row" in a:
+        row_explicit = "row" in a
+        if row_explicit:
             row = int(a["row"])
             if ctx is not None:
                 ctx["row"] = row + 1
@@ -1183,10 +1189,15 @@ class _DTLParser(HTMLParser):
             col = ctx["col"]
         else:
             raise DTLError(f"<{tag}> missing required attribute 'col'")
-        if not (0 <= row < self.screen.depth):
+        if row < 0 or (row_explicit and row >= self.screen.depth):
             raise DTLError(
                 f"<{tag}> row {row} outside panel depth {self.screen.depth}"
             )
+        if row >= self.screen.depth:
+            # An auto-flowed element ran past the panel bottom (a tall panel plus
+            # our block spacing); clamp to the last row rather than abort the panel,
+            # as the column clamp below does for the horizontal overflow.
+            row = self.screen.depth - 1
         if col < 0 or (col_explicit and col >= self.screen.width):
             raise DTLError(
                 f"<{tag}> col {col} outside panel width {self.screen.width}"
@@ -1905,6 +1916,19 @@ class _DTLParser(HTMLParser):
         leading blank line is needed (skip it when the row above is already blank)."""
         return any(getattr(it, "row", None) == row for it in self.screen.items)
 
+    def _skip_blank_before(self, a):
+        """ISPDTLC block spacing: insert a leading blank line before a flowed block
+        element (paragraph, panel instruction, command area, selection field). Added
+        only when the box already holds content (so the first block gets none) and
+        the row above is not already blank (so an existing gap isn't doubled). An
+        explicit ``row`` or COMPACT suppresses it. Advances the flow row cursor."""
+        ctx = self._areas[-1] if self._areas else None
+        if (ctx is not None and "row" not in a and not _bool_attr(a, "compact")
+                and ctx.get("had_content") and ctx["row"] >= 1
+                and ctx["row"] + 1 < self.screen.depth   # don't push off the panel
+                and self._row_occupied(ctx["row"] - 1)):
+            ctx["row"] += 1
+
     def _emit_info(self, a, content, tag="info", runs=None):
         # ``runs`` (from inline <hp>) is a list of (text, color, highlight); the
         # concatenation is the field's plain text, so mono renders identically.
@@ -1955,16 +1979,10 @@ class _DTLParser(HTMLParser):
         if not text:
             return
         # ISPDTLC block spacing: a blank line precedes a flowed paragraph or panel
-        # instruction (COMPACT suppresses it). It is added only when the box already
-        # holds real content (``had_content`` — so the first block in a box, and the
-        # first content inside a figure's framing rules, get no leading blank) AND
-        # the row above is not already blank (so a TOPINST's trailing blank, or the
-        # title/body gap, is not doubled).
-        ctx0 = self._areas[-1] if self._areas else None
-        if (ctx0 is not None and "row" not in a and tag in _BLANK_BEFORE_TAGS
-                and not _bool_attr(a, "compact") and ctx0.get("had_content")
-                and ctx0["row"] >= 1 and self._row_occupied(ctx0["row"] - 1)):
-            ctx0["row"] += 1
+        # instruction (see _skip_blank_before for the exact rule; COMPACT / an
+        # explicit row suppress it).
+        if tag in _BLANK_BEFORE_TAGS:
+            self._skip_blank_before(a)
         row, col, ctx = self._resolve_pos(a, "info")
         if self._lists:
             # A paragraph inside a list aligns with the list's item text.
@@ -2401,7 +2419,9 @@ class _DTLParser(HTMLParser):
 
     def _emit_cmdarea(self, a, content):
         # The command area is ISPF's command/option line; its variable defaults
-        # to the conventional ZCMD. Mark the field as the panel's command area.
+        # to the conventional ZCMD. A flowed command area gets a leading blank line
+        # (the title/body separator), like a paragraph.
+        self._skip_blank_before(a)
         field = self._add_field(a, content, "cmdarea", a.get("datavar", "ZCMD"))
         self.screen.command_field = field
         if self._scroll and field is not None:
