@@ -1725,6 +1725,35 @@ def test_list_column_intens_and_hilite_style_cells():
     assert cell.intensity is N and cell.highlight is None
 
 
+def test_list_column_noendattr_tightens_gutter():
+    # #232: NOENDATTR drops a column's trailing attribute byte, so the next column
+    # starts one position earlier — except it is ignored for the last column on a
+    # model line (which needs the trailing attribute to bound the field).
+    def heads(markup):
+        s = load_dtl('<panel name="p"><area><lstfld>' + markup
+                     + '</lstfld></area></panel>')
+        return {it.text: it.col for it in s.items
+                if getattr(it, "role", None) == "heading"}
+
+    normal = ('<lstcol datavar=a colwidth=4 usage=out>A'
+              '<lstcol datavar=b colwidth=4 usage=out>B'
+              '<lstcol datavar=c colwidth=4 usage=out>C')
+    assert heads(normal) == {"A": 1, "B": 7, "C": 13}    # +2 gutter each
+
+    # A and B suppress their trailing attr (+2→+1); C is last-on-line so its own
+    # NOENDATTR would be ignored (here it has none).
+    noend = ('<lstcol datavar=a colwidth=4 usage=out noendattr>A'
+             '<lstcol datavar=b colwidth=4 usage=out noendattr>B'
+             '<lstcol datavar=c colwidth=4 usage=out>C')
+    assert heads(noend) == {"A": 1, "B": 6, "C": 11}     # +1 gutter after A, B
+
+    # NOENDATTR on the LAST column is ignored — layout unchanged from normal.
+    last = ('<lstcol datavar=a colwidth=4 usage=out>A'
+            '<lstcol datavar=b colwidth=4 usage=out>B'
+            '<lstcol datavar=c colwidth=4 usage=out noendattr>C')
+    assert heads(last) == {"A": 1, "B": 7, "C": 13}
+
+
 def test_list_column_display_no_is_non_display():
     # #235: DISPLAY=NO is a non-display (password-style) column — the data cell is
     # hidden, but the column keeps its position and its heading still shows.

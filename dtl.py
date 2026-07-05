@@ -1586,6 +1586,9 @@ class _DTLParser(HTMLParser):
             # DISPLAY=NO is a non-display column (a password-style hidden cell); the
             # heading still shows. YES is the default.
             "display_no": str(a.get("display", "yes")).strip().lower() == "no",
+            # NOENDATTR drops this column's trailing attribute byte (tightening the
+            # gutter); ignored for the last column on a model line (see _emit_lstfld).
+            "noendattr": _bool_attr(a, "noendattr"),
             "group": self._lstgrp,
         })
         # TEXT: a short description rendered beside each data cell. TEXTLOC picks
@@ -1665,12 +1668,19 @@ class _DTLParser(HTMLParser):
         cols = fld["cols"]
         if not cols:
             return
+        # NOENDATTR drops a column's trailing attribute byte, but is ignored for the
+        # last column on each model line (which needs it to bound the field).
+        last_on_line = {}
+        for i, c in enumerate(cols):
+            last_on_line[c["line"]] = i
         x = fld["col"]
-        for c in cols:
+        for i, c in enumerate(cols):
             # Each column reserves its formatting width plus the CUA attribute-byte
             # space: OUT (or IN/BOTH with AUTOTAB) → +2 (lead+trail attr); a plain
             # input column (AUTOTAB=NO) → +3 (lead+trail attr + a trailing blank).
             gutter = 2 if c["usage"] == "out" or c["autotab"] else 3
+            if c.get("noendattr") and last_on_line[c["line"]] != i:
+                gutter -= 1                        # trailing attribute byte suppressed
             tw = c.get("text_area", 0)
             if c.get("text") and c["textloc"] == "before":
                 c["text_x"] = x                    # description, then the data cell
