@@ -1725,6 +1725,32 @@ def test_list_column_intens_and_hilite_style_cells():
     assert cell.intensity is N and cell.highlight is None
 
 
+def test_list_column_position_pins_column():
+    # #231: POSITION=n pins a column — n is the attribute byte before the data, so
+    # the data starts at n+1. Columns on different model lines pinned to the same
+    # POSITION align vertically; subsequent columns flow after the pinned one.
+    s = load_dtl(
+        '<panel name="p" width="60"><area><lstfld>'
+        '<lstcol datavar=a colwidth=6 usage=out line=1 position=20>Top'
+        '<lstcol datavar=b colwidth=6 usage=out line=2 position=20>Bot'
+        '</lstfld></area></panel>', rows=[{"a": "AA", "b": "BB"}])
+    at = {(it.text if isinstance(it, Text) else it.name): (it.row, it.col)
+          for it in s.items if getattr(it, "role", None) in ("heading", "cell")}
+    assert at["Top"] == (0, 21) and at["Bot"] == (1, 21)     # POSITION+1, stacked by line
+    assert at["AA"] == (2, 21) and at["BB"] == (3, 21)       # cells aligned under
+
+    # A pinned column shifts the flow: the next (unpinned) column starts after it.
+    s2 = load_dtl(
+        '<panel name="p" width="60"><area><lstfld>'
+        '<lstcol datavar=a colwidth=4 usage=out position=10>A'
+        '<lstcol datavar=b colwidth=4 usage=out>B'
+        '</lstfld></area></panel>')
+    heads = {it.text: it.col for it in s2.items
+             if getattr(it, "role", None) == "heading" and it.text in ("A", "B")}
+    assert heads["A"] == 11                                   # 10 + 1
+    assert heads["B"] == 11 + 4 + 2                           # flows after A (+2 gutter)
+
+
 def test_list_column_noendattr_tightens_gutter():
     # #232: NOENDATTR drops a column's trailing attribute byte, so the next column
     # starts one position earlier — except it is ignored for the last column on a

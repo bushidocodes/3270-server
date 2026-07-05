@@ -1589,6 +1589,10 @@ class _DTLParser(HTMLParser):
             # NOENDATTR drops this column's trailing attribute byte (tightening the
             # gutter); ignored for the last column on a model line (see _emit_lstfld).
             "noendattr": _bool_attr(a, "noendattr"),
+            # POSITION pins the column: it is the location of the attribute byte
+            # preceding the data, so the data starts at POSITION+1. Absent/invalid →
+            # normal left-to-right flow.
+            "position": self._opt_int(a.get("position")),
             "group": self._lstgrp,
         })
         # TEXT: a short description rendered beside each data cell. TEXTLOC picks
@@ -1681,19 +1685,22 @@ class _DTLParser(HTMLParser):
             gutter = 2 if c["usage"] == "out" or c["autotab"] else 3
             if c.get("noendattr") and last_on_line[c["line"]] != i:
                 gutter -= 1                        # trailing attribute byte suppressed
+            # POSITION pins the column start (attribute byte at POSITION → data at
+            # POSITION+1); otherwise it flows after the previous column.
+            base = c["position"] + 1 if c.get("position") is not None else x
             tw = c.get("text_area", 0)
             if c.get("text") and c["textloc"] == "before":
-                c["text_x"] = x                    # description, then the data cell
-                c["x"] = x + tw + 1
+                c["text_x"] = base                 # description, then the data cell
+                c["x"] = base + tw + 1
                 x = c["x"] + c["fmt"] + gutter
             elif c.get("text"):                    # data cell, then the description
-                c["x"] = x
-                c["text_x"] = x + c["fmt"] + 1
+                c["x"] = base
+                c["text_x"] = base + c["fmt"] + 1
                 x = c["text_x"] + tw + gutter
             else:
-                c["x"] = x
+                c["x"] = base
                 c["text_x"] = None
-                x += c["fmt"] + gutter
+                x = base + c["fmt"] + gutter
         row = fld["row"]
         H = DisplayIntensity.HIGH
         # Group headings stack by nesting depth: a depth-1 group heads the top row,
