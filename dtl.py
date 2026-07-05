@@ -1574,6 +1574,9 @@ class _DTLParser(HTMLParser):
             "autotab": a.get("autotab", "").lower() == "yes",
             "line": int(a.get("line", 1)),
             "align": a.get("align", "start").lower(),
+            # FORMAT positions the shorter of (heading, data) within the column
+            # formatting width: START (default) left, CENTER centred, END right.
+            "format": str(a.get("format", "start")).strip().lower(),
             # DTL COLOR / INTENS / HILITE on a <lstcol> style its cells, exactly as
             # on a <dtafld>: colour, intensity (HIGH / LOW→normal / NON→non-display)
             # and highlight (underscore / blink / reverse).
@@ -1595,6 +1598,17 @@ class _DTLParser(HTMLParser):
             == "before" else "after"
         col["textfmt"] = str(a.get("textfmt", "start")).strip().lower()
         col["text_area"] = max(textlen, len(text)) if text else 0
+
+    @staticmethod
+    def _fmt_offset(inner, fmt, mode):
+        """FORMAT offset of an ``inner``-wide item (heading or data cell) within
+        the ``fmt``-wide column: START 0, CENTER floor(slack/2), END slack."""
+        slack = max(0, fmt - inner)
+        if mode == "center":
+            return slack // 2
+        if mode == "end":
+            return slack
+        return 0
 
     @staticmethod
     def _cell_intensity(value):
@@ -1695,7 +1709,8 @@ class _DTLParser(HTMLParser):
         head_lines = max((c["line"] for c in cols if c["heading"]), default=0)
         for c in cols:
             if c["heading"]:
-                self.screen.add(Text(row + c["line"] - 1, c["x"],
+                hoff = self._fmt_offset(len(c["heading"]), c["fmt"], c["format"])
+                self.screen.add(Text(row + c["line"] - 1, c["x"] + hoff,
                                      c["heading"][:c["fmt"]], H, role="heading"))
         row += head_lines
         row = self._emit_lstfld_rows(cols, row)
@@ -1758,13 +1773,17 @@ class _DTLParser(HTMLParser):
                 value = self._align(raw, c["width"], c["align"])
                 intensity = c.get("intensity", DisplayIntensity.NORMAL)
                 hidden = intensity is DisplayIntensity.NON_DISPLAY
+                # FORMAT shifts the data cell within the column width (the cell's
+                # own contents are still justified by ALIGN, per the reference).
+                cx = c["x"] + self._fmt_offset(c["width"], c["fmt"],
+                                               c.get("format", "start"))
                 if c["usage"] == "out":
-                    self.screen.add(Text(cy, c["x"], value, intensity,
+                    self.screen.add(Text(cy, cx, value, intensity,
                                          color=c.get("color"),
                                          highlight=c.get("highlight"), role="cell"))
                 else:
                     self.screen.add(Field(
-                        row=cy, col=c["x"], length=c["width"],
+                        row=cy, col=cx, length=c["width"],
                         name=c["datavar"] or None, default=value,
                         terminator=id(c) in last_in_ids,
                         # INTENS=NON → a non-display input cell (Field.hidden);
