@@ -75,12 +75,10 @@ def test_space_fill_uses_ra():
 
 
 def test_ra_keeps_dtl_panels_byte_identical_to_the_builders():
-    # Both the DTL parser and the screens.py builders go through Text.render, so
-    # RA is applied to both — the golden equivalence is preserved.
-    from screens import build_tso_logon, build_ispf_menu
+    # Both the DTL parser and the screens.py logon builder go through Text.render,
+    # so RA is applied to both — the golden equivalence is preserved.
+    from screens import build_tso_logon
     assert load_panel("logon").render() == build_tso_logon().render()
-    assert load_panel("ispf", ZUSER="IBMUSER ", ZTIME="13:45").render() \
-        == build_ispf_menu("IBMUSER ", "13:45").render()
     # ...and the logon panel really does emit RA for its rule lines.
     assert RA in load_panel("logon").render()
 

@@ -13,7 +13,8 @@ import pytest
 
 import server
 from screen import Screen, Text, Field, DisplayIntensity
-from screens import build_tso_logon, build_ispf_menu
+from screens import build_tso_logon
+from dtl import load_panel
 
 
 FROZEN = datetime.datetime(2026, 6, 24, 13, 45)
@@ -51,23 +52,29 @@ def test_logon_with_error_matches_legacy_bytes():
 
 # ── ISPF menu ────────────────────────────────────────────────────────────────
 
-def test_ispf_matches_legacy_bytes(frozen_clock):
-    expected = _capture(server.send_ispf_menu, "IBMUSER")
-    got = build_ispf_menu("IBMUSER", FROZEN.strftime("%H:%M")).render()
-    assert got == bytes(expected)
+def _ispf_screen(userid, short_msg=None):
+    """The ISPF menu screen the server sends: the DTL panel, plus the transient
+    short-message overlay when present."""
+    s = load_panel("ispf", ZUSER=userid.ljust(8), ZTIME=FROZEN.strftime("%H:%M"))
+    if short_msg:
+        s.add(Text(2, 25, short_msg[:54], DisplayIntensity.HIGH))
+    return s
 
 
-def test_ispf_with_short_msg_matches_legacy_bytes(frozen_clock):
+def test_ispf_server_sends_the_dtl_menu(frozen_clock):
+    sent = _capture(server.send_ispf_menu, "IBMUSER")
+    assert bytes(sent) == _ispf_screen("IBMUSER").render()
+
+
+def test_ispf_server_overlays_the_short_message(frozen_clock):
     msg = "OPTION 3 NOT YET IMPLEMENTED"
-    expected = _capture(server.send_ispf_menu, "IBMUSER", msg)
-    got = build_ispf_menu("IBMUSER", FROZEN.strftime("%H:%M"), short_msg=msg).render()
-    assert got == bytes(expected)
+    sent = _capture(server.send_ispf_menu, "IBMUSER", msg)
+    assert bytes(sent) == _ispf_screen("IBMUSER", msg).render()
 
 
-def test_ispf_long_userid_matches_legacy_bytes(frozen_clock):
-    expected = _capture(server.send_ispf_menu, "TESTUSER")
-    got = build_ispf_menu("TESTUSER", FROZEN.strftime("%H:%M")).render()
-    assert got == bytes(expected)
+def test_ispf_server_substitutes_a_longer_userid(frozen_clock):
+    sent = _capture(server.send_ispf_menu, "TESTUSER")
+    assert bytes(sent) == _ispf_screen("TESTUSER").render()
 
 
 # ── model semantics ──────────────────────────────────────────────────────────
@@ -80,8 +87,8 @@ def test_field_addr_maps_named_fields():
 
 
 def test_ispf_option_addr_matches_legacy_constant():
-    s = build_ispf_menu("IBMUSER", "13:45")
-    assert s.field_addr("option") == server.ISPF_OPTION_ADDR
+    s = load_panel("ispf", ZUSER="IBMUSER ", ZTIME="13:45")
+    assert s.field_addr("ZCMD") == server.ISPF_OPTION_ADDR
 
 
 def test_parse_maps_addresses_to_names():
