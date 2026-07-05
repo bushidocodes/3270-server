@@ -1725,6 +1725,46 @@ def test_list_column_intens_and_hilite_style_cells():
     assert cell.intensity is N and cell.highlight is None
 
 
+def test_list_column_text_description_before_and_after():
+    # #229: <lstcol> TEXT renders a description beside each data cell. TEXTLOC picks
+    # the side (default AFTER); the description flows in the column so the next
+    # column clears it.
+    s = load_dtl(
+        '<panel name="p" width="50"><area><lstfld>'
+        '<lstcol datavar=amt colwidth=6 usage=out text=USD>Amount'
+        '<lstcol datavar=qty colwidth=4 usage=out text="(ea)" textloc=before>Qty'
+        '</lstfld></area></panel>',
+        rows=[{"amt": "100", "qty": "3"}])
+    pos = {it.text: it.col for it in s.items
+           if isinstance(it, Text) and it.row == 1}   # first data row
+    assert pos["100"] == 1                              # amt cell
+    assert pos["USD"] == 8                              # AFTER: past the 6-wide cell (+1)
+    assert pos["(ea)"] == 13                            # BEFORE the qty cell
+    assert pos["3"] == 18                               # qty cell, past its description
+    # The description repeats on every model row.
+    s2 = load_dtl(
+        '<panel name="p" width="50"><area><lstfld>'
+        '<lstcol datavar=amt colwidth=6 usage=out text=USD>Amount'
+        '</lstfld></area></panel>',
+        rows=[{"amt": "100"}, {"amt": "25"}])
+    assert [it.row for it in s2.items if getattr(it, "text", "") == "USD"] == [1, 2]
+
+
+def test_list_column_text_len_and_fmt_justify():
+    # TEXTLEN reserves a formatting area; TEXTFMT justifies the text within it.
+    def text_col(fmt):
+        s = load_dtl(
+            f'<panel name="p" width="50"><area><lstfld>'
+            f'<lstcol datavar=a colwidth=5 usage=out text=hi textlen=10 textfmt={fmt}>A'
+            f'</lstfld></area></panel>', rows=[{"a": "x"}])
+        return next(it.col for it in s.items
+                    if isinstance(it, Text) and it.text == "hi")
+    # Cell at col 1 (fmt 5) → text area starts at 1+5+1 = 7, width 10 (cols 7..16).
+    assert text_col("start") == 7                        # left
+    assert text_col("center") == 11                      # (10-2)//2 = 4 → 7+4
+    assert text_col("end") == 15                         # 10-2 = 8 → 7+8
+
+
 def test_list_column_intens_non_input_cell_is_hidden():
     # INTENS=NON on an INPUT column makes the field non-display (Field.hidden),
     # so the render suppresses its data/colour like a password field.
