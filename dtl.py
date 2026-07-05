@@ -805,6 +805,12 @@ class _DTLParser(HTMLParser):
                 "start_idx": len(self.screen.items),
                 "explicit": explicit,
                 "parent": parent,
+                # A box that transparently continues the parent's flow inherits its
+                # content state, so the first paragraph below a panel title still
+                # gets the CUA title/body separator. An explicitly-positioned box
+                # starts fresh.
+                "had_content": bool(parent and not explicit
+                                    and parent.get("had_content")),
             })
         elif tag == "fig":
             # A figure: a flow sub-box, optionally framed by a horizontal rule
