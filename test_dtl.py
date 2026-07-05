@@ -1725,6 +1725,34 @@ def test_list_column_intens_and_hilite_style_cells():
     assert cell.intensity is N and cell.highlight is None
 
 
+def test_list_field_scrollvar_adds_command_line_scroll_field():
+    # #239: <lstfld scrollvar=> puts a "Scroll ===>" amount field at the right of
+    # the command line and shortens the command field so they don't overlap.
+    s = load_dtl(
+        '<panel name="p" width="76">L<area>'
+        '<lstfld scrollvar=zscroll scrcaps=on scrvhelp=scrhelp>'
+        '<lstcol datavar=a colwidth=8 usage=out>Item</lstfld></area>'
+        '<cmdarea row="20" col="1" entwidth="60">Command ===></cmdarea></panel>',
+        rows=[{"a": "one"}], ZSCROLL="page")
+    scroll = next(it for it in s.items
+                  if isinstance(it, Field) and it.name == "zscroll")
+    assert scroll.col == 76 - 4 - 1 and scroll.length == 4     # right-aligned, 4 wide
+    assert scroll.default == "PAGE"                            # SCRCAPS uppercased
+    assert scroll.help == "scrhelp"                            # SCRVHELP
+    assert any(isinstance(it, Text) and it.text == "Scroll ===>" for it in s.items)
+    # The command field is clamped so it ends before the scroll label.
+    cmd = s.command_field
+    assert cmd.col + cmd.length <= scroll.col - len("Scroll ===>") - 1
+
+    # Too little room: the scroll entry is suppressed (needs >= 8 command bytes).
+    narrow = load_dtl(
+        '<panel name="p" width="30">L<area>'
+        '<lstfld scrollvar=zs><lstcol datavar=a colwidth=4 usage=out>I</lstfld>'
+        '</area><cmdarea row="20" col="1" entwidth="20">Cmd ===></cmdarea></panel>',
+        rows=[{"a": "x"}])
+    assert not any(isinstance(it, Field) and it.name == "zs" for it in narrow.items)
+
+
 def test_list_column_help_is_cursor_sensitive():
     # #237: HELP=panel on a <lstcol> attaches field-level help to its cells, so
     # HELP with the cursor on a cell resolves that panel — for both an output cell

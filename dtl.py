@@ -367,6 +367,7 @@ class _DTLParser(HTMLParser):
         self._lstfld = None       # active <lstfld> table {"cols", "groups", …}
         self._lstgrp = None       # innermost open <lstgrp> column group, or None
         self._lstgrp_stack = []   # open <lstgrp> groups, outermost first (nesting)
+        self._scroll = None       # <lstfld scrollvar=> config for the command line
         self._xlatl = None        # active <xlatl> {"msg", "upper", "items"} or None
         self._rows = None         # data rows for the list field (datavar→value)
         self._subs = {}           # &NAME/%NAME substitution values (for COLOR=%var)
@@ -696,6 +697,15 @@ class _DTLParser(HTMLParser):
             }
             self._lstgrp = None
             self._lstgrp_stack = []
+            # SCROLLVAR puts a "Scroll ===>" amount field on the command line; the
+            # <cmdarea> (coded after the list) picks this up when it renders.
+            if a.get("scrollvar"):
+                self._scroll = {
+                    "var": a["scrollvar"],
+                    "help": self._field_help(a and {"help": a.get("scrvhelp", "")}),
+                    "tab": str(a.get("scrolltab", "")).strip().lower() == "yes",
+                    "caps": str(a.get("scrcaps", "")).strip().lower() == "on",
+                }
         elif tag == "lstgrp":
             if self._lstfld is None:
                 raise DTLError("<lstgrp> outside of a <lstfld>")
@@ -2349,6 +2359,34 @@ class _DTLParser(HTMLParser):
         # to the conventional ZCMD. Mark the field as the panel's command area.
         field = self._add_field(a, content, "cmdarea", a.get("datavar", "ZCMD"))
         self.screen.command_field = field
+        if self._scroll and field is not None:
+            self._emit_scroll_field(field)
+
+    def _emit_scroll_field(self, cmd_field):
+        """Render the <lstfld scrollvar=> "Scroll ===>" amount field at the right of
+        the command line, and shorten the command field so it does not overlap.
+        Per the reference, the scroll entry is only added if the command field can
+        still be at least 8 bytes wide."""
+        SWIDTH = 4                                  # scroll amount (PAGE/HALF/n...)
+        label = "Scroll ===>"
+        sfield_col = self.screen.width - SWIDTH - 1     # 1-col right margin
+        slabel_col = sfield_col - len(label) - 1        # label + a space
+        # Room check: the command field must keep >= 8 bytes to its left.
+        if slabel_col - 1 - cmd_field.col < 8:
+            return
+        row = cmd_field.row
+        # Clamp the command field so its data ends before the scroll label.
+        cmd_field.length = min(cmd_field.length, slabel_col - 1 - cmd_field.col)
+        self.screen.add(Text(row, slabel_col, label, DisplayIntensity.NORMAL,
+                             role="prompt"))
+        value = str(self._subs.get(self._scroll["var"].upper(), "PAGE"))
+        if self._scroll["caps"]:
+            value = value.upper()
+        self.screen.add(Field(
+            row=row, col=sfield_col, length=SWIDTH,
+            name=self._scroll["var"], default=value[:SWIDTH],
+            terminator=True, role="field", help=self._scroll["help"],
+        ))
 
     def _emit_selfld_prompt(self, sf):
         """Emit the selection field's caption (the text before its first
