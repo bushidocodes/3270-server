@@ -1898,6 +1898,33 @@ def test_list_column_display_no_is_non_display():
     assert {"User", "Pass", "Secret"} <= heads
 
 
+def test_dtafld_pad_fills_entry_and_dtacol_default():
+    # #122: PAD/PADC set the fill character for an empty <dtafld> entry, with the
+    # same rules as <lstcol>. A <dtacol> PAD is the column default; a field's own
+    # PAD overrides it. Padless fields keep the space fill (byte-identical).
+    def fields(markup, **subs):
+        s = load_dtl('<panel name=p width=40><area>' + markup
+                     + '</area></panel>', **subs)
+        return [it for it in s.items if isinstance(it, Field)]
+
+    f = fields('<dtafld entwidth=5 pad=".">Name')[0]
+    assert f.pad == "."
+    buf = bytearray(); f.render(buf)
+    assert to_ebcdic(".....") in bytes(buf)                      # empty entry padded
+
+    assert fields('<dtafld entwidth=4 pad=NULLS>X')[0].pad == "\x00"
+    assert fields('<dtafld entwidth=4 pad=USER>X')[0].pad is None
+    assert fields('<dtafld entwidth=4>X')[0].pad is None          # no PAD → space
+    assert fields('<dtafld entwidth=4 pad="." padc="_">X')[0].pad == "_"  # PADC wins
+    assert fields('<dtafld entwidth=4 pad="%p">X', p="@")[0].pad == "@"   # %varname
+
+    # <dtacol> PAD is the default; a field's own PAD overrides it.
+    cols = fields('<dtacol pad="#"><dtafld entwidth=3>A'
+                  '<dtafld entwidth=3 pad="*">B')
+    assert cols[0].pad == "#"                                     # inherited
+    assert cols[1].pad == "*"                                     # overridden
+
+
 def test_list_column_pad_fills_empty_input_cell():
     # #234: PAD/PADC set the fill character for an empty input cell. PADC wins over
     # PAD; NULLS → a null fill; USER (profile pad, unavailable here) → the default

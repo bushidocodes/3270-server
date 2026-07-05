@@ -778,6 +778,9 @@ class _DTLParser(HTMLParser):
                              else (parent.get("pmtwidth") if parent else None)),
                 "entwidth": (self._opt_int(a["entwidth"]) if "entwidth" in a
                              else (parent.get("entwidth") if parent else None)),
+                # PAD/PADC default the column's <dtafld> fill character; a field's
+                # own PAD/PADC overrides it (see _add_field).
+                "pad": self._pad_char(a) or (parent.get("pad") if parent else None),
             })
         elif tag == "divider":
             ctx = self._areas[-1] if self._areas else None
@@ -1737,7 +1740,7 @@ class _DTLParser(HTMLParser):
             "help": self._field_help(a),
             # PAD/PADC: the fill character for an empty input cell (None → the
             # conventional space fill, keeping padless columns byte-identical).
-            "pad": self._lstcol_pad(a),
+            "pad": self._pad_char(a),
             "group": self._lstgrp,
         })
         # TEXT: a short description rendered beside each data cell. TEXTLOC picks
@@ -1765,13 +1768,13 @@ class _DTLParser(HTMLParser):
             return slack
         return 0
 
-    def _lstcol_pad(self, a):
-        """Resolve <lstcol> PAD/PADC to the fill character for an empty input
-        cell, or None to keep the default (space) fill. Per the reference, when
-        both are given PADC wins. NULLS → a null fill; USER (the ISPF profile pad
-        character, which this display server does not carry) → the default;
-        %varname is resolved against the dialog variables; any other value's
-        first character is the literal pad."""
+    def _pad_char(self, a):
+        """Resolve PAD/PADC (on a <lstcol>, <dtafld>, or <dtacol>) to the fill
+        character for an empty input field, or None to keep the default (space)
+        fill. Per the reference, when both are given PADC wins. NULLS → a null
+        fill; USER (the ISPF profile pad character, which this display server does
+        not carry) → the default; %varname is resolved against the dialog
+        variables; any other value's first character is the literal pad."""
         raw = a.get("padc") if a.get("padc") is not None else a.get("pad")
         if raw is None:
             return None
@@ -2341,6 +2344,9 @@ class _DTLParser(HTMLParser):
             role="field",
             highlight=self._hilite(a),
             help=self._field_help(a),
+            # PAD/PADC fill an empty entry; a field's own PAD wins over the
+            # enclosing <dtacol>'s default (None → the conventional space fill).
+            pad=self._pad_char(a) or (ctx.get("pad") if ctx else None),
         )
         self.screen.add(field)
         self._attach_validation(name, a)
