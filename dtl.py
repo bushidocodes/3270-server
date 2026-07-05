@@ -1065,7 +1065,7 @@ class _DTLParser(HTMLParser):
         content = self._dtafldd if isinstance(self._dtafldd, str) else "".join(self._chars)
         a = self._attrs
         if tag == "li":
-            self._emit_listitem(a, content)
+            self._emit_listitem(a, content, runs)
         elif tag in ("dt", "dd", "pt", "pd"):
             self._emit_defitem(tag, a, content)
         elif tag in ("lines", "xmp"):
@@ -1500,9 +1500,13 @@ class _DTLParser(HTMLParser):
         if ctx is not None:
             ctx["row"] = row + len(lines)
 
-    def _emit_listitem(self, a, content):
+    def _emit_listitem(self, a, content, runs=None):
         """Emit one <li>: a depth-based bullet/number plus the item text, flowed,
-        word-wrapped with a hanging indent, one level deeper per nested list."""
+        word-wrapped with a hanging indent, one level deeper per nested list. An
+        inline <hp> phrase banks its text into ``runs``, leaving ``content`` empty —
+        use the runs' concatenation so the item is not dropped."""
+        if runs is not None:
+            content = "".join(t for t, _, _ in runs)
         text = " ".join(content.split())
         if not text:
             return
