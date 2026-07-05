@@ -2299,6 +2299,7 @@ def test_caution_reference_figure_snapshot():
            "</INFO>\n</AREA>\n</HELP>")
     assert _ascii_snapshot(load_dtl(src)) == "\n".join([
         "                            Help for DELETE Command",
+        "",                                          # title/body separator
         " The DELETE command erases the specified file from storage.",
         " CAUTION:",
         " Issuing the DELETE command permanently removes the file from storage. There is",
@@ -2323,6 +2324,7 @@ def test_nt_reference_figure_snapshot():
            "This is a library!\n</NT>\n</INFO>\n</AREA>\n</HELP>")
     assert _ascii_snapshot(load_dtl(src)) == "\n".join([
         "                         Book / Periodical Search Help",
+        "",                                          # title/body separator
         " This entry screen allows you to locate a desired book or periodical by",
         " entering the title in the entry field.",
         " Note: If the item you are trying to locate is not in stock and you would like",
@@ -2345,6 +2347,7 @@ def test_notel_reference_figure_snapshot():
            "<P>This is a library!\n</NOTEL>\n</INFO>\n</AREA>\n</HELP>")
     assert _ascii_snapshot(load_dtl(src)) == "\n".join([
         "                         Book / Periodical Search Help",
+        "",                                          # title/body separator
         " This entry screen allows you to locate a desired book or periodical by",
         " entering the title in the entry field.",
         " Notes:",
@@ -2478,26 +2481,28 @@ def test_widget_help_matches_guide_figure():
     )
     N = DisplayIntensity.NORMAL
     assert s.title == "Widget Assembly Help"
+    # The title/body separator (a blank below the title) puts the first paragraph
+    # on row 2; the list and the trailing <p> follow with their own blank lines.
     assert s.items == [
         Text(0, 20, "Widget Assembly Help", N),
-        Text(1, 1, "To assemble your new Widget, you should:", N),
-        Text(2, 1, "1.", N),
-        Text(2, 5, "Attach the gizmo flexure component to the main", N),
-        Text(3, 5, "steering mechanism of the doohickey.", N),
-        Text(4, 5, "a.", N),
-        Text(4, 9, "If slot A fits snugly on retaining pin B, proceed", N),
-        Text(5, 9, "to step 2.", N),
-        Text(6, 5, "b.", N),
-        Text(6, 9, "If slot A does not fit snugly on retaining pin B,", N),
-        Text(7, 9, "throw the Widget away and buy a new one.", N),
-        Text(8, 1, "2.", N),
-        Text(8, 5, "Use a screwdriver to turn the power drive unit on.", N),
-        Text(9, 1, "3.", N),
-        Text(9, 5, "Stand back and watch the fun!", N),
+        Text(2, 1, "To assemble your new Widget, you should:", N),
+        Text(3, 1, "1.", N),
+        Text(3, 5, "Attach the gizmo flexure component to the main", N),
+        Text(4, 5, "steering mechanism of the doohickey.", N),
+        Text(5, 5, "a.", N),
+        Text(5, 9, "If slot A fits snugly on retaining pin B, proceed", N),
+        Text(6, 9, "to step 2.", N),
+        Text(7, 5, "b.", N),
+        Text(7, 9, "If slot A does not fit snugly on retaining pin B,", N),
+        Text(8, 9, "throw the Widget away and buy a new one.", N),
+        Text(9, 1, "2.", N),
+        Text(9, 5, "Use a screwdriver to turn the power drive unit on.", N),
+        Text(10, 1, "3.", N),
+        Text(10, 5, "Stand back and watch the fun!", N),
         # A <p> after the list items gets its guide-mandated leading blank (as the
-        # nested <p> does in NOTEL Figure 145), so it lands on row 11.
-        Text(11, 5, "Wake up the kids and call the neighbors, they won't", N),
-        Text(12, 5, "want to miss it!", N),
+        # nested <p> does in NOTEL Figure 145).
+        Text(12, 5, "Wake up the kids and call the neighbors, they won't", N),
+        Text(13, 5, "want to miss it!", N),
     ]
 
 
