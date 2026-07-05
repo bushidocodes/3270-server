@@ -2417,6 +2417,23 @@ def test_dl_headers_reference_figure_snapshot():
     ])
 
 
+def test_dl_indent_shifts_the_whole_list():
+    # #123: <dl indent=n> indents the whole definition list from the left margin —
+    # headers, terms, descriptions, and dividers all shift right by n columns.
+    def at(markup):
+        s = load_dtl('<panel name=p width=44><area><info>' + markup
+                     + '</info></area></panel>')
+        return {it.text.strip(): it.col for it in s.items
+                if isinstance(it, Text) and it.text.strip()}
+
+    body = ('<dl tsize=6{I}><dthd>Code<ddhd>Name'
+            '<dt>AP<dd>Apple</dl>')
+    plain = at(body.format(I=""))
+    shifted = at(body.format(I=" indent=6"))
+    for key in ("Code", "Name", "AP", "Apple"):
+        assert shifted[key] == plain[key] + 6            # every element shifts by 6
+
+
 def test_dl_list_divider_types():
     # #120: <dldiv> draws a horizontal divider across a definition list. TYPE=NONE
     # (default) is a blank spacer; SOLID/DASH a dashed rule; TEXT lays out the
