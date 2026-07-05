@@ -1582,6 +1582,19 @@ class _DTLParser(HTMLParser):
             "highlight": self._hilite(a),
             "group": self._lstgrp,
         })
+        # TEXT: a short description rendered beside each data cell. TEXTLOC picks
+        # the side (default AFTER), TEXTLEN reserves a formatting area (default: the
+        # text length), TEXTFMT justifies within it (ignored if the text overflows
+        # the area, per the reference). TEXTSKIP is cursor-skip behaviour only.
+        text = (a.get("text") or "").strip()
+        col = self._lstfld["cols"][-1]
+        tl = str(a.get("textlen", "")).strip()
+        textlen = int(tl) if tl.isdigit() else 0
+        col["text"] = text
+        col["textloc"] = "before" if str(a.get("textloc", "")).strip().lower() \
+            == "before" else "after"
+        col["textfmt"] = str(a.get("textfmt", "start")).strip().lower()
+        col["text_area"] = max(textlen, len(text)) if text else 0
 
     @staticmethod
     def _cell_intensity(value):
@@ -1637,11 +1650,23 @@ class _DTLParser(HTMLParser):
             return
         x = fld["col"]
         for c in cols:
-            c["x"] = x
             # Each column reserves its formatting width plus the CUA attribute-byte
             # space: OUT (or IN/BOTH with AUTOTAB) → +2 (lead+trail attr); a plain
             # input column (AUTOTAB=NO) → +3 (lead+trail attr + a trailing blank).
-            x += c["fmt"] + (2 if c["usage"] == "out" or c["autotab"] else 3)
+            gutter = 2 if c["usage"] == "out" or c["autotab"] else 3
+            tw = c.get("text_area", 0)
+            if c.get("text") and c["textloc"] == "before":
+                c["text_x"] = x                    # description, then the data cell
+                c["x"] = x + tw + 1
+                x = c["x"] + c["fmt"] + gutter
+            elif c.get("text"):                    # data cell, then the description
+                c["x"] = x
+                c["text_x"] = x + c["fmt"] + 1
+                x = c["text_x"] + tw + gutter
+            else:
+                c["x"] = x
+                c["text_x"] = None
+                x += c["fmt"] + gutter
         row = fld["row"]
         H = DisplayIntensity.HIGH
         # Group headings stack by nesting depth: a depth-1 group heads the top row,
@@ -1749,6 +1774,18 @@ class _DTLParser(HTMLParser):
                         color=c.get("color"), highlight=c.get("highlight"),
                         role="cell",
                     ))
+                # TEXT description beside the cell, justified within its area
+                # (TEXTFMT); unformatted when the text overflows the reserved area.
+                if c.get("text") and c.get("text_x") is not None:
+                    t, area = c["text"], c["text_area"]
+                    if area <= len(t) or c["textfmt"] == "start":
+                        off = 0
+                    elif c["textfmt"] == "end":
+                        off = area - len(t)
+                    else:
+                        off = (area - len(t)) // 2
+                    self.screen.add(Text(cy, c["text_x"] + off, t,
+                                         DisplayIntensity.NORMAL, role="text"))
             if div_fill:   # None (no divider) or "" (blank spacer) draw nothing
                 col0 = cols[0]["x"]
                 span = max(1, self.screen.width - col0 - 1)
