@@ -450,6 +450,10 @@ class Field:
     terminator: bool = True
     color: Optional[Color] = None
     highlight: Optional[Highlight] = None
+    # Fill character for the field width not covered by ``default`` — the DTL
+    # <lstcol> PAD/PADC pad character (NULLS → "\x00", a literal char, …). None
+    # keeps the conventional space fill, so a field without PAD is byte-identical.
+    pad: Optional[str] = None
     role: Optional[str] = _dc_field(default=None, compare=False)
     # Field-level help panel (DTL <dtafld help=...>): shown when the cursor is on
     # this field and HELP is pressed. Metadata — not rendered, not part of identity.
@@ -478,7 +482,8 @@ class Field:
             _role_colour(self.color, self.role) if (color and not self.hidden) else None,
             self.highlight if (color and not self.hidden) else None,
         )
-        buf.extend(_display(self.default.ljust(self.length)[: self.length]))
+        fill = self.pad if self.pad is not None else " "
+        buf.extend(_display(self.default.ljust(self.length, fill)[: self.length]))
         if self.terminator:
             _emit_sba(buf, self.row, self.col + 1 + self.length, cols)
             buf.append(SF)

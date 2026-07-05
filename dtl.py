@@ -1655,6 +1655,9 @@ class _DTLParser(HTMLParser):
             # HELP=panel-name attaches field-level (cursor-sensitive) help to the
             # column's cells, like <dtafld help=>.
             "help": self._field_help(a),
+            # PAD/PADC: the fill character for an empty input cell (None → the
+            # conventional space fill, keeping padless columns byte-identical).
+            "pad": self._lstcol_pad(a),
             "group": self._lstgrp,
         })
         # TEXT: a short description rendered beside each data cell. TEXTLOC picks
@@ -1681,6 +1684,26 @@ class _DTLParser(HTMLParser):
         if mode == "end":
             return slack
         return 0
+
+    def _lstcol_pad(self, a):
+        """Resolve <lstcol> PAD/PADC to the fill character for an empty input
+        cell, or None to keep the default (space) fill. Per the reference, when
+        both are given PADC wins. NULLS → a null fill; USER (the ISPF profile pad
+        character, which this display server does not carry) → the default;
+        %varname is resolved against the dialog variables; any other value's
+        first character is the literal pad."""
+        raw = a.get("padc") if a.get("padc") is not None else a.get("pad")
+        if raw is None:
+            return None
+        val = str(raw).strip()
+        if val.startswith("%"):                      # %varname → its value
+            val = str(self._subs.get(val[1:].upper(), "")).strip()
+        kw = val.lower()
+        if kw in ("", "user"):                        # profile pad unavailable
+            return None
+        if kw == "nulls":
+            return "\x00"
+        return val[0]
 
     @staticmethod
     def _cell_intensity(value):
@@ -1878,7 +1901,7 @@ class _DTLParser(HTMLParser):
                         intensity=DisplayIntensity.NORMAL if hidden else intensity,
                         hidden=hidden,
                         color=c.get("color"), highlight=c.get("highlight"),
-                        role="cell", help=c.get("help"),
+                        role="cell", help=c.get("help"), pad=c.get("pad"),
                     ))
                 # TEXT description beside the cell, justified within its area
                 # (TEXTFMT); unformatted when the text overflows the reserved area.
