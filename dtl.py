@@ -367,6 +367,7 @@ class _DTLParser(HTMLParser):
         self._title_item = None   # the centered title Text (retracted on collision)
         self._title_rule = None   # the action-bar separator rule (retracted on collision)
         self._titline = True      # <panel titline=no> suppresses the on-screen title line
+        self._panel_cursor = None # <panel cursor=field-name> places the cursor at that field
         self._lists = []          # stack of open <ul>/<ol> ({"type", "n"})
         self._lstfld = None       # active <lstfld> table {"cols", "groups", …}
         self._lstgrp = None       # innermost open <lstgrp> column group, or None
@@ -509,6 +510,10 @@ class _DTLParser(HTMLParser):
             # TITLINE=NO keeps the title as metadata but suppresses its on-screen
             # line (default YES); see _finalize_panel_title.
             self._titline = _bool_attr(a, "titline", default=True)
+            # PANEL CURSOR=field-name names the field the cursor starts in; the
+            # replacement for the non-standard field-level cursor= (resolved in
+            # close(), once every field has been emitted).
+            self._panel_cursor = a.get("cursor")
             if self._override_cols is not None:
                 self.screen.width = self._override_cols
             elif "width" in a:
@@ -1041,6 +1046,21 @@ class _DTLParser(HTMLParser):
         while self._areas and self._areas[-1].get("fig"):
             self._close_fig()             # a <fig> whose </fig> was omitted
         self._retract_title_if_collision()
+        self._place_panel_cursor()
+
+    def _place_panel_cursor(self):
+        """Honour <panel cursor=field-name>: put the cursor in the named field.
+
+        The standard replacement for the non-standard field-level cursor= — a
+        panel names one of its fields and the cursor starts there. Matched
+        case-insensitively against the field's NAME (its datavar)."""
+        if not self._panel_cursor:
+            return
+        want = self._panel_cursor.strip().upper()
+        for it in self.screen.items:
+            if isinstance(it, Field) and (it.name or "").upper() == want:
+                it.cursor = True
+                return
 
     def _emit_current(self):
         """Emit the open content element (``self._tag``) and reset capture state.

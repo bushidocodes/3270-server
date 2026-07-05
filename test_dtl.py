@@ -1186,7 +1186,11 @@ def test_command_shell_panel_shows_response_message():
     # Option 6 (Command): the command line is a ZCMD <cmdarea>, and the server's
     # response is substituted into the panel via &CMDMSG.
     s = load_panel("command", CMDMSG="IKJ56500I COMMAND FOO NOT FOUND")
-    assert s.field_addr("ZCMD") == 4 * 80 + 14   # Command ===> input line
+    # The command line auto-flows below the top instruction; its exact row is the
+    # compiler's business, but it is a real named input field the cursor lands in.
+    assert s.field_addr("ZCMD") is not None       # Command ===> input line
+    zcmd = next(f for f in s.items if isinstance(f, Field) and f.name == "ZCMD")
+    assert zcmd.cursor                             # <panel cursor=ZCMD>
     assert s.command_for("PF3") == "EXIT"
     texts = [t.text for t in s.items if isinstance(t, Text)]
     assert "IKJ56500I COMMAND FOO NOT FOUND" in texts
