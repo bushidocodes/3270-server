@@ -1,23 +1,27 @@
 <!DOCTYPE DM SYSTEM>
 <!-- ISPF Object/Action Workplace (option 11). An informational leaf panel:
      it describes the Workplace and lists the object types it works with.
-     Shown via _show_overlay; PF3 returns to the Primary Option Menu. -->
+     Shown via _show_overlay; PF3 returns to the Primary Option Menu.
+     Auto-flow (ISPDTLC-idiomatic): no row/col; the title centres itself and the
+     conversion utility spaces the paragraphs. -->
 <panel name="workplace" help="ispfhelp">ISPF Object/Action Workplace
-  <info row="0" col="0" intensity="high">-------------------------- ISPF Object/Action Workplace ------------------------</info>
-  <topinst row="2" col="1">The Workplace lets you act on objects by selecting them and choosing</topinst>
-  <topinst row="3" col="1">an action, rather than navigating the option menus.</topinst>
+  <topinst>The Workplace lets you act on objects by selecting them and choosing
+           an action, rather than navigating the option menus.</topinst>
 
-  <info row="5" col="3" intensity="high">Objects you can work with:</info>
-  <info row="7" col="5">o  Data sets and libraries</info>
-  <info row="8" col="5">o  Library members</info>
-  <info row="9" col="5">o  Workstation files</info>
-  <info row="10" col="5">o  Commands and command tables</info>
+  <info>
+    <p intensity="high">Objects you can work with:</p>
+    <ul>
+      <li>Data sets and libraries</li>
+      <li>Library members</li>
+      <li>Workstation files</li>
+      <li>Commands and command tables</li>
+    </ul>
 
-  <info row="12" col="3">Select an object, then choose an action from the action bar.</info>
-  <info row="13" col="3">(Object selection is not implemented in this demo.)</info>
+    <p>Select an object, then choose an action from the action bar.
+       (Object selection is not implemented in this demo.)</p>
+  </info>
 
-  <info row="22" col="1">Enter PF3 to return to the Primary Option Menu.</info>
-  <info row="23" col="0" intensity="high" fill="-" width="79"/>
+  <botinst>Enter PF3 to return to the Primary Option Menu.</botinst>
 
   <keyl name="WPKEYS">
     <keyi key="PF1" cmd="HELP">Help</keyi>
