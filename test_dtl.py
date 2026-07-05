@@ -2417,6 +2417,26 @@ def test_dl_headers_reference_figure_snapshot():
     ])
 
 
+def test_info_indent_shifts_content_and_clears_after():
+    # #123: <info indent=n> shifts the whole information region (its text, nested
+    # paragraphs, and lists) right by n columns; a sibling block after </info>
+    # returns to the box column.
+    s = load_dtl('<panel name=p width=50><area>'
+                 '<info indent=5><p>Indented para<ul><li>Bullet</ul></info>'
+                 '<p>Outside</area></panel>')
+    at = {it.text.strip(): it.col for it in s.items
+          if isinstance(it, Text) and it.text.strip()}
+    assert at["Indented para"] == 6          # 1 + 5
+    assert at["o"] == 6                       # the bullet marker shifts too
+    assert at["Bullet"] == 10                 # bullet text (marker + 4)
+    assert at["Outside"] == 1                 # sibling after </info> back at margin
+
+    # A plain <info> (no indent) is unchanged — the common bundled case.
+    plain = load_dtl('<panel name=p width=50><area><info><p>Plain</info></area></panel>')
+    assert next(it.col for it in plain.items
+                if isinstance(it, Text) and it.text.strip() == "Plain") == 1
+
+
 def test_notel_space_sets_item_indent():
     # #123: SPACE sets a note-list item's text indentation — YES → 3 columns,
     # NO/absent → the default 4. An <li> SPACE overrides the enclosing <notel>.

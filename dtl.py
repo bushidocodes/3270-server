@@ -374,6 +374,8 @@ class _DTLParser(HTMLParser):
         self._lists = []          # stack of open <ul>/<ol> ({"type", "n"})
         self._note_hang = None    # hanging-indent col of an open <nt>, so its
                                   # nested blocks flow under the note body (#219)
+        self._info_indent = 0     # <info indent=n>: extra columns its content is
+                                  # shifted right (cleared at </info> / box close)
         self._lstfld = None       # active <lstfld> table {"cols", "groups", …}
         self._lstgrp = None       # innermost open <lstgrp> column group, or None
         self._lstgrp_stack = []   # open <lstgrp> groups, outermost first (nesting)
@@ -878,6 +880,10 @@ class _DTLParser(HTMLParser):
                     raise DTLError("<msg> missing required attribute 'msgid'")
             self._tag, self._attrs, self._chars = "msg", a, []
         elif tag in _CONTENT_TAGS:
+            if tag == "info":
+                # <info indent=n> shifts its whole content right; the flow picks
+                # this up in _resolve_pos until the matching </info> (or box end).
+                self._info_indent = self._opt_int(a.get("indent"), 0)
             self._tag, self._attrs, self._chars = tag, a, []
             # A new content tag closes any still-open <dtafldd> (SGML omits the
             # end tag), so the dtafldd capture state must not leak into it.
@@ -929,6 +935,13 @@ class _DTLParser(HTMLParser):
                 self._emit_current()
             self._note_hang = None
             return
+        if tag == "info":
+            # The info's own text (if any) was flushed above; end its indent so a
+            # following sibling flows at the box column again (#123).
+            if self._tag == tag:
+                self._emit_current()
+            self._info_indent = 0
+            return
         if tag == "da":
             self._emit_da()
             self._da = None
@@ -943,6 +956,7 @@ class _DTLParser(HTMLParser):
                 self._close_fig()         # a <fig> whose </fig> was omitted
             self._retract_title_if_collision()
             self._areas.clear()  # drop the panel's implicit flow box
+            self._info_indent = 0
             return
         if tag == "selfld":
             # Advance the enclosing flow past the choices just laid out.
@@ -1036,6 +1050,7 @@ class _DTLParser(HTMLParser):
             self._close_fig()
             return
         if tag in ("area", "region", "dtacol"):
+            self._info_indent = 0    # an <info> can't outlive its enclosing box
             if self._areas:
                 ctx = self._areas.pop()
                 parent = ctx.get("parent")
@@ -1233,8 +1248,10 @@ class _DTLParser(HTMLParser):
         row = ctx["row"]
         ctx["row"] = row + 1
         # Inside an open <nt>, a nested block (a following <p>, list, …) hangs at
-        # the note's body indent, not back at the enclosing box column (#219).
-        col = self._note_hang if self._note_hang is not None else ctx["col"]
+        # the note's body indent, not back at the enclosing box column (#219). An
+        # <info indent=n> shifts its whole content that many columns to the right.
+        col = (self._note_hang if self._note_hang is not None
+               else ctx["col"]) + self._info_indent
         if row >= self.screen.depth:
             # An auto-flowed element ran past the panel bottom (a tall panel plus
             # our block spacing); clamp to the last row rather than abort the panel,
@@ -1560,9 +1577,10 @@ class _DTLParser(HTMLParser):
             return
         ctx = self._areas[-1] if self._areas else None
         row = ctx["row"] if ctx else 0
-        # A list nested in an open <nt> hangs under the note body, like a <p> (#219).
-        base = self._note_hang if self._note_hang is not None \
-            else (ctx["col"] if ctx else 1)
+        # A list nested in an open <nt> hangs under the note body, like a <p> (#219);
+        # an enclosing <info indent=n> shifts it right by n columns.
+        base = (self._note_hang if self._note_hang is not None
+                else (ctx["col"] if ctx else 1)) + self._info_indent
         depth = max(len(self._lists), 1)
         bullet_col = base + (depth - 1) * self._LIST_INDENT
         lst = self._lists[-1] if self._lists else None
