@@ -2389,8 +2389,8 @@ def test_caution_reference_figure_snapshot():
 def test_nt_reference_figure_snapshot():
     """NT-reference Figure 1: "Note:" then the body hung indented under the text.
 
-    Delta: the nested <p> ("If the librarian ...") flows at the left margin; the
-    figure hangs it under the note too (tracked separately)."""
+    The nested <p> ("If the librarian ...") hangs under the note body too, at the
+    same indent as the first paragraph — matching the reference figure (#219)."""
     src = ("<!DOCTYPE DM SYSTEM>\n<HELP NAME=nt DEPTH=20>Book / Periodical Search Help\n"
            "<AREA>\n<INFO>\n"
            "<P>This entry screen allows you to locate a desired book or periodical "
@@ -2407,8 +2407,27 @@ def test_nt_reference_figure_snapshot():
         " Note: If the item you are trying to locate is not in stock and you would like",
         "       to reserve it, please see the librarian at the front desk.",
         "",                                          # blank before the nested paragraph
-        " If the librarian is not there, please do not yell for help. This is a library!",
+        "       If the librarian is not there, please do not yell for help. This is a",
+        "       library!",                           # nested <p> hangs under the note
     ])
+
+
+def test_nt_nested_block_hangs_and_boundary_clears():
+    # #219: a nested <p> inside <nt> flows at the note's hanging indent, and a
+    # sibling <p> after </nt> returns to the enclosing box column.
+    s = load_dtl(
+        '<panel name="p" width="60"><area>'
+        '<nt>Reserve it at the desk.'
+        '<p>Come back later if nobody is there.'
+        '</nt>'
+        '<p>This paragraph is outside the note.'
+        '</area></panel>')
+    at = {it.text: it.col for it in s.items if isinstance(it, Text)}
+    body_col = at["Reserve it at the desk."]              # note body (hung past "Note: ")
+    assert at["Note:"] == 1                               # heading at the margin
+    assert body_col > 1
+    assert at["Come back later if nobody is there."] == body_col   # nested <p> hangs
+    assert at["This paragraph is outside the note."] == 1          # sibling back at margin
 
 
 def test_notel_reference_figure_snapshot():

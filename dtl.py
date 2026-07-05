@@ -371,6 +371,8 @@ class _DTLParser(HTMLParser):
         self._titline = True      # <panel titline=no> suppresses the on-screen title line
         self._panel_cursor = None # <panel cursor=field-name> places the cursor at that field
         self._lists = []          # stack of open <ul>/<ol> ({"type", "n"})
+        self._note_hang = None    # hanging-indent col of an open <nt>, so its
+                                  # nested blocks flow under the note body (#219)
         self._lstfld = None       # active <lstfld> table {"cols", "groups", …}
         self._lstgrp = None       # innermost open <lstgrp> column group, or None
         self._lstgrp_stack = []   # open <lstgrp> groups, outermost first (nesting)
@@ -910,6 +912,13 @@ class _DTLParser(HTMLParser):
         # end tag is handled below via the normal `tag == self._tag` path.
         if self._tag is not None and tag != self._tag and tag not in ("dtafldd", "lit"):
             self._emit_current()  # flush at the current list depth, before any pop
+        if tag in ("nt", "note"):
+            # Flush the note's own text if no nested child already did, then end the
+            # hanging indent so a following sibling block flows at the box column (#219).
+            if self._tag == tag:
+                self._emit_current()
+            self._note_hang = None
+            return
         if tag == "da":
             self._emit_da()
             self._da = None
@@ -1209,7 +1218,9 @@ class _DTLParser(HTMLParser):
             raise DTLError(f"<{tag}> outside any flow box")
         row = ctx["row"]
         ctx["row"] = row + 1
-        col = ctx["col"]
+        # Inside an open <nt>, a nested block (a following <p>, list, …) hangs at
+        # the note's body indent, not back at the enclosing box column (#219).
+        col = self._note_hang if self._note_hang is not None else ctx["col"]
         if row >= self.screen.depth:
             # An auto-flowed element ran past the panel bottom (a tall panel plus
             # our block spacing); clamp to the last row rather than abort the panel,
@@ -1535,7 +1546,9 @@ class _DTLParser(HTMLParser):
             return
         ctx = self._areas[-1] if self._areas else None
         row = ctx["row"] if ctx else 0
-        base = ctx["col"] if ctx else 1
+        # A list nested in an open <nt> hangs under the note body, like a <p> (#219).
+        base = self._note_hang if self._note_hang is not None \
+            else (ctx["col"] if ctx else 1)
         depth = max(len(self._lists), 1)
         bullet_col = base + (depth - 1) * self._LIST_INDENT
         lst = self._lists[-1] if self._lists else None
@@ -2065,6 +2078,8 @@ class _DTLParser(HTMLParser):
                                      role="text"))
             if ctx is not None:
                 ctx["row"] = row + max(len(lines), 1)
+            # Nested blocks (a following <p>, list, …) up to </nt> hang here too.
+            self._note_hang = body_col
             return
         # <note>: heading inline, body wrapped to the left margin.
         lines = self._wrap((head + text).strip(),
