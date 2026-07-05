@@ -851,6 +851,9 @@ def send_ispf_menu(client_socket, userid: str, short_msg: str = None):
     screen = load_panel("ispf", ZUSER=userid.ljust(8), ZTIME=time_str)
     if short_msg:
         screen.add(Text(2, 25, short_msg[:54], DisplayIntensity.HIGH))
+        # A menu message is always an error (INVALID OPTION / NOT YET
+        # IMPLEMENTED); real ISPF sounds the alarm on it, as the logon errors do.
+        screen.sound_alarm = True
     _send_screen(client_socket, screen)
     return screen
 
@@ -874,6 +877,8 @@ def _update_menu_message(client_socket, screen, short_msg):
     color = getattr(_session, "color", False)
     text = (short_msg or "")[:_MENU_MSG_WIDTH].ljust(_MENU_MSG_WIDTH)
     msg_item = Text(_MENU_MSG_ROW, _MENU_MSG_COL, text, DisplayIntensity.HIGH)
+    # Beep on an error message (like real ISPF), stay silent when clearing it.
+    screen.sound_alarm = bool(short_msg)
     cursor_at = None
     if screen.command_field is not None:
         cf = screen.command_field

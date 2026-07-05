@@ -60,6 +60,7 @@ def _ispf_screen(userid, short_msg=None):
     s = load_panel("ispf", ZUSER=userid.ljust(8), ZTIME=FROZEN.strftime("%H:%M"))
     if short_msg:
         s.add(Text(2, 25, short_msg[:54], DisplayIntensity.HIGH))
+        s.sound_alarm = True   # a menu error message beeps, like real ISPF
     return s
 
 
@@ -72,6 +73,10 @@ def test_ispf_server_overlays_the_short_message(frozen_clock):
     msg = "OPTION 3 NOT YET IMPLEMENTED"
     sent = _capture(server.send_ispf_menu, "IBMUSER", msg)
     assert bytes(sent) == _ispf_screen("IBMUSER", msg).render()
+    # A menu error message sounds the alarm (WCC bit 0x04), like real ISPF; a
+    # menu with no message does not.
+    assert sent[1] & 0x04
+    assert not (_capture(server.send_ispf_menu, "IBMUSER")[1] & 0x04)
 
 
 def test_ispf_server_substitutes_a_longer_userid(frozen_clock):
