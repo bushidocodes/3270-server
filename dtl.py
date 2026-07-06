@@ -758,6 +758,7 @@ class _DTLParser(HTMLParser):
                 "msg": a.get("msg"),
                 "upper": str(a.get("format", "")).strip().lower() == "upper",
                 "items": [],
+                "pairs": [],     # (internal value, external/displayed) translations
             }
         elif tag == "xlati":
             if self._xlatl is None:
@@ -2626,10 +2627,18 @@ class _DTLParser(HTMLParser):
             if desc:
                 self.screen.add(Text(row, desc_col, desc, _intensity(a),
                                      role="prompt"))
+        # Record the field's external→internal translation map (<xlatl>/<xlati>)
+        # so a typed value can be read back to its internal form (Screen.internal_value).
+        if name:
+            vc = self._field_varclass(name)
+            if vc and vc.get("xlati_in"):
+                self.screen.translations[name.upper()] = vc["xlati_in"]
         # USAGE=OUT is a display-only (output) field: show the variable's value as
         # protected text — like a list column — not an editable input box.
         if str(a.get("usage", "")).strip().lower() == "out":
             value = self._subs.get((name or "").upper()) or a.get("init", "")
+            # Translate the internal value to its displayed form (<xlatl>/<xlati>).
+            value = self._translate_out(name, value)
             self.screen.add(Text(row, fldcol, str(value)[:length].ljust(length),
                                  _intensity(a), color=self._color(a), role="cell",
                                  outline=self._outline(a)))
@@ -2707,6 +2716,20 @@ class _DTLParser(HTMLParser):
         vc = self._varclasses.get(str(decl.get("varclass", "")).upper())
         return bool(vc and vc.get("numeric"))
 
+    def _field_varclass(self, name):
+        """The <varclass> a field's variable is declared with, or None."""
+        decl = self._vardcls.get(name.upper()) if name else None
+        return (self._varclasses.get(str(decl.get("varclass", "")).upper())
+                if decl else None)
+
+    def _translate_out(self, name, value):
+        """Map a stored internal value to its displayed (external) form via the
+        variable's <xlatl>/<xlati> translations — e.g. internal "1" → "Enabled".
+        Untranslated values (and fields with no translate list) pass through."""
+        vc = self._field_varclass(name)
+        out = vc.get("xlati_out") if vc else None
+        return out.get(str(value).upper(), value) if out else value
+
     def _emit_varclass(self, a):
         name = a.get("name")
         if not name:
@@ -2764,11 +2787,13 @@ class _DTLParser(HTMLParser):
 
     def _emit_xlati(self, a, content):
         """One ``<xlati value=internal>external`` translation item. The external
-        (the form the user types and sees) is the value; the element text — which
-        may be a ``<lit>`` literal run — supplies it."""
+        (the form the user types and sees) is the element text — which may be a
+        ``<lit>`` literal run; ``value=`` is the internal form it maps to/from."""
         external = " ".join(content.split())
         if external:
             self._xlatl["items"].append(external)
+            if a.get("value") is not None:
+                self._xlatl["pairs"].append((a.get("value"), external))
 
     def _end_xlatl(self):
         """Close an ``<xlatl>`` translate list. ``FORMAT=upper`` marks the class as
@@ -2791,6 +2816,16 @@ class _DTLParser(HTMLParser):
                 "upper": upper,
                 "msg": xl["msg"] or vc.get("msg"),
             })
+        # The internal↔external translation maps: OUT maps a stored internal value
+        # to its displayed form; IN maps a typed external form back to the internal
+        # value (uppercased key when the class/list is FORMAT=upper).
+        if xl["pairs"]:
+            upper = xl["upper"] or vc.get("upper", False)
+            out = vc.setdefault("xlati_out", {})
+            inn = vc.setdefault("xlati_in", {})
+            for internal, external in xl["pairs"]:
+                out.setdefault(str(internal).upper(), external)
+                inn.setdefault(external.upper() if upper else external, internal)
 
     def _emit_source(self, a, content):
         """A )PROC/)INIT source block. It renders nothing. When it assigns the
