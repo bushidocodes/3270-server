@@ -1943,6 +1943,39 @@ def test_dtafld_outline_draws_box_lines():
     assert 0xC2 not in bytes(mono)
 
 
+def test_da_attr_applies_rendering_attributes():
+    # #124: <attr> data-area attribute characters carry INTENS/NUMERIC/PAD/
+    # OUTLINE/JUST onto the field the character starts (datain → input field,
+    # dataout → protected text).
+    s = load_dtl(
+        "<panel name=p width=40><area>"
+        "<da name=area depth=3>"
+        "<attr attrchar='%' type=datain numeric=on pad=nulls outline=box intens=high>"
+        "<attr attrchar='~' type=datain intens=non>"
+        "<attr attrchar='@' type=dataout just=right>"
+        "%_____ ~____ @Total"
+        "</da></area></panel>")
+    fields = [it for it in s.items if isinstance(it, Field)]
+    f0 = fields[0]                                    # the '%' input field
+    assert f0.numeric and f0.pad == "\x00" and f0.outline is Outline.BOX
+    assert f0.intensity is DisplayIntensity.HIGH
+    assert fields[1].hidden is True                  # '~' INTENS=NON → non-display
+    # '@' dataout JUST=right right-justifies its text within the run width.
+    tot = next(it for it in s.items if isinstance(it, Text) and it.text.strip() == "Total")
+    assert tot.text == "Total"                       # (fills its own width; single word)
+
+
+def test_da_attr_records_non_rendering_attributes():
+    # #124: attributes with no TN3270 display effect are still recognised (not
+    # ignored) — CAPS/SKIP/GE/PAS/CKBOX/ATTN parse without error or leaking.
+    s = load_dtl(
+        "<panel name=p width=40><area><da name=a depth=2>"
+        "<attr attrchar='#' type=datain caps=on skip=on ge=off pas=yes ckbox=off attn=off>"
+        "#____"
+        "</da></area></panel>")
+    assert any(isinstance(it, Field) for it in s.items)   # field still rendered
+
+
 def test_dtafld_pad_fills_entry_and_dtacol_default():
     # #122: PAD/PADC set the fill character for an empty <dtafld> entry, with the
     # same rules as <lstcol>. A <dtacol> PAD is the column default; a field's own
