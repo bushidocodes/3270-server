@@ -354,6 +354,10 @@ class _DTLParser(HTMLParser):
         self._selfld = None       # active <selfld> layout state, or None
         self._in_dtafldd = False  # capturing a <dtafldd> prompt child?
         self._dtafldd = None      # captured <dtafldd> prompt text, or None
+        self._pending_ps = None   # open <ps>'s (var, value) awaiting its row, or None
+        self._pending_chofld = None   # open <chofld>'s attrs (a choice's entry field)
+        self._chofld_choicetext = None  # the choice text captured before a <chofld>
+        self._pending_scrfld = None   # a <scrfld> awaiting its <dtafld>/<lstcol>
         self._keylist = None      # active <keyl> bindings dict, or None
         self._varclasses = {}     # <varclass> name (upper) → {"numeric", "checks", "msg"}
         self._vardcls = {}        # <vardcl> name (upper) → {"varclass": name}
@@ -510,6 +514,41 @@ class _DTLParser(HTMLParser):
             var = a.get("var")
             if var:
                 self.handle_data(f"&{var}.")
+            return
+        # <ps> (point-and-shoot): an inline phrase whose text the user can select by
+        # cursor — placing the cursor on it and pressing Enter sets VAR to VALUE
+        # (before )PROC). Like <hp>/<rp> it does NOT close its parent and its text
+        # stays part of the parent's content; the (var, value) is banked here and
+        # mapped to the parent's row when the parent is emitted (_emit_current).
+        # VALUE=* on a <ps> in a <choice> means "the choice's number" (resolved in
+        # _emit_choice). The point-and-shoot text is color-emphasised on real ISPF
+        # colour terminals; in host/mono it renders like the surrounding text.
+        if tag == "ps":
+            var = a.get("var")
+            if var:
+                self._pending_ps = (var, str(a.get("value", "")))
+            return
+        # <chofld> (choice data field): an input field within a <choice> row. The
+        # text captured before it is the choice description; the text after it is the
+        # field's own description. Both are banked and laid out when the choice is
+        # emitted (_emit_choice); like <dtafldd> it does not close its parent.
+        if tag == "chofld":
+            if self._tag == "choice":
+                self._chofld_choicetext = "".join(self._chars)
+                self._chars = []
+                self._pending_chofld = a
+            return
+        # <scrfld> (scrollable field): annotates the enclosing <dtafld>/<lstcol>,
+        # making it horizontally scrollable — DISPLEN is the field's logical data
+        # length (wider than the on-screen window, which stays the field's
+        # entwidth/colwidth), and the indicator attributes name scroll-status
+        # variables. It does not close its parent (attached when the field/column is
+        # emitted); finalise an open <dtafldd> capture first so a description isn't
+        # swallowed.
+        if tag == "scrfld":
+            if self._in_dtafldd and isinstance(self._dtafldd, list):
+                self._in_dtafldd, self._dtafldd = False, "".join(self._dtafldd)
+            self._pending_scrfld = a
             return
         # Implicit end tags: a new block element closes the open content element
         # (DTL omits most end tags). <dtafldd> (a field's prompt/description) and
@@ -998,6 +1037,11 @@ class _DTLParser(HTMLParser):
         if tag in ("hp", "rp") and self._runs is not None:
             self._end_hp()
             return
+        # </ps>, </chofld>, </scrfld>: inline/annotating children handled on their
+        # start tag. They must not close the enclosing content element (the choice/
+        # field/text they sit inside stays open), so a stray end tag is a no-op.
+        if tag in ("ps", "chofld", "scrfld"):
+            return
         # <varsub> is an empty tag: its text was injected on the start tag, so a
         # (rare) explicit </varsub> is a no-op — return before the implicit flush
         # below, which would otherwise prematurely close the enclosing <msg>.
@@ -1280,6 +1324,15 @@ class _DTLParser(HTMLParser):
             self._store_figcap(content)
         if horiz:
             self._flow_horiz(box, start_idx)
+        # A <ps> phrase inside this element makes its row point-and-shoot: map the
+        # row the element rendered on to the phrase's (var, value). _emit_choice may
+        # have resolved a VALUE=* to the choice number by now.
+        if self._pending_ps is not None:
+            rows = [it.row for it in self.screen.items[start_idx:]
+                    if hasattr(it, "row")]
+            if rows:
+                self.screen.ps_rows[min(rows)] = self._pending_ps
+            self._pending_ps = None
         self._tag, self._attrs, self._chars = None, None, []
         self._runs, self._hp = None, None
         self._dtafldd, self._in_dtafldd = None, False
@@ -2027,6 +2080,20 @@ class _DTLParser(HTMLParser):
             == "before" else "after"
         col["textfmt"] = str(a.get("textfmt", "start")).strip().lower()
         col["text_area"] = max(textlen, len(text)) if text else 0
+        # A <scrfld> nested in this column makes it horizontally scrollable: its
+        # data (DISPLEN) is wider than the on-screen COLWIDTH window, and ISPF
+        # generates a scale/indicator line under the column heading (see Figure 42
+        # in the DTL guide, rendered in _emit_lstfld).
+        scr = self._pending_scrfld
+        self._pending_scrfld = None
+        if scr is not None:
+            col["scrfld"] = scr
+            self.screen.scroll_fields.append({
+                "name": col["datavar"],
+                "displen": self._opt_int(scr.get("displen")),
+                "scroll": str(scr.get("scroll", "on")).strip().lower(),
+                **{k: scr[k] for k in self._SCRFLD_INDICATORS if k in scr},
+            })
 
     @staticmethod
     def _fmt_offset(inner, fmt, mode):
@@ -2172,6 +2239,20 @@ class _DTLParser(HTMLParser):
                 self.screen.add(Text(row + c["line"] - 1, c["x"] + hoff,
                                      c["heading"][:c["fmt"]], H, role="heading"))
         row += head_lines
+        # A scrollable column (a nested <scrfld>) shows a scale/separator line
+        # between its heading and the data — the on-screen window is COLWIDTH but the
+        # data scrolls wider (DISPLEN). See Figure 42 in the DTL guide.
+        if any(c.get("scrfld") for c in cols):
+            for c in cols:
+                scr = c.get("scrfld")
+                if scr is None:
+                    continue
+                text = (self._scale_ruler(c["fmt"]) if "scale" in scr
+                        else ("-" * (c["fmt"] - 1) + ">") if c["fmt"] >= 1 else "")
+                if text:
+                    self.screen.add(Text(row, c["x"], text,
+                                         DisplayIntensity.NORMAL, role="prompt"))
+            row += 1
         row = self._emit_lstfld_rows(cols, row)
         # ISPF puts a "ROW x TO y OF z" scroll status on the title line's right —
         # but only if that region is free (a bundled panel's full-width title rule
@@ -2642,6 +2723,7 @@ class _DTLParser(HTMLParser):
             self.screen.add(Text(row, fldcol, str(value)[:length].ljust(length),
                                  _intensity(a), color=self._color(a), role="cell",
                                  outline=self._outline(a)))
+            self._attach_scrfld(name, row, fldcol, length, ctx)
             return None
         field = Field(
             row=row,
@@ -2667,7 +2749,54 @@ class _DTLParser(HTMLParser):
         )
         self.screen.add(field)
         self._attach_validation(name, a)
+        self._attach_scrfld(name, row, fldcol, length, ctx)
         return field
+
+    # ── <scrfld> scrollable-field indicators ────────────────────────────────
+
+    @staticmethod
+    def _scale_ruler(width):
+        """The ISPF scale ruler for a ``width``-wide scrollable window:
+        ``----+----1----+----2…`` (a ``+`` every 5 columns, the tens digit every
+        10). Shown below/above a scrollable field via the SCRFLD SCALE variable."""
+        out = []
+        for i in range(1, max(0, width) + 1):
+            out.append(str((i // 10) % 10) if i % 10 == 0
+                       else "+" if i % 5 == 0 else "-")
+        return "".join(out)
+
+    # SCRFLD attributes naming an on-panel scroll-indicator variable.
+    _SCRFLD_INDICATORS = ("scale", "sindvar", "indvar", "lindvar", "rindvar",
+                          "lcolind", "rcolind")
+
+    def _attach_scrfld(self, name, row, col, width, ctx):
+        """Attach a pending <scrfld> to the <dtafld> field just emitted at
+        ``(row, col)`` with on-screen ``width``. The field's data can be longer than
+        the window (DISPLEN); ISPF scrolls it horizontally. Records the scroll
+        metadata and, when a scroll-indicator variable is specified, generates the
+        indicator line (a SCALE ruler, else a separator of dashes) below the field
+        (FLDSPOS=BELOW, the default) or above it, advancing the flow past it."""
+        a = self._pending_scrfld
+        self._pending_scrfld = None
+        if a is None:
+            return
+        self.screen.scroll_fields.append({
+            "name": name,
+            "displen": self._opt_int(a.get("displen")),
+            "scroll": str(a.get("scroll", "on")).strip().lower(),
+            **{k: a[k] for k in self._SCRFLD_INDICATORS if k in a},
+        })
+        if not any(k in a for k in self._SCRFLD_INDICATORS):
+            return                                  # no indicator variable → no line
+        text = (self._scale_ruler(width) if "scale" in a
+                else ("-" * (width - 1) + ">") if width >= 1 else "")
+        below = str(a.get("fldspos", "below")).strip().lower() != "above"
+        irow = row + 1 if below else row - 1
+        if 0 <= irow < self.screen.depth and text:
+            self.screen.add(Text(irow, col, text, DisplayIntensity.NORMAL,
+                                 role="prompt"))
+            if below and ctx is not None:
+                ctx["row"] += 1                     # the indicator occupies a line
 
     @staticmethod
     def _field_help(a):
@@ -2955,6 +3084,16 @@ class _DTLParser(HTMLParser):
         if sf is None:
             raise DTLError("<choice> outside of a <selfld>")
         self._emit_selfld_prompt(sf)
+        # A <chofld> nested in this choice split the captured text: the part banked
+        # before it is the choice description; `content` (the part after) is the
+        # field's own description. Consume both now (even for a HIDE-hidden choice,
+        # so the pending state never leaks into the next choice).
+        chofld = self._pending_chofld
+        self._pending_chofld = None
+        chofld_desc = ""
+        if chofld is not None:
+            chofld_desc, content = content, (self._chofld_choicetext or "")
+        self._chofld_choicetext = None
         # HIDE/HIDEX conditionally remove the choice from the list (dynamic panels
         # show a variable subset). A hidden choice renders nothing, consumes no
         # row, and isn't selectable — the choices below it move up.
@@ -2972,6 +3111,10 @@ class _DTLParser(HTMLParser):
         disp = sel.split(",")[0].strip() if sel is not None else None
         auto_num = disp is None and not sf.get("multi")
         num = str(sf["count"] + 1) if auto_num else (disp or "")
+        # A <ps value=*> inside a choice uses the choice's number (or SELCHAR value)
+        # as its point-and-shoot value — resolve it now that the number is known.
+        if self._pending_ps is not None and self._pending_ps[1] == "*":
+            self._pending_ps = (self._pending_ps[0], num)
         # On the first choice, a column-less single-choice field whose choices are
         # auto-numbered switches to the reference figure layout: a selection input
         # field before the first choice, and "N." (number + period) numbering.
@@ -3037,8 +3180,20 @@ class _DTLParser(HTMLParser):
             desccol = sf["namecol"]
         else:
             desccol = sf["desccol"]
-        self.screen.add(Text(row, desccol, content.rstrip(), color=explicit, role=rdesc))
-        sf["row"] = row + 1
+        # A flowed choice (text on the line after <choice>, as the <ps>/<chofld>
+        # guide examples code it) captures a leading newline + indentation; drop it.
+        # Deliberate leading spaces on the *same* line (which position the
+        # description) and the internal keyword/description gap are both preserved.
+        desc_text = re.sub(r"^\s*\n\s*", "", content) if "\n" in content else content
+        desc_text = desc_text.rstrip()
+        self.screen.add(Text(row, desccol, desc_text, color=explicit, role=rdesc))
+        # A <chofld> lays out an input field just past the description, with its own
+        # description on the line below (see Figure 96 in the DTL guide).
+        extra = 0
+        if chofld is not None:
+            extra = self._emit_chofld(chofld, chofld_desc, row, desccol,
+                                      len(desc_text), explicit)
+        sf["row"] = row + 1 + extra
         sf["count"] += 1
         if unavail:
             return                          # not selectable → no routing/point-and-shoot
@@ -3067,6 +3222,45 @@ class _DTLParser(HTMLParser):
             checkvar = a.get("checkvar")
             if checkvar and self._subs.get(checkvar.strip().upper(), "").strip().upper() == match:
                 self.screen.cursor_at = (row, mark.col if mark is not None else sf["namecol"])
+
+    def _emit_chofld(self, a, description, row, desccol, desclen, color):
+        """Lay out a <chofld> (choice data field): an input (or output) field just
+        past the choice description, with the field's own description — if any — on
+        the line below, indented to the description column (per Figure 96 in the DTL
+        guide). Returns the number of extra rows the description consumed (0 or 1)."""
+        length = int(a.get("entwidth", 8))
+        fldcol = desccol + desclen + 1              # a gap past the description text
+        if fldcol + length + 1 >= self.screen.width:   # clamp to the panel edge
+            length = max(1, self.screen.width - fldcol - 2)
+        name = a.get("datavar")
+        if name:                                    # honour the variable's <xlatl> map
+            vc = self._field_varclass(name)
+            if vc and vc.get("xlati_in"):
+                self.screen.translations[name.upper()] = vc["xlati_in"]
+        # USAGE=OUT is a display-only field (the variable's value as protected text);
+        # otherwise an editable entry the user types into.
+        if str(a.get("usage", "")).strip().lower() == "out":
+            value = self._translate_out(name, self._subs.get((name or "").upper())
+                                        or a.get("init", ""))
+            self.screen.add(Text(row, fldcol, str(value)[:length].ljust(length),
+                                 color=self._color(a) or color, role="cell",
+                                 outline=self._outline(a)))
+        else:
+            self.screen.add(Field(
+                row=row, col=fldcol, length=length, name=name or None,
+                default=a.get("init", ""),
+                numeric=self._resolve_numeric(a, name),
+                hidden=str(a.get("display", "yes")).strip().lower() == "no",
+                color=self._color(a) or color, role="field",
+                highlight=self._hilite(a), outline=self._outline(a),
+                help=self._field_help(a), pad=self._pad_char(a),
+            ))
+            self._attach_validation(name, a)
+        desc = " ".join((description or "").split())
+        if desc:
+            self.screen.add(Text(row + 1, desccol, desc, color=color, role="desc"))
+            return 1
+        return 0
 
     def _end_pdc(self):
         """Finalise the open <pdc> onto its <abc>. DTL omits most end tags, so a

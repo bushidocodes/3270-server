@@ -557,6 +557,17 @@ class Screen:
     # than one choice can be chosen. [{"value": match, "name": choice, "addr": n}].
     # The mark Fields are also emitted as items; this records how to read them.
     selection_fields: List[dict] = _dc_field(default_factory=list)
+    # Screen row → (variable, value) for a DTL <ps> point-and-shoot phrase on that
+    # row: cursoring onto it and pressing Enter sets the variable to the value
+    # (ISPF sets it before )PROC). Metadata: not rendered. See point_and_shoot_at.
+    ps_rows: Dict[int, Tuple[str, str]] = _dc_field(default_factory=dict)
+    # Horizontally scrollable fields (DTL <scrfld> nested in a <dtafld>/<lstcol>):
+    # each entry records the field's DISPLEN (its logical data length, wider than
+    # the on-screen window) and any scroll-indicator variables. The window itself
+    # renders at the enclosing field's entwidth/colwidth; ISPF scrolls the longer
+    # data through it. [{"name", "displen", "scroll", "sindvar", "scale", ...}].
+    # Metadata: not rendered (the generated scale/separator line is a normal item).
+    scroll_fields: List[dict] = _dc_field(default_factory=list)
     # Field name (upper) → {"checkmsg": id, "checks": [...]}, from a variable's
     # <varclass> validation (<checkl>/<checki>). Metadata: not rendered.
     validations: Dict[str, dict] = _dc_field(default_factory=dict)
@@ -601,6 +612,30 @@ class Screen:
         if cursor_addr is None:
             return None
         return self.selection_rows.get(cursor_addr // 80)
+
+    def point_and_shoot_at(self, cursor_addr: Optional[int]) -> Optional[Tuple[str, str]]:
+        """The ``(variable, value)`` of the DTL ``<ps>`` point-and-shoot phrase the
+        cursor's row is on, or ``None``. Cursoring onto a point-and-shoot phrase and
+        pressing Enter sets ``variable`` to ``value`` (ISPF does this before )PROC).
+        """
+        if cursor_addr is None:
+            return None
+        return self.ps_rows.get(cursor_addr // 80)
+
+    def command_point_and_shoot(self, cursor_addr: Optional[int]) -> Optional[str]:
+        """The command-line value a DTL ``<ps>`` phrase under the cursor sets, or
+        ``None``. Only a ``<ps>`` whose VAR is this panel's command variable (the
+        ``<cmdarea>``, e.g. ZCMD) drives the option line — the common point-and-shoot
+        menu (see the DTL guide's Figure 151). Other point-and-shoot variables are
+        recorded in :attr:`ps_rows` but need an application variable pool to act on.
+        """
+        ps = self.point_and_shoot_at(cursor_addr)
+        if ps is None or self.command_field is None:
+            return None
+        var, value = ps
+        if var.strip().upper() == (self.command_field.name or "").upper():
+            return value
+        return None
 
     def selected_values(self, fields_by_addr: Dict[int, str]) -> List[str]:
         """For a multi-select panel (DTL ``<selfld type=multi>``), the MATCH

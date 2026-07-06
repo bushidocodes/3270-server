@@ -769,6 +769,159 @@ def test_choice_unavail_is_dimmed_and_unselectable():
     assert all(_role_colour(it.color, it.role) is Color.BLUE for it in dimmed)
 
 
+# ── <ps> point-and-shoot fields (#115) ───────────────────────────────────────
+
+def test_ps_records_point_and_shoot_rows_and_renders_text():
+    # <ps var=.. value=..> inside a choice supplies the choice text and makes the
+    # row point-and-shoot: cursoring on it sets the variable (see the DTL guide's
+    # Figure 151). The enclosed text renders as the choice description.
+    s = load_dtl(
+        '<panel name=ps1 menu><selfld type=menu>'
+        '<choice><ps var=zcmd value=1>Selection #1</ps>'
+        '<choice><ps var=zcmd value=2>Selection #2</ps>'
+        '</selfld><cmdarea></panel>'
+    )
+    assert s.ps_rows == {0: ("zcmd", "1"), 1: ("zcmd", "2")}
+    # The point-and-shoot text is not lost — it is the choice's description.
+    descs = [it for it in s.items if isinstance(it, Text) and "Selection" in it.text]
+    assert [it.text for it in descs] == ["Selection #1", "Selection #2"]
+    assert s.point_and_shoot_at(0 * 80 + 5) == ("zcmd", "1")
+    assert s.point_and_shoot_at(1 * 80 + 3) == ("zcmd", "2")
+    assert s.point_and_shoot_at(9 * 80) is None
+    assert s.point_and_shoot_at(None) is None
+
+
+def test_ps_value_star_uses_the_choice_number():
+    # VALUE=* on a <ps> in a <choice> uses the choice's number as the value.
+    s = load_dtl(
+        '<panel name=ps1 menu><selfld type=menu>'
+        '<choice><ps var=zcmd value=*>First</ps>'
+        '<choice><ps var=zcmd value=*>Second</ps>'
+        '</selfld></panel>'
+    )
+    assert s.ps_rows == {0: ("zcmd", "1"), 1: ("zcmd", "2")}
+
+
+def test_ps_drives_the_command_line_only_for_the_command_variable():
+    # command_point_and_shoot resolves a <ps> to the option line only when its VAR
+    # is the panel's command variable (the <cmdarea>, defaulting to ZCMD).
+    s = load_dtl(
+        '<panel name=ps1 menu><selfld type=menu>'
+        '<choice><ps var=zcmd value=7>Sets the command</ps>'
+        '<choice><ps var=other value=9>Sets another variable</ps>'
+        '</selfld><cmdarea></panel>'
+    )
+    assert s.command_point_and_shoot(0 * 80 + 5) == "7"
+    assert s.command_point_and_shoot(1 * 80 + 5) is None   # not the command variable
+    assert s.command_point_and_shoot(None) is None
+
+
+def test_ps_in_body_text_preserves_the_text_and_row():
+    # A <ps> is also valid inside body text (info/p/…): the text renders and its
+    # row is recorded for point-and-shoot.
+    s = load_dtl(
+        '<panel name=p><area>'
+        '<info>See <ps var=zsel value=go>the details</ps> here.</info>'
+        '</area></panel>'
+    )
+    line = next(it for it in s.items if isinstance(it, Text) and "details" in it.text)
+    assert "See the details here." == line.text
+    assert s.ps_rows.get(line.row) == ("zsel", "go")
+
+
+# ── <chofld> choice data fields (#115) ───────────────────────────────────────
+
+def test_chofld_adds_an_entry_field_within_the_choice():
+    # <chofld> nests an input field in a <choice> row: the text before it is the
+    # choice description, the field follows it, and the text after it is the
+    # field's own description on the line below (see the guide's Figure 96).
+    s = load_dtl(
+        '<panel name=m menu><selfld type=menu>'
+        '<choice checkvar=card match=new>New Type:'
+        '<chofld datavar=cardtype entwidth=9>(Permanent or Temporary)'
+        '<choice checkvar=card match=renew>Renewal'
+        '</selfld></panel>'
+    )
+    desc = next(it for it in s.items if isinstance(it, Text) and it.text == "New Type:")
+    field = next(it for it in s.items if isinstance(it, Field) and it.name == "cardtype")
+    assert field.length == 9
+    assert field.row == desc.row and field.col > desc.col        # follows the description
+    # The chofld's own description sits on the next line.
+    fdesc = next(it for it in s.items if isinstance(it, Text)
+                 and it.text == "(Permanent or Temporary)")
+    assert fdesc.row == desc.row + 1
+    # The choice below flows past the extra description line.
+    renewal = next(it for it in s.items if isinstance(it, Text) and it.text == "Renewal")
+    assert renewal.row == desc.row + 2
+
+
+def test_chofld_usage_out_is_a_display_field():
+    # USAGE=OUT makes the choice data field display-only: the variable's value as
+    # protected text, not an editable field.
+    s = load_dtl(
+        '<panel name=m menu><selfld type=menu>'
+        '<choice>Status:<chofld datavar=st usage=out entwidth=6>'
+        '</selfld></panel>',
+        ST="OPEN",
+    )
+    assert not any(isinstance(it, Field) and it.name == "st" for it in s.items)
+    cell = next(it for it in s.items if isinstance(it, Text) and it.text.startswith("OPEN"))
+    assert cell.text == "OPEN  "                    # padded to entwidth, protected
+
+
+# ── <scrfld> scrollable fields (#115) ────────────────────────────────────────
+
+def test_scrfld_on_a_dtafld_records_metadata_and_draws_a_scale():
+    # <scrfld> makes the enclosing <dtafld> horizontally scrollable: the on-screen
+    # window stays the field's entwidth, DISPLEN is the (wider) logical length, and
+    # a SCALE ruler is drawn below the field (see the guide's Figure 41).
+    s = load_dtl(
+        '<panel name=p><area><dtacol pmtwidth=6 entwidth=10>'
+        '<dtafld datavar=nm>Name<scrfld displen=40 scale=nmsc>'
+        '</dtacol></area></panel>'
+    )
+    field = next(it for it in s.items if isinstance(it, Field) and it.name == "nm")
+    assert field.length == 10                        # the window, not DISPLEN
+    ruler = next(it for it in s.items if isinstance(it, Text) and it.text.startswith("----+"))
+    assert ruler.text == "----+----1"                # scale ruler, field-width wide
+    assert ruler.row == field.row + 1 and ruler.col == field.col
+    assert s.scroll_fields == [
+        {"name": "nm", "displen": 40, "scroll": "on", "scale": "nmsc"}]
+
+
+def test_scrfld_separator_indicator_shows_scroll_direction():
+    # A SINDVAR (separator) scroll indicator renders as a run of dashes ending in a
+    # '>' (data extends to the right), field-width wide.
+    s = load_dtl(
+        '<panel name=p><area><dtacol pmtwidth=6 entwidth=10>'
+        '<dtafld datavar=nm>Name<scrfld displen=40 sindvar=si>'
+        '<dtafld datavar=ad>Addr'
+        '</dtacol></area></panel>'
+    )
+    sep = next(it for it in s.items if isinstance(it, Text) and set(it.text) <= set("->"))
+    assert sep.text == "---------" + ">"            # 10 wide
+    # The following field flows below the generated indicator line, not over it.
+    addr = next(it for it in s.items if isinstance(it, Field) and it.name == "ad")
+    assert addr.row == sep.row + 1
+
+
+def test_scrfld_on_a_lstcol_draws_a_scale_under_the_heading():
+    # A scrollable list column draws its scale line between the heading and the
+    # data cells (see the guide's Figure 42).
+    s = load_dtl(
+        '<panel name=p><area><lstfld>'
+        '<lstcol datavar=mon colwidth=9>Monday<scrfld displen=30 scale=monsc>'
+        '</lstfld></area></panel>'
+    )
+    heading = next(it for it in s.items if isinstance(it, Text) and it.text == "Monday")
+    ruler = next(it for it in s.items if isinstance(it, Text) and it.text.startswith("----+"))
+    cell = next(it for it in s.items if isinstance(it, Field) and it.name == "mon")
+    assert ruler.text == "----+----"                # colwidth (9) wide
+    assert ruler.row == heading.row + 1 and cell.row == ruler.row + 1
+    assert s.scroll_fields == [
+        {"name": "mon", "displen": 30, "scroll": "on", "scale": "monsc"}]
+
+
 def test_ispf_panel_selections_drive_validation():
     s = load_panel("ispf", ZUSER="IBMUSER ", ZTIME="13:45")
     # The menu declares 0-7, 9-13 and X — but not 8.
