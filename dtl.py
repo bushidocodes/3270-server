@@ -369,6 +369,8 @@ class _DTLParser(HTMLParser):
         self._panel_title = None  # capturing the panel's title text, or None
         self._textline = None     # <textline> segments [(text, expand)], or None
         self._pandefs = {}        # <pandef id> → default attrs for <panel pandef=id>
+        self._skip = None         # inside a non-rendering block [tag, chars, attrs]
+                                  # — <comment>/<copyr>/<compopt>/<source>
         self._title_item = None   # the centered title Text (retracted on collision)
         self._title_rule = None   # the action-bar separator rule (retracted on collision)
         self._titline = True      # <panel titline=no> suppresses the on-screen title line
@@ -456,11 +458,27 @@ class _DTLParser(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         a = {k: v for k, v in attrs}
+        # Inside a non-rendering block (<comment>/<copyr>/<compopt>/<source>):
+        # suppress all nested markup (only raw text is accumulated). A <panel>/
+        # <help> can't be inside such a block — since these directives are often
+        # coded WITHOUT an end tag (before the panel), the panel ends the block;
+        # any other tag (a sibling directive or nested markup) is dropped.
+        if self._skip is not None:
+            if tag not in ("panel", "help"):
+                return
+            self._close_skip()
+            # fall through to process the <panel>/<help>
         # The panel's title text (between <panel ...> and its first child) ends
         # at the first child tag (which we pass so an <ab> can push the title
         # below the action bar).
         if self._panel_title is not None:
             self._finalize_panel_title(tag)
+        if tag in ("comment", "copyr", "compopt", "source"):
+            # Non-rendering blocks: <comment>/<copyr>/<compopt> are dropped;
+            # <source> ()INIT/)PROC logic renders nothing but its raw text is kept
+            # for the ZSEL selection routing (see _close_skip).
+            self._skip = [tag, [], a]
+            return
         # An inline <hp> (highlighted phrase) inside a text element does NOT close
         # it — it emphasises a phrase *within* one field. Bank the runs and return
         # before the implicit-flush below (see _begin_hp / _finalize_runs). A <rp>
@@ -721,10 +739,6 @@ class _DTLParser(HTMLParser):
             if self._xlatl is None:
                 raise DTLError("<xlati> outside of an <xlatl>")
             self._tag, self._attrs, self._chars = "xlati", a, []
-        elif tag == "source":
-            # A )PROC/)INIT source block. Its text is captured but renders nothing;
-            # a <source type=proc> is scanned for the ZSEL selection routing.
-            self._tag, self._attrs, self._chars = "source", a, []
         elif tag == "varlist":
             self._in_varlist = True
         elif tag == "vardcl":
@@ -912,7 +926,18 @@ class _DTLParser(HTMLParser):
             # end tag), so the dtafldd capture state must not leak into it.
             self._in_dtafldd, self._dtafldd = False, None
 
+    def _close_skip(self):
+        """Leave the current non-rendering block. A <source>'s accumulated text is
+        handed to _emit_source (ZSEL routing); the rest is discarded."""
+        tag, chars, attrs = self._skip
+        self._skip = None
+        if tag == "source":
+            self._emit_source(attrs, "".join(chars))
+
     def handle_data(self, data):
+        if self._skip is not None:
+            self._skip[1].append(data)   # accumulate the block's raw text
+            return
         if self._panel_title is not None:
             self._panel_title.append(data)
         elif self._in_dtafldd and self._dtafldd is not None:
@@ -934,6 +959,13 @@ class _DTLParser(HTMLParser):
             self._selfld["prompt_chars"].append(data)
 
     def handle_endtag(self, tag):
+        # End of a non-rendering block on its explicit end tag. <source> feeds its
+        # accumulated raw text to _emit_source (ZSEL routing); the others are
+        # dropped. A non-matching end tag inside the block is ignored.
+        if self._skip is not None:
+            if tag == self._skip[0]:
+                self._close_skip()
+            return
         if self._panel_title is not None:
             self._finalize_panel_title()
         # Closing an inline <hp>/<rp> banks its emphasised run and keeps the
@@ -1113,6 +1145,8 @@ class _DTLParser(HTMLParser):
         ``<panel>Widgets`` with no body or ``</panel>``) or with an open content
         element — finalise them exactly as the matching end tag would have."""
         super().close()
+        if self._skip is not None:        # a block whose end tag was omitted at EOF
+            self._close_skip()
         if self._panel_title is not None:
             self._finalize_panel_title()
         if self._tag is not None:
@@ -1215,8 +1249,6 @@ class _DTLParser(HTMLParser):
             self._emit_checki(a, content)
         elif tag == "xlati":
             self._emit_xlati(a, content)
-        elif tag == "source":
-            self._emit_source(a, content)
         elif tag == "figcap":
             self._store_figcap(content)
         if horiz:
@@ -1243,8 +1275,6 @@ class _DTLParser(HTMLParser):
         elif tag == "checki":  # a self-closing checki carries params in attrs
             self.handle_endtag(tag)
         elif tag == "xlati":  # a self-closing xlati (no external text)
-            self.handle_endtag(tag)
-        elif tag == "source":  # a self-closing/empty source declares nothing
             self.handle_endtag(tag)
         elif tag == "varclass":  # a self-closing varclass has no checks; close it
             self.handle_endtag(tag)

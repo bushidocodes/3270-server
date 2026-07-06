@@ -82,6 +82,29 @@ def test_source_proc_zsel_parses_selection_targets():
     assert [it for it in s.items if isinstance(it, Text) and "ZSEL" in it.text] == []
 
 
+def test_directive_blocks_render_nothing_even_with_nested_markup():
+    # #119: <comment>/<copyr>/<compopt>/<source> are non-rendering — their content,
+    # INCLUDING nested markup, must not leak as visible text.
+    def texts(src):
+        return [it.text for it in load_dtl(src).items if isinstance(it, Text)]
+
+    assert texts("<panel name=p><area><p>Visible"
+                 "<comment><p>HIDDEN</p><divider></comment>"
+                 "<p>After</area></panel>") == ["Visible", "After"]
+    # <copyr>/<compopt> are commonly coded WITHOUT an end tag (before the panel);
+    # the <panel> ends the block — the directive text/markup must not render.
+    assert texts("<copyr>Copyright 2026<copyr>All rights reserved"
+                 "<panel name=p><area><p>Body</area></panel>") == ["Body"]
+    assert texts("<compopt noprep nographic>"
+                 "<panel name=p><area><p>Body</area></panel>") == ["Body"]
+    # <source> still renders nothing and its ZSEL text still routes.
+    s = load_dtl("<panel name=p><area><source type=proc>"
+                 "&ZSEL = TRANS(&ZCMD 1,'PGM(view)')<p>SRCLEAK"
+                 "</source><p>Body</area></panel>")
+    assert [it.text for it in s.items if isinstance(it, Text)] == ["Body"]
+    assert s.selection_targets == {"1": "PGM(view)"}
+
+
 def _zsel_targets(proc):
     s = load_dtl(f'<panel>M<area><info>x</info><source type=proc>{proc}</source>'
                  '</area></panel>')
