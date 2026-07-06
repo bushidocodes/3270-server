@@ -1186,9 +1186,11 @@ def _show_submenu(client_socket, panel_name: str, initial=None, userid=None,
                 return
             aid_str, fields, cursor = action
             opt = (screen.command_value(fields) or "").strip().upper()
-            # Point-and-shoot: Enter on a choice row selects it when nothing typed.
+            # Point-and-shoot: with nothing typed, Enter on a <ps> phrase sets the
+            # command variable, else Enter on a choice row selects that choice.
             if not opt and aid_str == "Enter":
-                opt = screen.selection_at(cursor) or ""
+                ps = screen.command_point_and_shoot(cursor)
+                opt = ps.strip().upper() if ps else (screen.selection_at(cursor) or "")
             if not opt:
                 continue
         head = opt.split(".", 1)[0]
@@ -2061,9 +2063,11 @@ def handle_client(client_socket, addr):
             # Read the option from the panel's <cmdarea> (its ZCMD command
             # field), resolved by role rather than a hard-coded address.
             option = (screen.command_value(fields) or "").strip().upper()
-            # Point-and-shoot: with no typed option, Enter on a choice row picks it.
+            # Point-and-shoot: with no typed option, Enter on a <ps> phrase sets the
+            # command variable, else Enter on a choice row picks that choice.
             if not option and aid_str == "Enter":
-                option = screen.selection_at(cursor) or ""
+                ps = screen.command_point_and_shoot(cursor)
+                option = ps.strip().upper() if ps else (screen.selection_at(cursor) or "")
 
             cmd = screen.command_for(aid_str)
             if option == "X" or cmd in _LEAVE_COMMANDS:
