@@ -2455,12 +2455,33 @@ class _DTLParser(HTMLParser):
         ch = a.get("attrchar")
         if not ch:
             raise DTLError("<attr> missing required attribute 'attrchar'")
+
+        def _flag(name, *values):
+            return str(a.get(name, "")).strip().lower() in (values or ("on",))
         self._da["attrs"][ch] = {
             "type": str(a.get("type", "char")).strip().lower(),
             "color": self._color(a),
             "hilite": self._hilite(a),
-            "intens": _intensity(a, "intens", DisplayIntensity.NORMAL),
+            # INTENS HIGH/LOW→normal/NON→non-display (same as a <lstcol> cell).
+            "intens": self._cell_intensity(a.get("intens")),
             "padc": (a.get("padc") or " ")[:1],
+            # Rendering-effect attributes, applied to the field the char starts:
+            "outline": self._outline(a),                 # OUTLINE=L|R|O|U|BOX
+            "numeric": _flag("numeric"),                 # NUMERIC=ON → numeric field
+            "pad": self._pad_char(a),                    # PAD/PADC empty-cell fill
+            "just": str(a.get("just", "asis")).strip().lower(),   # ASIS|LEFT|RIGHT
+            "skip": _flag("skip"),                        # SKIP=ON → autoskip field
+            # Recorded (no TN3270 display effect on this server): CAPS (input
+            # uppercase), GE (graphic escape / DBCS), PAS/CSRGRP (point-and-shoot
+            # → #115), CKBOX/CUADYN (GUI checkbox / dynamic CUA), ATTN (attention).
+            "caps": _flag("caps", "on", "in", "out"),
+            "ge": _flag("ge"),
+            "pas": _flag("pas"),
+            "csrgrp": a.get("csrgrp"),
+            "ckbox": _flag("ckbox"),
+            "cuadyn": a.get("cuadyn"),
+            "attn": _flag("attn"),
+            "format": str(a.get("format", "")).strip().lower(),   # EBCDIC|DBCS|MIX
         }
 
     def _emit_da(self):
@@ -2503,17 +2524,29 @@ class _DTLParser(HTMLParser):
             idx = j
 
     def _emit_da_field(self, spec, row, col, content):
+        hidden = spec["intens"] is DisplayIntensity.NON_DISPLAY
         if spec["type"] == "datain":
             # The run after the attribute char is the field's extent (pad-char
             # placeholders in the source), not initial data — so it sets the
-            # width and the field starts empty.
+            # width and the field starts empty. INTENS/NUMERIC/PAD/OUTLINE from
+            # the <attr> apply to the input field (SKIP/CAPS are input behaviour).
             self.screen.add(Field(
                 row=row, col=col, length=max(1, len(content)), default="",
+                intensity=DisplayIntensity.NORMAL if hidden else spec["intens"],
+                hidden=hidden, numeric=spec["numeric"], pad=spec["pad"],
                 color=spec["color"], highlight=spec["hilite"],
+                outline=spec["outline"],
             ))
         else:  # dataout / char / text → protected display field
-            self.screen.add(Text(row, col, content, spec["intens"],
-                                 color=spec["color"], highlight=spec["hilite"]))
+            # JUST right/left-justifies the display text within its run width.
+            text = content
+            if spec["just"] == "right":
+                text = content.strip().rjust(len(content))
+            elif spec["just"] == "left":
+                text = content.strip().ljust(len(content))
+            self.screen.add(Text(row, col, text, spec["intens"],
+                                 color=spec["color"], highlight=spec["hilite"],
+                                 outline=spec["outline"]))
 
     def _add_field(self, a, content, tag, name, description=None):
         """Emit a prompt (if any) plus its field: an unprotected input field, or —
