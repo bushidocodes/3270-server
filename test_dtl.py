@@ -10,7 +10,7 @@ import pathlib
 import pytest
 
 from dtl import load_dtl, load_panel, load_messages, load_message_member, DTLError
-from screen import Screen, Text, Field, DisplayIntensity, Color, Highlight, SA
+from screen import Screen, Text, Field, DisplayIntensity, Color, Highlight, SA, Outline
 from server import to_ebcdic
 
 
@@ -1919,6 +1919,28 @@ def test_list_column_display_no_is_non_display():
     # Headings are still visible over the non-display columns.
     heads = {it.text for it in s.items if getattr(it, "role", None) == "heading"}
     assert {"User", "Pass", "Secret"} <= heads
+
+
+def test_dtafld_outline_draws_box_lines():
+    # #122: OUTLINE=NONE|L|R|O|U|BOX on a <dtafld> draws the 3270 field-outlining
+    # lines — emitted as an SFE pair (type 0xC2) on an extended terminal, and
+    # nothing on a mono terminal (byte-identical there).
+    def field(kw):
+        s = load_dtl(f'<panel name=p width=40><area>'
+                     f'<dtafld entwidth=5 outline={kw}>N</area></panel>')
+        return next(it for it in s.items if isinstance(it, Field))
+
+    assert field("box").outline is Outline.BOX
+    assert field("l").outline is Outline.LEFT
+    assert field("").outline is None                 # no OUTLINE → none
+
+    # The 0xC2 outlining pair reaches the wire on an extended (colour) render...
+    f = field("box")
+    ext = bytearray(); f.render(ext, color=True)
+    assert bytes([0xC2, Outline.BOX.value]) in bytes(ext)
+    # ...but a mono render carries no outlining (byte-for-byte unchanged).
+    mono = bytearray(); f.render(mono, color=False)
+    assert 0xC2 not in bytes(mono)
 
 
 def test_dtafld_pad_fills_entry_and_dtacol_default():

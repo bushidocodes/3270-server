@@ -142,7 +142,7 @@ uppercase). An undefined reference is left untouched rather than blanked.
 import re
 from html.parser import HTMLParser
 
-from screen import Screen, Text, Field, DisplayIntensity, Color, Highlight
+from screen import Screen, Text, Field, DisplayIntensity, Color, Highlight, Outline
 
 # An ISPF dialog-variable reference in panel source: ``&&`` (escaped literal
 # ampersand) or ``&NAME`` with an optional terminating ``.``. A name is 1–8
@@ -258,6 +258,12 @@ _HIGHLIGHTS = {
     # tolerated aliases
     "underscore": Highlight.UNDERSCORE,
     "rvideo": Highlight.REVERSE,
+}
+
+# DTL OUTLINE=NONE | L | R | O | U | BOX → the 3270 field-outlining lines.
+_OUTLINES = {
+    "none": Outline.NONE, "l": Outline.LEFT, "r": Outline.RIGHT,
+    "o": Outline.OVER, "u": Outline.UNDER, "box": Outline.BOX,
 }
 
 # Each DTL element is tagged with a CUA "role" (see screen._CUA_COLORS), so a
@@ -404,6 +410,12 @@ class _DTLParser(HTMLParser):
     def _hilite(self, a):
         """The Highlight for a tag's HILITE= attribute, or None."""
         return _HIGHLIGHTS.get(str(a.get("hilite", "")).strip().lower())
+
+    def _outline(self, a):
+        """The Outline for a tag's OUTLINE= attribute (NONE|L|R|O|U|BOX), or None.
+        Field outlining draws the box line(s) around a field on an extended
+        terminal; a mono terminal is unaffected."""
+        return _OUTLINES.get(str(a.get("outline", "")).strip().lower())
 
     # ── inline <hp> (highlighted phrase) mixed content ───────────────────────
 
@@ -1982,6 +1994,7 @@ class _DTLParser(HTMLParser):
             "color": self._color(a),
             "intensity": self._cell_intensity(a.get("intens")),
             "highlight": self._hilite(a),
+            "outline": self._outline(a),   # OUTLINE box lines on the cells
             # DISPLAY=NO is a non-display column (a password-style hidden cell); the
             # heading still shows. YES is the default.
             "display_no": str(a.get("display", "yes")).strip().lower() == "no",
@@ -2230,7 +2243,7 @@ class _DTLParser(HTMLParser):
                                          else intensity,
                                          color=c.get("color"),
                                          highlight=c.get("highlight"), role="cell",
-                                         help=c.get("help")))
+                                         help=c.get("help"), outline=c.get("outline")))
                 else:
                     self.screen.add(Field(
                         row=cy, col=cx, length=c["width"],
@@ -2242,6 +2255,7 @@ class _DTLParser(HTMLParser):
                         hidden=hidden,
                         color=c.get("color"), highlight=c.get("highlight"),
                         role="cell", help=c.get("help"), pad=c.get("pad"),
+                        outline=c.get("outline"),
                     ))
                 # TEXT description beside the cell, justified within its area
                 # (TEXTFMT); unformatted when the text overflows the reserved area.
@@ -2584,7 +2598,8 @@ class _DTLParser(HTMLParser):
         if str(a.get("usage", "")).strip().lower() == "out":
             value = self._subs.get((name or "").upper()) or a.get("init", "")
             self.screen.add(Text(row, fldcol, str(value)[:length].ljust(length),
-                                 _intensity(a), color=self._color(a), role="cell"))
+                                 _intensity(a), color=self._color(a), role="cell",
+                                 outline=self._outline(a)))
             return None
         field = Field(
             row=row,
@@ -2602,6 +2617,7 @@ class _DTLParser(HTMLParser):
             color=self._color(a),
             role="field",
             highlight=self._hilite(a),
+            outline=self._outline(a),
             help=self._field_help(a),
             # PAD/PADC fill an empty entry; a field's own PAD wins over the
             # enclosing <dtacol>'s default (None → the conventional space fill).
