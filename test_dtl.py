@@ -2584,6 +2584,49 @@ def test_dl_leading_blank_and_noskip():
     assert "A" in nos[i2 + 1]                           # no blank — term immediately after
 
 
+def test_dl_multicolumn_tsize_lays_terms_side_by_side():
+    # #120: TSIZE='w1 w2 …' gives multiple definition-term COLUMNS; one <dt> per
+    # width lays them side by side, with the <dd> past every term column.
+    s = load_dtl("<panel name=p width=50><area><info><dl tsize=\"6 6\">"
+                 "<dt>Alpha<dt>Beta<dd>An entry.</dl></info></area></panel>")
+    at = {it.text: it.col for it in s.items if isinstance(it, Text)}
+    assert at["Alpha"] == 1                       # column 0 at the margin
+    assert at["Beta"] == 1 + 6 + 1                # column 1 past width 6 + a gap
+    assert at["An entry."] == 1 + 6 + 6 + 1       # description past both columns + gap
+    rows = {it.text: it.row for it in s.items if isinstance(it, Text)}
+    assert rows["Alpha"] == rows["Beta"] == rows["An entry."]   # share the entry row
+
+
+def test_dl_vertical_dividers_between_columns():
+    # #120: <dtdiv>/<ptdiv> draw a vertical `|` between term columns; <dthdiv>
+    # between heading columns — in the gap before the following column.
+    s = load_dtl("<panel name=p width=50><area><info><dl tsize=\"6 6\">"
+                 "<dthd>Code<dthdiv><dthd>Name<ddhd>Meaning"
+                 "<dt>AP<dtdiv><dt>App<dd>Appliances"
+                 "</dl></info></area></panel>")
+    bars = [(it.row, it.col) for it in s.items
+            if isinstance(it, Text) and it.text == "|"]
+    assert len(bars) == 2                        # one header divider, one term divider
+    gap_col = 1 + 6                              # base + width of column 0
+    assert all(c == gap_col for _, c in bars)    # both sit in the column-0/1 gap
+    hdr_row = next(it.row for it in s.items if it.text == "Code")
+    item_row = next(it.row for it in s.items if it.text == "AP")
+    assert sorted(r for r, _ in bars) == sorted({hdr_row, item_row})
+
+
+def test_dl_dtseg_stacks_term_segments():
+    # #120: <dtseg> adds an extra line of the definition term, stacked directly
+    # under the term text in its column; the description flows alongside.
+    s = load_dtl("<panel name=p width=50><area><info><dl tsize=8>"
+                 "<dt>LOCATE<dtseg>LOC or<dtseg>L"
+                 "<dd>Positions the display.</dl></info></area></panel>")
+    at = {it.text: (it.row, it.col) for it in s.items if isinstance(it, Text)}
+    r0 = at["LOCATE"][0]
+    assert at["LOC or"] == (r0 + 1, at["LOCATE"][1])   # stacked in the term column
+    assert at["L"] == (r0 + 2, at["LOCATE"][1])
+    assert at["Positions the display."][0] == r0        # description alongside the term
+
+
 def test_dl_indent_shifts_the_whole_list():
     # #123: <dl indent=n> indents the whole definition list from the left margin —
     # headers, terms, descriptions, and dividers all shift right by n columns.

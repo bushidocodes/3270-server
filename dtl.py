@@ -287,7 +287,8 @@ _TEXT_TAGS = ("info",) + _INSTRUCTION_TAGS + _FLOW_TEXT_TAGS
 # A TOPINST instead gets a blank line AFTER it. See the P/TOPINST tag references.
 _BLANK_BEFORE_TAGS = ("p", "pnlinst")
 _CONTENT_TAGS = _TEXT_TAGS + ("dtafld", "cmdarea", "choice", "figcap",
-                              "dthd", "ddhd", "dldiv", "pldiv", "textseg")
+                              "dthd", "ddhd", "dldiv", "pldiv", "textseg",
+                              "dtseg", "ptseg")
 _FIELD_TAGS = ("dtafld", "cmdarea")
 
 
@@ -527,9 +528,16 @@ class _DTLParser(HTMLParser):
             # and break style; <dt>/<dd> (<pt>/<pd>) entries lay out against it.
             # ISPDTLC inserts a blank line before the list (COMPACT/NOSKIP suppress).
             self._skip_blank_before(a)
+            # TSIZE='n' | 's1 s2 … sn' → one width per definition-term COLUMN; a
+            # multi-column list codes one <dt> per width (see _emit_defitem).
+            tsizes = [int(p) for p in str(a.get("tsize", "")).split() if p.isdigit()] \
+                or [self._DL_TSIZE]
             self._lists.append({
                 "type": tag, "n": 0,
-                "tsize": int(a["tsize"]) if "tsize" in a else self._DL_TSIZE,
+                "tsizes": tsizes,
+                "tsize": tsizes[0],           # first-column width (single-column paths)
+                "col": 0,                     # current term-column index in the entry
+                "seg_row": None,              # next <dtseg> stacking row for this column
                 "break": a.get("break", "none").lower(),
                 "compact": _bool_attr(a, "compact"),  # no blank after a <ddhd> header
                 "indent": self._opt_int(a.get("indent"), 0),  # shift the list right
@@ -548,6 +556,10 @@ class _DTLParser(HTMLParser):
             pid = str(a.get("id", "")).strip().lower()
             if pid:
                 self._pandefs[pid] = {k: v for k, v in a.items() if k != "id"}
+        elif tag in ("dtdiv", "dthdiv", "ptdiv"):
+            # A vertical `|` between definition-term (or -heading) columns; the
+            # preceding <dt>/<dthd> was flushed just above, so its column state is set.
+            self._emit_defdiv(tag)
         if tag in ("panel", "help"):
             # A <panel PANDEF=id> inherits the named <pandef>'s defaults — the
             # panel's own attributes win (setdefault fills only what it omits).
@@ -1201,6 +1213,8 @@ class _DTLParser(HTMLParser):
             self._emit_listitem(a, content, runs)
         elif tag in ("dt", "dd", "pt", "pd"):
             self._emit_defitem(tag, a, content)
+        elif tag in ("dtseg", "ptseg"):
+            self._emit_dtseg(tag, content)
         elif tag in ("dthd", "ddhd"):
             self._emit_defhead(tag, a, content)
         elif tag in ("dldiv", "pldiv"):
@@ -1332,6 +1346,7 @@ class _DTLParser(HTMLParser):
     _BULLETS = ("o", "-", "--", "---")
     _LIST_INDENT = 4   # columns added per nesting level
     _DL_TSIZE = 10     # default <dl>/<parml> term-column width (chars)
+    _DL_GAP = 1        # gap between multi-column definition terms / before the desc
     _HGAP = 2          # default column gap between side-by-side (dir=horiz) items
     # <panel> WIDTH/DEPTH validation bounds (z/OS ISPF DTL Guide, PANEL tag).
     _WIDTH_MIN, _WIDTH_MAX = 16, 160
@@ -1761,35 +1776,83 @@ class _DTLParser(HTMLParser):
         text = " ".join(content.split())
         if not text:
             return
-        # Find the enclosing definition list (it carries tsize/break/pending).
+        # Find the enclosing definition list (it carries tsizes/break/pending).
         dl = next((ln for ln in reversed(self._lists)
                    if ln["type"] in ("dl", "parml")), None)
-        tsize = dl["tsize"] if dl else self._DL_TSIZE
+        tsizes = dl["tsizes"] if dl else [self._DL_TSIZE]
         brk = dl["break"] if dl else "none"
         depth = max(len(self._lists), 1)
         row, col, ctx = self._resolve_pos(a, tag)  # advances the flow one line
         base = col + (depth - 1) * self._LIST_INDENT + (dl["indent"] if dl else 0)
+        # The description column sits past every term column (+1-col gaps between).
+        desc_col = base + sum(tsizes) + (len(tsizes) - 1) * self._DL_GAP
         if tag in ("dt", "pt"):
-            # FORMAT positions the term within its TSIZE column (START left, the
-            # default; CENTER centred; END right). A term wider than TSIZE gets no
-            # offset (it spills into the description area, per BREAK).
+            ci = min(dl["col"] if dl else 0, len(tsizes) - 1)
+            col_x = base + sum(tsizes[:ci]) + ci * self._DL_GAP
+            width = tsizes[ci]
+            if dl is not None and ci == 0:
+                dl["entry_row"] = row       # the first line of a new entry
+            # FORMAT positions the term within its column (START left default,
+            # CENTER, END); a term wider than its column spills (per BREAK).
             fmt = dl["format"] if dl else "start"
-            term_col = base + self._fmt_offset(len(text), tsize, fmt)
-            self.screen.add(Text(row, term_col, text, _intensity(a)))
-            # Decide where this term's description goes. With break=none/fit a
-            # short term shares its line; rewind the flow cursor so the next
-            # <dd> lands on the same row.
-            same_line = brk != "all" and len(text) < tsize
-            if same_line and ctx is not None:
-                ctx["row"] = row
+            self.screen.add(Text(row, col_x + self._fmt_offset(len(text), width, fmt),
+                                 text, _intensity(a)))
             if dl is not None:
-                dl["pending"] = {"desc_col": base + tsize}
+                dl["col"] = ci + 1
+                dl["base"] = base
+                # <dtseg>s for THIS column stack on the lines below the term.
+                dl["seg"] = {"row": row + 1, "x": col_x}
+                dl["pending"] = {"desc_col": desc_col}
+            # A term that fits its column shares its row with the next column /
+            # the description; a spilled or break=all term takes its own line.
+            if brk != "all" and len(text) < width and ctx is not None:
+                ctx["row"] = row
             return
-        # Description.
-        desc_col = dl["pending"]["desc_col"] if dl and dl["pending"] else base + tsize
+        # Description: flows at the current flow row (which a fitting term rewound
+        # to its own line; break=all / a spilled term left on the next line).
+        desc_col = dl["pending"]["desc_col"] if dl and dl["pending"] else desc_col
+        seg_bottom = dl["seg"]["row"] if dl and dl.get("seg") else None
         if dl is not None:
             dl["pending"] = None
+            dl["col"] = 0                   # next <dt> starts a new entry's column 0
+            dl["seg"] = None
         self._emit_flow_lines(text, row, desc_col, ctx)
+        # Resume flow below the term-segment stack if it runs past the description.
+        if ctx is not None and seg_bottom is not None and ctx["row"] < seg_bottom:
+            ctx["row"] = seg_bottom
+
+    def _emit_defdiv(self, tag):
+        """A vertical `|` divider between definition-term columns: <dtdiv>/<ptdiv>
+        between <dt>/<pt> columns, <dthdiv> between <dthd> columns. It sits in the
+        one-column gap before the current column (the previous <dt>/<dthd> having
+        advanced the column cursor), on that row."""
+        dl = next((ln for ln in reversed(self._lists)
+                   if ln["type"] in ("dl", "parml")), None)
+        if dl is None or "base" not in dl:
+            return
+        ci = dl["col"]                    # the column the next <dt>/<dthd> will use
+        if ci < 1:
+            return                        # no preceding column to divide from
+        tsizes = dl["tsizes"]
+        gap_x = dl["base"] + sum(tsizes[:ci]) + (ci - 1) * self._DL_GAP
+        if tag == "dthdiv":
+            row = dl["hdr"]["row"] if dl.get("hdr") else None
+        else:
+            row = dl.get("entry_row")
+        if row is not None:
+            self.screen.add(Text(row, gap_x, "|", role="rule"))
+
+    def _emit_dtseg(self, tag, content):
+        """A <dtseg>/<ptseg> term segment: an additional line of the current
+        definition term, stacked directly under the term text in its column."""
+        text = " ".join(content.split())
+        dl = next((ln for ln in reversed(self._lists)
+                   if ln["type"] in ("dl", "parml")), None)
+        if dl is None or not dl.get("seg") or not text:
+            return
+        seg = dl["seg"]
+        self.screen.add(Text(seg["row"], seg["x"], text, DisplayIntensity.NORMAL))
+        seg["row"] += 1
 
     def _emit_defhead(self, tag, a, content):
         """Emit a definition-list column heading. ``<dthd>`` is the term-column
@@ -1802,23 +1865,30 @@ class _DTLParser(HTMLParser):
             return
         dl = next((ln for ln in reversed(self._lists)
                    if ln["type"] in ("dl", "parml")), None)
-        tsize = dl["tsize"] if dl else self._DL_TSIZE
+        tsizes = dl["tsizes"] if dl else [self._DL_TSIZE]
         depth = max(len(self._lists), 1)
         row, col, ctx = self._resolve_pos(a, tag)   # advances the flow one line
         base = col + (depth - 1) * self._LIST_INDENT + (dl["indent"] if dl else 0)
+        desc_col = base + sum(tsizes) + (len(tsizes) - 1) * self._DL_GAP
         if tag == "dthd":
-            self.screen.add(Text(row, base, text, _intensity(a), role="heading"))
-            # The paired <ddhd> shares this row (rewind, like a <dt>'s <dd>).
+            # A term-column heading — like a <dt>, one per TSIZE column.
+            ci = min(dl["col"] if dl else 0, len(tsizes) - 1)
+            col_x = base + sum(tsizes[:ci]) + ci * self._DL_GAP
+            self.screen.add(Text(row, col_x, text, _intensity(a), role="heading"))
             if ctx is not None:
-                ctx["row"] = row
+                ctx["row"] = row                 # paired <ddhd>/next <dthd> share it
             if dl is not None:
-                dl["pending"] = {"desc_col": base + tsize}
+                dl["col"] = ci + 1
+                dl["base"] = base
+                dl["hdr"] = {"row": row}         # header row (for <dthdiv>)
+                dl["pending"] = {"desc_col": desc_col}
             return
         # <ddhd>: the description-column heading, then a blank line before the
         # items (COMPACT on the <dl> suppresses that blank).
-        desc_col = dl["pending"]["desc_col"] if dl and dl["pending"] else base + tsize
+        desc_col = dl["pending"]["desc_col"] if dl and dl["pending"] else desc_col
         if dl is not None:
             dl["pending"] = None
+            dl["col"] = 0                        # next <dt> starts a new entry
         self.screen.add(Text(row, desc_col, text, _intensity(a), role="heading"))
         if ctx is not None and not (dl and dl.get("compact")):
             ctx["row"] = row + 2                     # heading row + one blank line
