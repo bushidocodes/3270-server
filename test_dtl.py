@@ -2461,6 +2461,24 @@ def test_ga_reserves_a_region_framed_by_dividers():
         >= next(it.row for it in s2.items if it.text == "A") + 3   # 2 reserved + flow
 
 
+def test_pandef_supplies_panel_defaults():
+    # #117: <pandef id=…> defines reusable defaults; a <panel pandef=id> inherits
+    # them (HELP/DEPTH/WIDTH/…), with the panel's own attributes taking precedence.
+    s = load_dtl("<pandef id=printdef help=prnthlp depth=20 width=70>"
+                 "<panel name=panel01 pandef=printdef>A Panel"
+                 "<area><p>Body</area></panel>")
+    assert s.width == 70                          # inherited
+    assert s.depth == 20                          # inherited
+    assert s.help == "prnthlp"                    # inherited
+    assert s.title == "A Panel"
+
+    # The panel's own attribute wins over the pandef default.
+    s2 = load_dtl("<pandef id=d width=70 depth=20>"
+                  "<panel name=p pandef=d width=40>Own"
+                  "<area><p>x</area></panel>")
+    assert s2.width == 40                          # panel own overrides pandef
+
+
 def test_textline_no_expand_centres_the_whole_line():
     # With no EXPAND the accumulated segments centre as the panel title.
     s = load_dtl("<panel name=t width=40><textline>"

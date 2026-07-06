@@ -368,6 +368,7 @@ class _DTLParser(HTMLParser):
         self._cur_pdc = None      # current <pdc> pull-down choice, or None
         self._panel_title = None  # capturing the panel's title text, or None
         self._textline = None     # <textline> segments [(text, expand)], or None
+        self._pandefs = {}        # <pandef id> → default attrs for <panel pandef=id>
         self._title_item = None   # the centered title Text (retracted on collision)
         self._title_rule = None   # the action-bar separator rule (retracted on collision)
         self._titline = True      # <panel titline=no> suppresses the on-screen title line
@@ -523,7 +524,19 @@ class _DTLParser(HTMLParser):
             # replacing the tag's own title text (see _emit_textline). The empty
             # title captured before it was just flushed to nothing above.
             self._textline = []
+        elif tag == "pandef":
+            # <pandef id=…> defines reusable panel defaults (HELP/DEPTH/WIDTH/
+            # KEYLIST/…) applied to any <panel PANDEF=id>. It renders nothing.
+            pid = str(a.get("id", "")).strip().lower()
+            if pid:
+                self._pandefs[pid] = {k: v for k, v in a.items() if k != "id"}
         if tag in ("panel", "help"):
+            # A <panel PANDEF=id> inherits the named <pandef>'s defaults — the
+            # panel's own attributes win (setdefault fills only what it omits).
+            pd = self._pandefs.get(str(a.get("pandef", "")).strip().lower())
+            if pd:
+                for k, v in pd.items():
+                    a.setdefault(k, v)
             # A top-level <help> is itself a (help) panel — same flow root. The
             # title is the panel's content text (panel-title-text), captured into
             # screen.title by _finalize_panel_title — not an attribute.
