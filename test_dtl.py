@@ -2418,6 +2418,35 @@ def test_dl_headers_reference_figure_snapshot():
     ])
 
 
+def test_textline_builds_a_zoned_panel_title():
+    # #117: <textline>/<textseg> replace the panel title. A segment with EXPAND is
+    # the centre pivot — segments before it are left-justified, after it right-
+    # justified (the classic ISPF time / title / date line).
+    s = load_dtl(
+        "<panel name=t width=80><textline>"
+        "<textseg>10:30"
+        "<textseg expand=both>My Panel Title"
+        "<textseg>2026/07/05"
+        "</textline><topinst>Intro</panel>")
+    at = {it.text: it.col for it in s.items if isinstance(it, Text)}
+    assert at["10:30"] == 1                                   # left zone at the margin
+    assert at["My Panel Title"] == (80 - len("My Panel Title")) // 2   # centred
+    assert at["2026/07/05"] == 80 - 1 - len("2026/07/05")     # right-justified
+    assert s.title == "10:30 My Panel Title 2026/07/05"       # accumulated metadata
+    # The body flows below the title line.
+    assert next(it.row for it in s.items if it.text == "Intro") >= 1
+
+
+def test_textline_no_expand_centres_the_whole_line():
+    # With no EXPAND the accumulated segments centre as the panel title.
+    s = load_dtl("<panel name=t width=40><textline>"
+                 "<textseg>Alpha<textseg>Beta</textline><p>Body</panel>")
+    title = next(it for it in s.items if it.text == "AlphaBeta")
+    assert title.row == 0
+    assert title.col == (40 - len("AlphaBeta")) // 2
+    assert s.title == "AlphaBeta"
+
+
 def test_info_indent_shifts_content_and_clears_after():
     # #123: <info indent=n> shifts the whole information region (its text, nested
     # paragraphs, and lists) right by n columns; a sibling block after </info>

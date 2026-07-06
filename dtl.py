@@ -287,7 +287,7 @@ _TEXT_TAGS = ("info",) + _INSTRUCTION_TAGS + _FLOW_TEXT_TAGS
 # A TOPINST instead gets a blank line AFTER it. See the P/TOPINST tag references.
 _BLANK_BEFORE_TAGS = ("p", "pnlinst")
 _CONTENT_TAGS = _TEXT_TAGS + ("dtafld", "cmdarea", "choice", "figcap",
-                              "dthd", "ddhd", "dldiv", "pldiv")
+                              "dthd", "ddhd", "dldiv", "pldiv", "textseg")
 _FIELD_TAGS = ("dtafld", "cmdarea")
 
 
@@ -367,6 +367,7 @@ class _DTLParser(HTMLParser):
         self._cur_abc = None      # current <abc> action-bar choice, or None
         self._cur_pdc = None      # current <pdc> pull-down choice, or None
         self._panel_title = None  # capturing the panel's title text, or None
+        self._textline = None     # <textline> segments [(text, expand)], or None
         self._title_item = None   # the centered title Text (retracted on collision)
         self._title_rule = None   # the action-bar separator rule (retracted on collision)
         self._titline = True      # <panel titline=no> suppresses the on-screen title line
@@ -517,6 +518,11 @@ class _DTLParser(HTMLParser):
                 "format": str(a.get("format", "start")).strip().lower(),
                 "pending": None,
             })
+        elif tag == "textline":
+            # <textline> builds the panel/help title from its <textseg> segments,
+            # replacing the tag's own title text (see _emit_textline). The empty
+            # title captured before it was just flushed to nothing above.
+            self._textline = []
         if tag in ("panel", "help"):
             # A top-level <help> is itself a (help) panel — same flow root. The
             # title is the panel's content text (panel-title-text), captured into
@@ -944,6 +950,9 @@ class _DTLParser(HTMLParser):
                 self._emit_current()
             self._info_indent = 0
             return
+        if tag == "textline":
+            self._emit_textline()
+            return
         if tag == "da":
             self._emit_da()
             self._da = None
@@ -1147,6 +1156,13 @@ class _DTLParser(HTMLParser):
             self._emit_defhead(tag, a, content)
         elif tag in ("dldiv", "pldiv"):
             self._emit_listdiv(a, content)
+        elif tag == "textseg":
+            if self._textline is not None:
+                seg = " ".join(content.split())
+                width = self._opt_int(a.get("width"))
+                if width:                     # WIDTH reserves space for the segment
+                    seg = seg[:width].ljust(width)
+                self._textline.append((seg, str(a.get("expand", "")).strip().lower()))
         elif tag in ("lines", "xmp"):
             # <xmp> (example) is preformatted like <lines>: authored line breaks
             # and interior spacing are significant.
@@ -1405,6 +1421,48 @@ class _DTLParser(HTMLParser):
         # The title is content in the panel box, so the first flowed paragraph
         # skips a blank line below it — the CUA title/body separator.
         if self._areas:
+            self._areas[-1]["had_content"] = True
+
+    def _emit_textline(self):
+        """Emit the panel/help title built from a <textline>'s <textseg> segments.
+
+        Segments accumulate left to right. A segment with EXPAND acts as a pivot
+        (the classic ISPF title line: time on the left, title centred via
+        EXPAND=BOTH, date on the right); segments before it are left-justified and
+        those after are right-justified. With no EXPAND the whole line is centred
+        as the panel title (per the reference)."""
+        segs, self._textline = self._textline or [], None
+        if not segs:
+            return
+        row = 2 if any(getattr(it, "row", None) == 0 for it in self.screen.items) \
+            else 0                              # below an action bar if row 0 is taken
+        width = self.screen.width
+        pivot = next((i for i, (_, e) in enumerate(segs) if e), None)
+        if pivot is None:                       # no EXPAND → centre the whole line
+            text = "".join(t for t, _ in segs)
+            if self.screen.title is None:
+                self.screen.title = text
+            if self._titline and text:
+                col = max(0, (width - len(text)) // 2)
+                self.screen.add(Text(row, col, text, DisplayIntensity.NORMAL))
+        else:
+            left = "".join(t for t, _ in segs[:pivot])
+            centre = segs[pivot][0]
+            right = "".join(t for t, _ in segs[pivot + 1:])
+            if self.screen.title is None:
+                self.screen.title = " ".join(x for x in (left, centre, right) if x)
+            if self._titline:
+                if left:
+                    self.screen.add(Text(row, 1, left, DisplayIntensity.NORMAL))
+                if centre:
+                    col = max(0, (width - len(centre)) // 2)
+                    self.screen.add(Text(row, col, centre, DisplayIntensity.NORMAL))
+                if right:
+                    self.screen.add(Text(row, max(0, width - 1 - len(right)), right,
+                                         DisplayIntensity.NORMAL))
+        # Flow the body below the title line.
+        if self._areas and self._areas[-1]["row"] <= row:
+            self._areas[-1]["row"] = row + 1
             self._areas[-1]["had_content"] = True
 
     def _retract_title_if_collision(self):
