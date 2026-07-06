@@ -821,6 +821,8 @@ class _DTLParser(HTMLParser):
                     # unchanged). The standard replacement for the non-standard
                     # <info fill=->.
                     self.screen.add(Text(row, col, "-" * width, role="rule"))
+        elif tag == "ga":
+            self._emit_ga(a)
         elif tag in ("area", "region"):
             # A flow box that transparently continues the enclosing flow: its
             # content flows after the parent's, and the parent resumes after it.
@@ -1464,6 +1466,46 @@ class _DTLParser(HTMLParser):
         if self._areas and self._areas[-1]["row"] <= row:
             self._areas[-1]["row"] = row + 1
             self._areas[-1]["had_content"] = True
+
+    def _emit_ga(self, a):
+        """Reserve a graphic area (<ga>): DEPTH lines framed by an optional DIV
+        divider before and after. The graphic data itself (the NAME dialog
+        variable) is GDDM/image content a TN3270 text terminal cannot display
+        (see #102), so the reserved region renders blank; only the DIV rules draw."""
+        ctx = self._areas[-1] if self._areas else None
+        if ctx is None:
+            return
+        col = ctx["col"]
+        width = self._opt_int(a.get("width")) or max(1, self.screen.width - col - 1)
+        if str(a.get("depth", "")).strip() == "*":     # remaining panel depth
+            depth = max(1, self.screen.depth - ctx["row"] - 2)
+        else:
+            depth = max(1, self._opt_int(a.get("depth"), 1) or 1)
+        div = str(a.get("div", "none")).strip().lower()
+        row = ctx["row"]
+        if div not in ("none", ""):
+            self._ga_divider(row, col, width, div, a)  # divider before
+            row += 1
+        row += depth                                   # reserve the graphic region
+        if div not in ("none", ""):
+            self._ga_divider(row, col, width, div, a)  # divider after
+            row += 1
+        ctx["row"] = row
+        ctx["had_content"] = True
+
+    def _ga_divider(self, row, col, width, div, a):
+        """One <ga> DIV line: BLANK → nothing; SOLID/DASH → a dashed rule; TEXT →
+        the divider-text positioned by FORMAT within the width."""
+        if div == "blank":
+            return
+        if div == "text":
+            text = " ".join(str(a.get("text", "")).split())[:width]
+            fmt = str(a.get("format", "start")).strip().lower()
+            off = (width - len(text)) if fmt == "end" \
+                else (width - len(text)) // 2 if fmt == "center" else 0
+            self.screen.add(Text(row, col + max(0, off), text, role="rule"))
+        else:                                          # solid / dash → dashed rule
+            self.screen.add(Text(row, col, "-" * width, role="rule"))
 
     def _retract_title_if_collision(self):
         """Drop an auto title (and its action-bar separator rule) that collides
