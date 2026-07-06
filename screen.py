@@ -69,6 +69,7 @@ SA = 0x28
 XA_BASIC = 0xC0        # pair type: the all-character / basic field attribute
 XA_HIGHLIGHT = 0x41    # pair type: extended highlighting
 XA_FOREGROUND = 0x42   # pair type: foreground colour
+XA_OUTLINING = 0xC2    # pair type: field outlining (the four box lines)
 # Repeat to Address: fill the buffer from the current position up to a stop
 # address with one repeated character — 4 bytes for any run length, versus one
 # byte per character. Used for rule lines / fills (see Text.render). The rendered
@@ -106,6 +107,18 @@ class Highlight(Enum):
     BLINK = 0xF1
     REVERSE = 0xF2
     UNDERSCORE = 0xF4
+
+
+class Outline(Enum):
+    """3270 field outlining (attribute type 0xC2): a bitmask of the four box
+    lines. DTL OUTLINE=L|R|O|U|BOX maps L→left, R→right, O→over (top),
+    U→under (bottom), BOX→all four."""
+    NONE = 0x00
+    UNDER = 0x01
+    RIGHT = 0x02
+    OVER = 0x04
+    LEFT = 0x08
+    BOX = 0x0F
 
 
 class Line(Enum):
@@ -160,19 +173,22 @@ def _role_colour(color: Optional[Color], role: Optional[str]) -> Optional[Color]
 
 
 def _emit_field_start(buf: bytearray, fa: int,
-                      color: Optional[Color], highlight: Optional[Highlight]) -> None:
+                      color: Optional[Color], highlight: Optional[Highlight],
+                      outline: "Optional[Outline]" = None) -> None:
     """Emit a field start into ``buf``.
 
     With no extended attributes this is the classic ``SF`` + attribute byte —
-    byte-for-byte what the mono panels have always produced. With a colour
-    and/or highlight it is an ``SFE`` carrying the basic field attribute
-    (type 0xC0) plus one pair per extended attribute.
+    byte-for-byte what the mono panels have always produced. With a colour,
+    highlight and/or outlining it is an ``SFE`` carrying the basic field
+    attribute (type 0xC0) plus one pair per extended attribute.
     """
     pairs = []
     if color is not None and color != Color.DEFAULT:
         pairs.append((XA_FOREGROUND, color.value))
     if highlight is not None and highlight != Highlight.DEFAULT:
         pairs.append((XA_HIGHLIGHT, highlight.value))
+    if outline is not None and outline != Outline.NONE:
+        pairs.append((XA_OUTLINING, outline.value))
     if not pairs:
         buf.append(SF)
         buf.append(fa)
@@ -294,6 +310,7 @@ class Text:
     intensity: DisplayIntensity = DisplayIntensity.NORMAL
     color: Optional[Color] = None
     highlight: Optional[Highlight] = None
+    outline: Optional["Outline"] = None
     # CUA element role (e.g. "title", "num") → a default colour on colour
     # terminals. Not part of identity: two items that render alike are equal.
     role: Optional[str] = _dc_field(default=None, compare=False)
@@ -331,7 +348,8 @@ class Text:
         fa = field_attribute(display=self.intensity, protected=True)
         base_color = _role_colour(self.color, self.role) if color else None
         base_highlight = self.highlight if color else None
-        _emit_field_start(buf, fa, base_color, base_highlight)
+        _emit_field_start(buf, fa, base_color, base_highlight,
+                          self.outline if color else None)
         if self.runs is not None and color:
             _emit_attr_runs(buf, self.runs, base_color, base_highlight)
         elif len(self.text) >= _RA_MIN_RUN and len(set(self.text)) == 1:
@@ -450,6 +468,7 @@ class Field:
     terminator: bool = True
     color: Optional[Color] = None
     highlight: Optional[Highlight] = None
+    outline: Optional["Outline"] = None
     # Fill character for the field width not covered by ``default`` — the DTL
     # <lstcol> PAD/PADC pad character (NULLS → "\x00", a literal char, …). None
     # keeps the conventional space fill, so a field without PAD is byte-identical.
@@ -481,6 +500,7 @@ class Field:
             buf, fa,
             _role_colour(self.color, self.role) if (color and not self.hidden) else None,
             self.highlight if (color and not self.hidden) else None,
+            self.outline if (color and not self.hidden) else None,
         )
         fill = self.pad if self.pad is not None else " "
         buf.extend(_display(self.default.ljust(self.length, fill)[: self.length]))
