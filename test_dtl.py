@@ -2437,6 +2437,30 @@ def test_textline_builds_a_zoned_panel_title():
     assert next(it.row for it in s.items if it.text == "Intro") >= 1
 
 
+def test_ga_reserves_a_region_framed_by_dividers():
+    # #117: <ga> reserves DEPTH lines for a graphic area, framed by an optional
+    # DIV divider before and after. The graphic itself (GDDM, #102) can't render
+    # on a text terminal, so the region is blank; only the DIV rules draw.
+    s = load_dtl("<panel name=g width=50><area>"
+                 "<p>Above"
+                 "<ga name=chart depth=3 div=solid>"
+                 "<p>Below</area></panel>")
+    rules = sorted(it.row for it in s.items
+                   if isinstance(it, Text) and set(it.text.strip()) == {"-"})
+    assert len(rules) == 2                       # a divider before and after
+    assert rules[1] - rules[0] == 4              # depth 3 + the leading divider row
+    below = next(it.row for it in s.items if it.text == "Below")
+    assert below > rules[1]                      # body flows past the graphic area
+
+    # DIV=NONE (default) reserves the space silently — no rule drawn.
+    s2 = load_dtl("<panel name=g width=50><area><p>A"
+                  "<ga name=c depth=2><p>B</area></panel>")
+    assert not any(set(it.text.strip()) == {"-"} for it in s2.items
+                   if isinstance(it, Text))
+    assert next(it.row for it in s2.items if it.text == "B") \
+        >= next(it.row for it in s2.items if it.text == "A") + 3   # 2 reserved + flow
+
+
 def test_textline_no_expand_centres_the_whole_line():
     # With no EXPAND the accumulated segments centre as the panel title.
     s = load_dtl("<panel name=t width=40><textline>"
