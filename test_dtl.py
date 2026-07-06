@@ -2597,6 +2597,23 @@ def test_dl_multicolumn_tsize_lays_terms_side_by_side():
     assert rows["Alpha"] == rows["Beta"] == rows["An entry."]   # share the entry row
 
 
+def test_dl_vertical_dividers_between_columns():
+    # #120: <dtdiv>/<ptdiv> draw a vertical `|` between term columns; <dthdiv>
+    # between heading columns — in the gap before the following column.
+    s = load_dtl("<panel name=p width=50><area><info><dl tsize=\"6 6\">"
+                 "<dthd>Code<dthdiv><dthd>Name<ddhd>Meaning"
+                 "<dt>AP<dtdiv><dt>App<dd>Appliances"
+                 "</dl></info></area></panel>")
+    bars = [(it.row, it.col) for it in s.items
+            if isinstance(it, Text) and it.text == "|"]
+    assert len(bars) == 2                        # one header divider, one term divider
+    gap_col = 1 + 6                              # base + width of column 0
+    assert all(c == gap_col for _, c in bars)    # both sit in the column-0/1 gap
+    hdr_row = next(it.row for it in s.items if it.text == "Code")
+    item_row = next(it.row for it in s.items if it.text == "AP")
+    assert sorted(r for r, _ in bars) == sorted({hdr_row, item_row})
+
+
 def test_dl_dtseg_stacks_term_segments():
     # #120: <dtseg> adds an extra line of the definition term, stacked directly
     # under the term text in its column; the description flows alongside.
