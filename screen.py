@@ -560,6 +560,9 @@ class Screen:
     # Field name (upper) → {"checkmsg": id, "checks": [...]}, from a variable's
     # <varclass> validation (<checkl>/<checki>). Metadata: not rendered.
     validations: Dict[str, dict] = _dc_field(default_factory=dict)
+    # Field name (upper) → {external → internal} value translations, from a DTL
+    # <xlatl>/<xlati>: maps a typed/displayed value back to its internal form.
+    translations: Dict[str, dict] = _dc_field(default_factory=dict)
     # Command name (upper) → {"action": str, "trunc": int}, from a DTL <cmdtbl>.
     # Lets the command line recognise named commands (with truncation).
     commands: Dict[str, dict] = _dc_field(default_factory=dict)
@@ -622,6 +625,15 @@ class Screen:
             if trunc and len(t) >= trunc and name.startswith(t):
                 return c["action"]
         return None
+
+    def internal_value(self, name: str, typed: str) -> str:
+        """Translate a field's typed/displayed value back to its internal form
+        via its <xlatl>/<xlati> map (e.g. "Enabled" → "1"). Values with no
+        translation — and fields with no translate list — pass through unchanged."""
+        m = self.translations.get((name or "").upper())
+        if not m:
+            return typed
+        return m.get(typed, m.get(typed.upper(), typed))
 
     def first_validation_error(self, fields_by_addr: Dict[int, str]):
         """Validate submitted fields against their <varclass> checks.

@@ -3577,6 +3577,31 @@ def test_xlatl_xlati_restricts_input_to_its_translations():
     assert s.first_validation_error({addr: ""}) is None                       # empty skipped
 
 
+def test_xlatl_xlati_translates_internal_and_external_values():
+    # #114: <xlatl>/<xlati value=internal>external maps a variable's internal value
+    # to its displayed form (usage=out) and a typed value back to internal.
+    src = (
+        '<varclass name="onoff" type="char 8">'
+        '  <xlatl msg="ABC001">'
+        '    <xlati value="1">Enabled<xlati value="0">Disabled'
+        '  </xlatl>'
+        '</varclass>'
+        '<varlist><vardcl name="state" varclass="onoff"/></varlist>'
+        '<panel name=p width=40><area>'
+        '<dtafld datavar="state" usage=out>Status</dtafld>'
+        '</area></panel>')
+    # usage=out: the internal value 1 displays as its external form "Enabled".
+    s = load_dtl(src, state="1")
+    cells = [it.text.strip() for it in s.items
+             if isinstance(it, Text) and getattr(it, "role", None) == "cell"]
+    assert "Enabled" in cells
+    assert "1" not in cells                                    # raw internal not shown
+    # read-back: a typed external value maps to its internal form.
+    assert s.internal_value("state", "Enabled") == "1"
+    assert s.internal_value("state", "Disabled") == "0"
+    assert s.internal_value("state", "Other") == "Other"      # untranslated passes through
+
+
 def test_xlati_lit_external_preserves_literal_and_uses_own_message():
     # A <lit> external keeps its interior spacing; the xlatl MSG applies to the
     # xlati check independently of the class-level checkmsg.

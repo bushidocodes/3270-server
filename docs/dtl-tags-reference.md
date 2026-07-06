@@ -103,8 +103,8 @@ Legend: **Name** — the tag's full name. **End tag** — whether a closing tag 
 | **VARLIST** | Variable List | Yes | — | N/A | VARDCL | — | ✅ Supported |
 | **VARSUB** | Variable Substitution | No | VAR=variable-name | N/A | — | MSG | ✅ substitutes the named dialog variable in `<msg>` text (display-time, like `&NAME`) |
 | **WARNING** | Warning | Yes | — | text | DL, FIG, HP, LINES, NOTE, NOTEL, NT, OL, P, PARML, PS, RP, SL, UL, XMP | LI, LP, P | ✅ labelled block |
-| **XLATI** | Translate Item | No | VALUE=internal-value | displayed-value | LIT | XLATL | 🟡 Partial — external value read (validates input); internal-value mapping not modelled — #114 |
-| **XLATL** | Translate List | Yes | FORMAT=NONE \| UPPER<br>TRUNC=n \| char<br>MSG=message-identifier | N/A | XLATI | VARCLASS | 🟡 Partial — `<xlati>` list validates typed input (FORMAT=upper honoured, MSG carried); value translation/TRUNC not yet — #114 |
+| **XLATI** | Translate Item | No | VALUE=internal-value | displayed-value | LIT | XLATL | ✅ internal↔external value translation: internal value displayed on usage=out, typed value read back via Screen.internal_value; validates input — #114 |
+| **XLATL** | Translate List | Yes | FORMAT=NONE \| UPPER<br>TRUNC=n \| char<br>MSG=message-identifier | N/A | XLATI | VARCLASS | ✅ `<xlati value=internal>external`: value translation both ways (out display / in read-back) + input validation (FORMAT=upper, MSG); TRUNC not modelled — #114 |
 | **XMP** | Example | Yes | NOSKIP | text | DL, HP, NOTE, NOTEL, NT, OL, P, PARML, PS, RP, SL, UL | (body text tags) | ❌ #52 |
 
 ## Notes
