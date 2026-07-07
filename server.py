@@ -1344,13 +1344,18 @@ def _show_overlay(client_socket, panel_name: str, rows=None, enter_returns=True)
 def _pdc_item_text(row, col, number, item, inner):
     """Build one framed pull-down item line ``| N. label |``, underlining the
     item's mnemonic letter (DTL ``<M>``) when it has one. Mono renders identically
-    to the plain framed line, so only colour/extended terminals show the underline."""
+    to the plain framed line, so only colour/extended terminals show the underline.
+
+    An unavailable item (DTL ``<pdc unavail>``) drops to NORMAL intensity — the
+    3270's only sub-high de-emphasis — and never underlines a mnemonic, matching how
+    ``<choice unavail>`` greys a selection choice."""
     from screen import Text, Highlight
     label = item["label"]
     t = f"{number}. {label}"
     framed = "|" + (" " + t).ljust(inner) + "|"
+    intensity = DisplayIntensity.NORMAL if item.get("unavail") else DisplayIntensity.HIGH
     m = item.get("mnemonic")
-    if m is not None:
+    if m is not None and not item.get("unavail"):
         pos = 2 + (len(t) - len(label)) + m      # past ``| `` and the ``N. `` prefix
         if 0 <= pos < len(framed):
             runs = [(framed[:pos], None, None),
@@ -1358,7 +1363,7 @@ def _pdc_item_text(row, col, number, item, inner):
                     (framed[pos + 1:], None, None)]
             return Text.rich(row, col, [r for r in runs if r[0]],
                              intensity=DisplayIntensity.HIGH)
-    return Text(row, col, framed, DisplayIntensity.HIGH)
+    return Text(row, col, framed, intensity)
 
 
 def _show_pulldown(client_socket, screen, choice):
@@ -1383,6 +1388,8 @@ def _show_pulldown(client_socket, screen, choice):
     screen.add(Text(top, col, border, DisplayIntensity.HIGH))
     action_by_row = {}
     help_by_row = {}
+    checked_row = None       # row of the current (CHECKVAR-matched) item, if any
+    first_row = None         # first *available* item, for the default cursor landing
     number = 0
     row = top
     for item in pdc:
@@ -1392,11 +1399,20 @@ def _show_pulldown(client_socket, screen, choice):
             continue
         number += 1
         screen.add(_pdc_item_text(row, col, number, item, inner))
-        action_by_row[row] = item["action"]
         if item.get("help"):
             help_by_row[row] = item["help"]
+        if item.get("unavail"):
+            continue          # shown (dimmed) but not selectable: no action mapping
+        action_by_row[row] = item["action"]
+        if first_row is None:
+            first_row = row
+        if item.get("checked"):
+            checked_row = row
     screen.add(Text(row + 1, col, border, DisplayIntensity.HIGH))
-    screen.cursor_at = (top + 1, col + 1)  # land on the first item
+    # Land on the current item (CHECKVAR match) if there is one, else the first
+    # selectable item — never on an unavailable/greyed row.
+    land = checked_row or first_row or (top + 1)
+    screen.cursor_at = (land, col + 1)
 
     while True:
         _send_screen(client_socket, screen)

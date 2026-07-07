@@ -359,6 +359,9 @@ class _DTLParser(HTMLParser):
         self._chofld_choicetext = None  # the choice text captured before a <chofld>
         self._pending_scrfld = None   # a <scrfld> awaiting its <dtafld>/<lstcol>
         self._keylist = None      # active <keyl> bindings dict, or None
+        self._keylist_name = None  # <keyl name=...> (the list's name), or None
+        self._keylist_applid = None  # <keyl applid=...> (its application id), or None
+        self._keyi = None         # open <keyi> awaiting its FKA-text content, or None
         self._varclasses = {}     # <varclass> name (upper) → {"numeric", "checks", "msg"}
         self._vardcls = {}        # <vardcl> name (upper) → {"varclass": name}
         self._cur_varclass = None # name of the <varclass> currently being defined
@@ -769,7 +772,12 @@ class _DTLParser(HTMLParser):
             if self._tag in _FIELD_TAGS:
                 self._in_dtafldd, self._dtafldd = True, []
         elif tag == "keyl":
+            # NAME identifies the keylist (referenced by <panel keylist=name>);
+            # APPLID is the application it belongs to. Both are metadata recorded
+            # on the Screen so the dialog can name/scope its keylist.
             self._keylist = {}
+            self._keylist_name = a.get("name")
+            self._keylist_applid = a.get("applid")
         elif tag == "keyi":
             self._emit_keyi(a)
         elif tag == "cmdtbl":
@@ -801,7 +809,13 @@ class _DTLParser(HTMLParser):
         elif tag == "ab":
             # The action bar sits on the top row; its choices are separated by a
             # fixed gap (the non-standard per-bar gap= attribute has been removed).
-            self._ab = {"row": 0, "col": 1, "gap": 3, "choices": []}
+            # ABSEPSTR is the string drawn between the choices (IBM's default is two
+            # blanks; we keep the wider gap when it is absent so bundled panels stay
+            # byte-identical). ABSEPCHAR is the character of the separator *line*
+            # ISPF draws on the row below the bar — both default to nothing shown.
+            self._ab = {"row": 0, "col": 1, "gap": 3, "choices": [],
+                        "absepstr": a.get("absepstr"),
+                        "absepchar": a.get("absepchar")}
         elif tag == "abc":
             if self._ab is None:
                 raise DTLError("<abc> outside of an <ab>")
@@ -811,13 +825,36 @@ class _DTLParser(HTMLParser):
             if self._cur_abc is None:
                 raise DTLError("<pdc> outside of an <abc>")
             self._end_pdc()                     # implicit end of a previous <pdc>
+            # A pull-down item can be conditionally unavailable (shown but not
+            # selectable), mirroring <choice unavail>: UNAVAIL=var greys it when the
+            # variable is true. CHECKVAR=var MATCH=x marks it the *current* setting
+            # (a "> " current-choice indicator) when the variable equals MATCH — the
+            # pull-down analogue of <choice checkvar> landing on the current choice.
+            unavail = "unavail" in a and self._var_truthy(a.get("unavail"))
+            checkvar = a.get("checkvar")
+            match = str(a.get("match", "")).strip().upper()
+            checked = bool(checkvar) and \
+                self._subs.get(str(checkvar).strip().upper(), "").strip().upper() == match
             self._cur_pdc = {"chars": [], "action": "",
-                             "help": self._field_help(a)}
+                             "help": self._field_help(a),
+                             "unavail": unavail, "checked": checked}
         elif tag == "action":
-            # A pull-down choice's command: <pdc>label<action run=cmd>. RUN= is
-            # the standard DTL attribute naming the command the choice runs.
+            # A pull-down choice's command: <pdc>label<action run=cmd>. RUN= names
+            # the command the choice runs. SETVAR/TOGVAR model the variable an action
+            # assigns/toggles (an ISPF "Settings"-style on/off pull-down item): SETVAR
+            # sets VAR to VALUE; TOGVAR flips VAR between VALUE1 and VALUE2. TYPE is
+            # the action kind (CMD | PGM | PANEL | EXIT), defaulting to CMD.
             if self._cur_pdc is not None:
                 self._cur_pdc["action"] = a.get("run") or self._cur_pdc["action"]
+                if a.get("type"):
+                    self._cur_pdc["type"] = str(a["type"]).strip().lower()
+                if a.get("parm"):
+                    self._cur_pdc["parm"] = a["parm"]
+                if a.get("setvar"):
+                    self._cur_pdc["setvar"] = (a["setvar"], a.get("value", "1"))
+                if a.get("togvar"):
+                    self._cur_pdc["togvar"] = (
+                        a["togvar"], a.get("value1", "0"), a.get("value2", "1"))
         elif tag == "pdsep":
             # A separator line within an action-bar pull-down: close the choice
             # above it (DTL omits end tags) and record a divider row between the
@@ -1065,6 +1102,8 @@ class _DTLParser(HTMLParser):
             self._cur_pdc["chars"].append(data)
         elif self._cur_abc is not None:
             self._cur_abc["chars"].append(data)
+        elif self._keyi is not None:
+            self._keyi["chars"].append(data)   # a <keyi>'s FKA-text
         elif self._da is not None:
             self._da["body"].append(data)
         elif self._tag is not None:
@@ -1157,9 +1196,15 @@ class _DTLParser(HTMLParser):
             if self._in_dtafldd:
                 self._in_dtafldd, self._dtafldd = False, "".join(self._dtafldd)
             return
+        if tag == "keyi":
+            self._finalize_keyi()
+            return
         if tag == "keyl":
+            self._finalize_keyi()       # flush the last <keyi> (its end tag is omitted)
             self.screen.keylist = self._keylist or {}
-            self._keylist = None
+            self.screen.keylist_name = self._keylist_name
+            self.screen.keylist_applid = self._keylist_applid
+            self._keylist = self._keylist_name = self._keylist_applid = None
             return
         if tag == "cmdtbl":
             self._finalize_cmd_trunc()
@@ -1404,6 +1449,8 @@ class _DTLParser(HTMLParser):
         elif tag == "selfld":  # a self-closing selfld has no choices; close it
             self._selfld = None
         elif tag == "keyl":  # a self-closing keylist has no items; close it
+            self.handle_endtag(tag)
+        elif tag == "keyi":  # a self-closing key item has no FKA-text; close it
             self.handle_endtag(tag)
         elif tag == "msg":  # a self-closing msg has empty text
             self.handle_endtag(tag)
@@ -3501,10 +3548,17 @@ class _DTLParser(HTMLParser):
             if mnem is not None:               # re-base the offset onto the label
                 mnem -= len(raw) - len(raw.lstrip())
                 mnem = mnem if 0 <= mnem < len(label) else None
-            self._cur_abc["pdc"].append({
+            item = {
                 "label": label, "action": self._cur_pdc["action"], "mnemonic": mnem,
                 "help": self._cur_pdc.get("help"),
-            })
+            }
+            # Optional behaviours are added only when present, so ordinary items keep
+            # their four-key shape (and the action-bar model stays compact).
+            for key in ("unavail", "checked", "type", "parm", "setvar", "togvar"):
+                val = self._cur_pdc.get(key)
+                if val:
+                    item[key] = val
+            self._cur_abc["pdc"].append(item)
         self._cur_pdc = None
 
     def _end_abc(self):
@@ -3530,7 +3584,9 @@ class _DTLParser(HTMLParser):
         choice keeps its ``row``/``col`` so the server can map a cursor onto it
         for point-and-shoot."""
         col = ab["col"]
-        for choice in ab["choices"]:
+        sep = ab.get("absepstr")            # explicit between-choice separator string
+        choices = ab["choices"]
+        for i, choice in enumerate(choices):
             label = choice["label"]
             choice["row"], choice["col"] = ab["row"], col
             m = choice.get("mnemonic")
@@ -3544,8 +3600,23 @@ class _DTLParser(HTMLParser):
                                           intensity=DisplayIntensity.HIGH))
             else:
                 self.screen.add(Text(ab["row"], col, label, DisplayIntensity.HIGH))
-            col += len(label) + ab["gap"]
-        self.screen.action_bar = ab["choices"]
+            col += len(label)
+            if i < len(choices) - 1:
+                if sep is not None:
+                    # ABSEPSTR: draw the separator string in the bar between choices
+                    # (e.g. " | "), then resume laying out at its far edge.
+                    self.screen.add(Text(ab["row"], col, sep, DisplayIntensity.HIGH))
+                    col += len(sep)
+                else:
+                    col += ab["gap"]        # default: a plain gap of blanks
+        # ABSEPCHAR draws the separator *line* below the action bar (the horizontal
+        # rule dividing the bar from the panel body), spanning the panel width.
+        sepchar = ab.get("absepchar")
+        if sepchar:
+            width = max(1, self.screen.width - ab["col"] - 1)
+            self.screen.add(Text(ab["row"] + 1, ab["col"], sepchar[0] * width,
+                                 role="rule"))
+        self.screen.action_bar = choices
 
     def _finalize_cmd_trunc(self):
         """Apply a captured <t> truncation point to the current <cmd>: the number
@@ -3557,6 +3628,7 @@ class _DTLParser(HTMLParser):
     def _emit_keyi(self, a):
         if self._keylist is None:
             raise DTLError("<keyi> outside of a <keyl>")
+        self._finalize_keyi()          # close a previous <keyi> (DTL omits end tags)
         key = a.get("key")
         if not key:
             raise DTLError("<keyi> missing required attribute 'key'")
@@ -3564,6 +3636,23 @@ class _DTLParser(HTMLParser):
         # both key and command are case-insensitive, stored uppercase.
         cmd = a.get("cmd", a.get("action", ""))
         self._keylist[key.upper()] = cmd.upper()
+        # FKA=NO|YES|LONG|SHORT governs whether the key appears in the function-key
+        # area; the element content is the FKA display text. Capture it (unless
+        # FKA=NO suppresses it) so the FKA line can be labelled.
+        self._keyi = {"key": key.upper(),
+                      "show": str(a.get("fka", "yes")).strip().lower() != "no",
+                      "chars": []}
+
+    def _finalize_keyi(self):
+        """Bank an open <keyi>'s FKA-text onto the Screen and clear it. The text is
+        the key's function-key-area label (e.g. ``F3=Exit``); FKA=NO suppresses it."""
+        ki = self._keyi
+        self._keyi = None
+        if ki is None:
+            return
+        text = "".join(ki["chars"]).strip()
+        if ki["show"] and text:
+            self.screen.keylist_fka[ki["key"]] = text
 
 
 def load_dtl(source: str, rows=None, screen_rows=None, screen_cols=None,
