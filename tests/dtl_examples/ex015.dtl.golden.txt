@@ -1,0 +1,7 @@
+                                 Travel Agency
+
+ Destinations:
+ __  1.  London
+     2.  Madrid
+     3.  Paris
+     4.  Zurich
