@@ -208,6 +208,36 @@ def test_ws3270_table_input_reads_rows_back():
     assert "Read 1 row(s): ABC=XYZ" in out, out[-1500:]
 
 
+def test_ws3270_table_input_caps_column_folds_to_uppercase():
+    """A real emulator types *lowercase* into the Table Input Key column, which is
+    a CAPS=ON <lstcol>: the server folds it to uppercase on read-back
+    (Screen.read_table_rows), so the echo shows the key uppercased while the plain
+    Value column keeps its case — proving CAPS=ON end-to-end (#238)."""
+    _require_emulator()
+    port = _serve_one_client()
+    out = _drive(port, [
+        "Wait(20,InputField)",
+        "String(IBMUSER)", "Tab()", "String(SYS1)", "Enter()",
+        "Wait(20,Output)",       # ISPF menu
+        "String(7)", "Enter()",  # option 7 → Dialog Test
+        "Wait(10,Output)",
+        "PF(5)",                 # → Table Input scratch panel
+        "Wait(10,InputField)",
+        "String(abc)",           # lowercase into the CAPS=ON Key column
+        "Tab()",
+        "String(xyz)",           # lowercase into the plain Value column
+        "Enter()",
+        "Wait(10,Output)",
+        "Ascii()",
+        "PF(3)", "Wait(5,Output)",
+        "PF(3)", "Wait(5,Output)",
+        "Quit()",
+    ])
+
+    # Key folded to uppercase (CAPS=ON), Value left as typed (CAPS off).
+    assert "Read 1 row(s): ABC=xyz" in out, out[-1500:]
+
+
 def test_ws3270_model_3_browse_uses_the_alternate_screen():
     """A model-3 emulator (32 rows) browsing a member sees more lines per page —
     proving ERASE/WRITE ALTERNATE and the larger geometry work on a real

@@ -12,7 +12,7 @@
 
   <lstfld>
     <lstgrp headline="yes">Scratch Table
-      <lstcol datavar="tkey" usage="in" colwidth="8">Key
+      <lstcol datavar="tkey" usage="in" caps="on" colwidth="8">Key
       <lstcol datavar="tval" usage="in" colwidth="20">Value
     </lstgrp>
   </lstfld>

@@ -1729,6 +1729,39 @@ def test_read_table_rows_empty_for_display_only_table():
     assert s.read_table_rows({}) == []
 
 
+def test_lstcol_caps_on_folds_typed_value_to_uppercase_on_readback():
+    # <lstcol CAPS=ON>: the input cell is marked caps, and read_table_rows folds
+    # the typed value to uppercase (as ISPF's CAPS(ON) does); a plain column does
+    # not (#238).
+    src = (
+        '<panel name="t">T'
+        '<lstfld>'
+        '<lstcol datavar="k" usage="in" caps="on" colwidth="6">Key'
+        '<lstcol datavar="v" usage="in" colwidth="10">Val'
+        '</lstfld></panel>'
+    )
+    s = load_dtl(src, rows=[{"k": "", "v": ""}])
+    cells = {f.name: f for f in s.items
+             if isinstance(f, Field) and f.row_index is not None}
+    assert cells["k"].caps is True and cells["v"].caps is False
+    # client types lowercase into both cells
+    modified = {cells["k"].data_addr: "abc", cells["v"].data_addr: "xyz"}
+    out = s.read_table_rows(modified)
+    # the caps column is folded, the plain column is left as typed
+    assert out == [{"k": "ABC", "v": "xyz"}]
+
+
+def test_lstcol_caps_default_off():
+    # CAPS is OFF by default: no fold.
+    src = ('<panel name="t">T<lstfld>'
+           '<lstcol datavar="k" usage="in" colwidth="6">Key</lstfld></panel>')
+    s = load_dtl(src, rows=[{"k": ""}])
+    cell = next(f for f in s.items
+                if isinstance(f, Field) and f.row_index is not None)
+    assert cell.caps is False
+    assert s.read_table_rows({cell.data_addr: "abc"}) == [{"k": "abc"}]
+
+
 # ── message members (<msgmbr>/<msg>) ─────────────────────────────────────────
 
 def test_msg_member_parses_and_formats_with_substitution():

@@ -2516,6 +2516,9 @@ class _DTLParser(HTMLParser):
             "datavar": a.get("datavar", ""),
             # A column is an input field unless it is explicitly display-only.
             "usage": "out" if a.get("usage", "").lower() == "out" else "in",
+            # CAPS=OFF|ON (default OFF): an ON input column is uppercase-input —
+            # ISPF folds it to uppercase; we fold the typed value on read-back.
+            "caps": str(a.get("caps", "")).strip().lower() == "on",
             "autotab": a.get("autotab", "").lower() == "yes",
             "line": int(a.get("line", 1)),
             "align": a.get("align", "start").lower(),
@@ -2822,6 +2825,8 @@ class _DTLParser(HTMLParser):
                         # server can read the table back per row despite every row's
                         # cell in this column sharing the DATAVAR (Screen.read_table_rows).
                         row_index=row_index,
+                        # CAPS=ON folds the typed value to uppercase on read-back.
+                        caps=c.get("caps", False),
                     ))
                 # TEXT description beside the cell, justified within its area
                 # (TEXTFMT); unformatted when the text overflows the reserved area.
