@@ -10,7 +10,8 @@ import pathlib
 import pytest
 
 from dtl import load_dtl, load_panel, load_messages, load_message_member, DTLError
-from screen import Screen, Text, Field, DisplayIntensity, Color, Highlight, SA, Outline
+from screen import (Screen, Text, Field, DisplayIntensity, Color, Highlight, SA,
+                    Outline, GraphicText, Line)
 from server import to_ebcdic
 
 
@@ -3645,6 +3646,96 @@ def test_divider_type_none_is_a_blank_spacer():
         texts = [i for i in s.items if isinstance(i, Text)]
         assert not any(set(t.text) == {"-"} for t in texts)          # no rule
         assert texts[-1] == Text(2, 1, "below", DisplayIntensity.NORMAL)  # row consumed
+
+
+def test_divider_type_dash_matches_the_no_type_default():
+    # #125: TYPE=DASH is the historical hyphen rule — identical to a plain <divider>
+    # (which is why bundled panels stay byte-for-byte unchanged).
+    plain = load_dtl('<panel><area><divider></area></panel>')
+    dash = load_dtl('<panel><area><divider type="dash"></area></panel>')
+    assert plain.items == dash.items
+    assert plain.items[0] == Text(0, 1, "-" * 78, role="rule")
+
+
+def test_divider_type_solid_is_a_ge_line():
+    # #125: TYPE=SOLID draws an unbroken GE line (── from the graphic set),
+    # visibly distinct from DASH's hyphens.
+    s = load_dtl('<panel><area><divider type="solid"></area></panel>')
+    gts = [i for i in s.items if isinstance(i, GraphicText)]
+    assert len(gts) == 1
+    assert set(gts[0].codes) == {Line.HORIZONTAL.value}   # all solid-line glyphs
+    assert not any(isinstance(i, Text) and set(i.text) == {"-"} for i in s.items)
+
+
+def test_divider_type_text_lays_out_its_text_positioned_by_format():
+    # #125: TYPE=TEXT renders the divider's own text, placed within the span by
+    # FORMAT (START/CENTER/END) — not a rule of dashes.
+    start = load_dtl('<panel><area><divider type="text">Options</divider></area></panel>')
+    assert start.items[0] == Text(0, 1, "Options", role="rule")
+    centre = load_dtl(
+        '<panel><area><divider type="text" format="center">Options</divider></area></panel>')
+    # 78-wide span, 7-char text → centred at 1 + (78-7)//2.
+    assert centre.items[0] == Text(0, 1 + (78 - 7) // 2, "Options", role="rule")
+    end = load_dtl(
+        '<panel><area><divider type="text" format="end">Options</divider></area></panel>')
+    assert end.items[0] == Text(0, 1 + (78 - 7), "Options", role="rule")
+
+
+def test_region_grpbox_frames_content_in_a_box_border():
+    # #125: <region GRPBOX=YES> draws a GE box border around its content, with the
+    # content inset past the left border and one row below the top border.
+    s = load_dtl(
+        '<panel><region grpbox="yes"><info>hello</info>'
+        '<info>world</info></region></panel>'
+    )
+    texts = [i for i in s.items if isinstance(i, Text)]
+    assert texts[0] == Text(1, 3, "hello", DisplayIntensity.NORMAL)   # inset + below top
+    assert texts[1] == Text(2, 3, "world", DisplayIntensity.NORMAL)
+    gts = [i for i in s.items if isinstance(i, GraphicText)]
+    # A top edge, a bottom edge, and left+right verticals on each content row.
+    top = next(g for g in gts if g.row == 0)
+    assert top.codes[0] == Line.TOP_LEFT.value and top.codes[-1] == Line.TOP_RIGHT.value
+    bottom = next(g for g in gts if g.codes[0] == Line.BOTTOM_LEFT.value)
+    assert bottom.row == 3                                            # below both rows
+    verticals = [g for g in gts if g.codes == bytes([Line.VERTICAL.value])]
+    assert {g.row for g in verticals} == {1, 2}                       # a side per content row
+    # Left edge at the box origin (col 1), right edge one short of the top's width.
+    assert min(g.col for g in verticals) == 1
+    assert max(g.col for g in verticals) == 1 + len(top.codes) - 1
+
+
+def test_region_grpbox_title_sits_on_the_top_edge():
+    # #125: the region's leading text becomes the group-box title, laid on the top
+    # border between ┌─ and ─┐ (a Text field flanked by two GraphicText segments).
+    s = load_dtl(
+        '<panel><region grpbox="yes">Terminal Settings'
+        '<info>value</info></region></panel>'
+    )
+    title = next(i for i in s.items
+                 if isinstance(i, Text) and "Terminal Settings" in i.text)
+    assert title.row == 0                                             # on the top edge
+    top_segs = [i for i in s.items if isinstance(i, GraphicText) and i.row == 0]
+    assert any(g.codes[0] == Line.TOP_LEFT.value for g in top_segs)   # ┌─ segment
+    assert any(g.codes[-1] == Line.TOP_RIGHT.value for g in top_segs)  # ─┐ segment
+
+
+def test_region_without_grpbox_is_unchanged():
+    # Byte-identity guard: a plain <region> draws no border and does not inset.
+    s = load_dtl('<panel><region><info>x</info></region></panel>')
+    assert s.items == [Text(0, 1, "x", DisplayIntensity.NORMAL)]
+
+
+def test_panel_records_window_and_keylist_metadata():
+    # #125: KEYLIST/WINDOW/WINTITLE/CURSOR are recorded on the Screen as metadata
+    # (they do not change the rendered field stream).
+    s = load_dtl(
+        '<panel keylist="ISRLIST" window="yes" wintitle="Pop-Up" cursor="zcmd">'
+        '<area><dtafld name="zcmd">Cmd</dtafld></area></panel>'
+    )
+    assert s.keylist_ref == "ISRLIST"          # panel KEYLIST= reference (vs a <keyl> NAME)
+    assert s.window is True
+    assert s.window_title == "Pop-Up"
+    assert s.cursor_field == "zcmd"
 
 
 def test_regions_lay_out_side_by_side_columns():
