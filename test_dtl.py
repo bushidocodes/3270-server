@@ -316,6 +316,49 @@ def test_hp_highlight_via_type_attribute():
     ]
 
 
+@pytest.mark.parametrize("typ,colour", [
+    ("et", Color.TURQUOISE), ("ch", Color.BLUE), ("ct", Color.YELLOW),
+    ("fp", Color.GREEN), ("lef", Color.TURQUOISE), ("li", Color.WHITE),
+    ("nt", Color.GREEN), ("pt", Color.BLUE), ("sac", Color.WHITE),
+    ("wasl", Color.BLUE), ("wt", Color.RED),
+])
+def test_hp_type_names_a_cua_colour(typ, colour):
+    # #218: an <hp TYPE=cua-type> paints the phrase in that CUA type's standard
+    # z/OS colour (ISPF Dialog Developer's Guide Table 11), not the default role.
+    s = load_dtl(f'<panel><info>see <hp type="{typ}">HERE</hp> now</info></panel>')
+    assert s.items[0].runs == [
+        ("see ", None, None),
+        ("HERE", colour, None),
+        (" now", None, None),
+    ]
+
+
+def test_hp_type_text_is_not_a_cua_colour():
+    # TYPE=TEXT is the escape hatch (non-CUA): it names no colour, so the phrase
+    # keeps the default role colour unless an explicit COLOR/HILITE is given.
+    s = load_dtl('<panel><info>see <hp type="text">HERE</hp> now</info></panel>')
+    # No colour/highlight/intensity → the phrase carries no emphasis, so the line
+    # collapses back to a single plain Text (no rich runs).
+    assert s.items[0].text == "see HERE now"
+    assert s.items[0].runs is None and s.items[0].color is None
+
+
+def test_hp_explicit_colour_overrides_cua_type():
+    # A CUA TYPE and an explicit COLOR are mutually exclusive in valid DTL; if both
+    # appear we honour COLOR (it wins over the type's default colour).
+    s = load_dtl('<panel><info>see <hp type="et" color="red">HERE</hp> now'
+                 '</info></panel>')
+    assert s.items[0].runs[1] == ("HERE", Color.RED, None)
+
+
+def test_hp_type_colour_mono_is_byte_identical():
+    # Colour-only: the CUA-type colour rides an SA order a mono terminal ignores,
+    # so an <hp TYPE=cua-type> renders byte-for-byte like the plain text on mono.
+    typed = load_dtl('<panel><info>see <hp type="wt">HERE</hp> now</info></panel>')
+    plain = load_dtl('<panel><info>see HERE now</info></panel>')
+    assert typed.render(color=False) == plain.render(color=False)
+
+
 def test_hp_flow_wrapped_keeps_highlight_across_lines():
     # #208: an <hp> inside flowed (word-wrapped) <p> text keeps its highlight on
     # every line the phrase spans — previously the flow path dropped the runs and
@@ -2102,6 +2145,46 @@ def test_note_wraps_to_margin_and_nt_hangs_and_text_overrides_heading():
                    '<note text="Tip:">Save often.</note></info></area></panel>')
     assert any(t.text.startswith("Tip: Save often") for t in tip.items
                if isinstance(t, Text))
+
+
+def test_note_type_colours_the_heading():
+    # #218: a <note TYPE=cua-type> paints its "Note:" heading run in that CUA
+    # type's standard colour (WT → red), leaving the body run uncoloured.
+    s = load_dtl('<panel width="50"><area><info>'
+                 '<note type="wt">Mind the gap between here and there.</note>'
+                 '</info></area></panel>')
+    head = next(t for t in s.items
+                if getattr(t, "runs", None) and t.runs[0][0].startswith("Note:"))
+    assert head.runs[0] == ("Note: ", Color.RED, None)
+    assert head.runs[1][1] is None                       # body run stays default
+
+
+def test_nt_type_colours_the_hung_heading():
+    # <nt> hangs its body under the heading; TYPE colours just the heading Text
+    # (SAC → white), not the body lines.
+    s = load_dtl('<panel width="30"><area><info>'
+                 '<nt type="sac">Mind the gap here please.</nt>'
+                 '</info></area></panel>')
+    head = next(t for t in s.items if getattr(t, "text", "") == "Note:")
+    assert head.color == Color.WHITE
+
+
+def test_notel_type_colours_the_heading():
+    # <notel TYPE=cua-type> colours its "Notes:" heading (ET → turquoise).
+    s = load_dtl('<panel width="50"><area><info><notel type="et">'
+                 '<li>First point.<li>Second point.</notel>'
+                 '</info></area></panel>')
+    head = next(t for t in s.items if getattr(t, "text", "") == "Notes:")
+    assert head.color == Color.TURQUOISE
+
+
+def test_note_type_colour_mono_is_byte_identical():
+    # Colour-only: adding a CUA TYPE to a <note>/<nt> does not change the mono
+    # data stream (the colour rides an SA order mono ignores).
+    base = '<panel width="40"><area><info>{}</info></area></panel>'
+    typed = load_dtl(base.format('<note type="ct">Save your work often here.</note>'))
+    plain = load_dtl(base.format('<note>Save your work often here.</note>'))
+    assert typed.render(color=False) == plain.render(color=False)
 
 
 def test_caution_heading_on_own_line_and_emphasized():
