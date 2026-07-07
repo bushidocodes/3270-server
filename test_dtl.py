@@ -2819,6 +2819,31 @@ def test_list_field_display_column_and_data_rows():
     ]
 
 
+def test_lstfld_out_of_scope_attributes_are_accepted_and_ignored():
+    # #240: the codegen/DBCS-only <lstfld>/<lstcol>/<lstgrp> attributes have no
+    # host-display effect in this server (we emit no )ATTR/)MODEL/)PROC). They are
+    # accepted and ignored — a panel that uses them loads and renders identically
+    # to one that omits them, rather than being rejected.
+    plain = (
+        '<panel name="p">T<lstfld>'
+        '<lstgrp>G<lstcol datavar="a" colwidth="6">A</lstgrp>'
+        '</lstfld></panel>'
+    )
+    decorated = (
+        '<panel name="p">T'
+        '<lstfld rules="both" rows="scan" attrchange="new" vardcl="yes">'
+        '<lstgrp>G'
+        '<lstcol datavar="a" colwidth="6" clear="a" coltype="ee" pas="on"'
+        ' csrgrp="1" attrchange="new" vardcl="yes">A'
+        '</lstgrp></lstfld></panel>'
+    )
+    rows = [{"a": "1"}, {"a": "2"}]
+    a = load_dtl(plain, rows=rows)
+    b = load_dtl(decorated, rows=rows)
+    # accepted (no exception) and no rendering difference: byte-for-byte identical
+    assert b.render() == a.render()
+
+
 def test_list_field_bottom_of_data_only_when_not_clipped():
     # #220: "BOTTOM OF DATA" is drawn when the end of the table is on screen; when
     # the rows are clipped by the panel depth (more data on the next page) it is
