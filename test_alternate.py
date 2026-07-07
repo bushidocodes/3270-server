@@ -73,6 +73,48 @@ class _FakeSock:
 
 
 _PF3 = bytes([0xF3, 0xFF, 0xEF])   # a PF3 reply → Browse's keylist EXITs
+_PF8 = bytes([0xF8, 0xFF, 0xEF])   # a PF8 reply → page down
+
+
+# ── scroll amount + help paging (#281) ───────────────────────────────────────
+
+def test_scroll_amount_interprets_ispf_values():
+    # PAGE / HALF / MAX / CSR / n / blank, as ISPF's SCROLL field does.
+    assert server._scroll_amount("PAGE", 20) == 20
+    assert server._scroll_amount("", 20) == 20            # blank defaults to PAGE
+    assert server._scroll_amount("garbage", 20) == 20     # unknown → PAGE
+    assert server._scroll_amount("HALF", 20) == 10
+    assert server._scroll_amount("HALF", 1) == 1          # never below 1
+    assert server._scroll_amount("5", 20) == 5            # literal n
+    assert server._scroll_amount("MAX", 20, total=137) == 137
+    assert server._scroll_amount("CSR", 20, cursor_offset=6) == 6
+    assert server._scroll_amount("CSR", 20) == 20         # no cursor → PAGE
+
+
+def test_help_panel_pages_when_it_overflows():
+    # #281: a help panel taller than 24 rows is paged. PF8 advances to the next
+    # window; the title stays fixed and a "More:" indicator shows.
+    fake = _FakeSock([_PF8, _PF3])
+    server._show_help(fake, "ispfhelp")
+    assert len(fake.sent) >= 2                            # paged (not one screen)
+    page1 = fake.sent[0].decode("cp037", errors="replace")
+    page2 = fake.sent[1].decode("cp037", errors="replace")
+    assert "Primary Option Menu - HELP" in page1          # title fixed on both
+    assert "Primary Option Menu - HELP" in page2
+    assert "More:" in page1                                # scroll indicator
+    # content moved: page 2 shows text that page 1 did not
+    assert "Press PF3 at any time" in page2
+    assert "Press PF3 at any time" not in page1
+
+
+def test_short_help_panel_is_not_paged():
+    # A help panel that fits on 24 rows is shown as a single overlay (unchanged
+    # path): one screen, no "More:" indicator.
+    fake = _FakeSock([_PF3])
+    server._show_help(fake, "sizehelp")
+    assert len(fake.sent) == 1
+    only = fake.sent[0].decode("cp037", errors="replace")
+    assert "More:" not in only
 
 
 def test_browse_alternate_shows_more_lines_on_model_3():

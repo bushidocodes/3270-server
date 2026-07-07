@@ -273,6 +273,65 @@ def test_ws3270_table_input_required_column_validates():
     assert "Read 1 row(s): MYKEY=justval" in out, out[-1800:]
 
 
+def test_ws3270_member_list_pages_with_correct_scroll_status():
+    """A real emulator pages the member list (Utilities → Library) with PF8: the
+    panel's "ROW x TO y OF z" scroll status reflects the true window over the full
+    set and "BOTTOM OF DATA" appears only on the last page (#281)."""
+    _require_emulator()
+    n = len(server._library_members())
+    if n <= 17:
+        pytest.skip("member list fits on one model-2 page; nothing to page")
+    port = _serve_one_client()
+    out = _drive(port, [
+        "Wait(20,InputField)",
+        "String(IBMUSER)", "Tab()", "String(SYS1)", "Enter()",
+        "Wait(20,Output)",           # ISPF menu
+        "String(3)", "Enter()",      # option 3 → Utilities
+        "Wait(10,Output)",
+        "String(1)", "Enter()",      # option 1 → Library member list (page 1)
+        "Wait(10,Output)",
+        "Ascii()",                   # page 1: ROW 1 TO 17 OF n, no BOTTOM
+        "PF(8)",                     # page down
+        "Wait(10,Output)",
+        "Ascii()",                   # last page: ROW 18 TO n OF n + BOTTOM OF DATA
+        "PF(3)", "Wait(5,Output)",
+        "PF(3)", "Wait(5,Output)",
+        "PF(3)", "Wait(5,Output)",
+        "Quit()",
+    ])
+
+    assert "ROW 1 TO 17 OF %d" % n in out, out[-2000:]
+    assert "ROW 18 TO %d OF %d" % (n, n) in out, out[-2000:]
+    assert "BOTTOM OF DATA" in out, out[-2000:]
+
+
+def test_ws3270_help_tutorial_pages_with_pf8():
+    """A real emulator opens the Primary Option Menu help (PF1) — a tutorial taller
+    than 24 rows — and pages it with PF8: the title stays fixed, a "More:" scroll
+    indicator shows, and page 2 reveals text not on page 1 (#281)."""
+    _require_emulator()
+    port = _serve_one_client()
+    out = _drive(port, [
+        "Wait(20,InputField)",
+        "String(IBMUSER)", "Tab()", "String(SYS1)", "Enter()",
+        "Wait(20,Output)",           # ISPF menu
+        "PF(1)",                     # HELP → the (multi-page) tutorial
+        "Wait(10,Output)",
+        "Ascii()",                   # page 1
+        "PF(8)",                     # page down
+        "Wait(10,Output)",
+        "Ascii()",                   # page 2
+        "PF(3)", "Wait(5,Output)",   # leave help
+        "PF(3)", "Wait(5,Output)",   # exit ISPF
+        "Quit()",
+    ])
+
+    assert "Primary Option Menu - HELP" in out, out[-2000:]
+    assert "More:" in out, out[-2000:]
+    # page 2 shows the closing paragraph, which is off the bottom of page 1
+    assert "Press PF3 at any time" in out, out[-2000:]
+
+
 def test_ws3270_model_3_browse_uses_the_alternate_screen():
     """A model-3 emulator (32 rows) browsing a member sees more lines per page —
     proving ERASE/WRITE ALTERNATE and the larger geometry work on a real

@@ -1,22 +1,47 @@
 <!DOCTYPE DM SYSTEM>
-<!-- Help panel for the ISPF Primary Option Menu. Shown on PF1; PF3 returns.
-     Auto-flow (ISPDTLC-idiomatic): no row/col; the title centres itself and the
-     conversion utility spaces the blocks. The option grid is a preformatted
-     <lines> block so its columns line up. -->
+<!-- Help/tutorial panel for the ISPF Primary Option Menu. Shown on PF1. The
+     tutorial is longer than one 24-row screen, so the server pages it with
+     PF7/PF8 (server._show_help, #281); PF3 returns. Auto-flow (ISPDTLC-idiomatic):
+     no row/col; the title centres itself and the conversion utility spaces the
+     blocks. The option grid is a preformatted <lines> block so its columns line
+     up. -->
 <panel name="ispfhelp">ISPF Primary Option Menu - HELP
   <info>
-    <p>The Primary Option Menu is the top of the ISPF dialog hierarchy.</p>
+    <p>The Primary Option Menu is the top of the ISPF dialog hierarchy. From it
+       you reach every ISPF function by selecting a numbered option.</p>
 
     <p>Type an option number on the Option ===> line and press ENTER to select it.</p>
     <lines>
 0  Settings      1  View          2  Edit          3  Utilities
 4  Foreground    5  Batch         6  Command       7  Dialog Test
+9  IBM Products  10 SCLM          11 Workplace     12 z/OS System
 </lines>
 
     <p>Enter X (or press PF3) on the Option line to exit ISPF and log off.</p>
+
+    <p>Option 0 (Settings) tailors your ISPF session: the command line placement,
+       the terminal characteristics, the list and log data set dispositions, and
+       the function-key definitions.</p>
+
+    <p>Options 1 and 2 (View and Edit) open a member of the panel library. View
+       shows the source read-only; Edit opens it for change. Type a member name on
+       the entry panel and press ENTER.</p>
+
+    <p>Option 3 (Utilities) groups the data-management functions: the Library
+       utility (3.1) lists the members of a library so you can browse, rename, or
+       delete them; other utilities allocate, copy, and print data sets.</p>
+
+    <p>Option 6 (Command) is a TSO command shell. Option 7 (Dialog Test) exercises
+       the dialog manager, including the variable display and the table-input test.</p>
+
+    <p>Long panels like this tutorial scroll: press PF8 (or PF11) to page forward
+       and PF7 (or PF10) to page back. The "More: - +" indicator on the bottom
+       line shows whether more text lies above (-) or below (+).</p>
+
+    <p>Press PF3 at any time to leave HELP and return to the Primary Option Menu.</p>
   </info>
 
-  <botinst>PF3=Return</botinst>
+  <botinst>PF7=Up  PF8=Down  PF3=Return</botinst>
 
   <keyl name="HELPKEYS">
     <keyi key="PF3"  cmd="EXIT">Return</keyi>

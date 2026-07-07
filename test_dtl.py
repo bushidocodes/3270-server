@@ -2831,6 +2831,26 @@ def test_list_field_bottom_of_data_only_when_not_clipped():
     assert not any("BOTTOM OF DATA" in getattr(t, "text", "") for t in clipped.items)
 
 
+def test_list_field_paged_window_status_and_bottom_marker():
+    # #281: when a table is a *slice* of a larger set, row_offset/row_total make the
+    # "ROW x TO y OF z" status reflect the real window, and "BOTTOM OF DATA" is
+    # drawn only when the last row of the full set is on screen.
+    src = ('<panel name="p" width="60">Members<area><lstfld>'
+           '<lstcol datavar=a colwidth=6>A</lstfld></area></panel>')
+    # a middle/first page of 3 rows out of 10, starting at offset 0
+    page1 = load_dtl(src, rows=[{"a": str(i)} for i in range(3)],
+                     row_offset=0, row_total=10)
+    row0 = [t for t in page1.items if getattr(t, "row", None) == 0]
+    assert any(getattr(t, "text", "") == "ROW 1 TO 3 OF 10" for t in row0)
+    assert not any("BOTTOM OF DATA" in getattr(t, "text", "") for t in page1.items)
+    # the last page (offset 7, showing rows 8-10) reaches the end
+    page_last = load_dtl(src, rows=[{"a": str(i)} for i in range(7, 10)],
+                         row_offset=7, row_total=10)
+    row0 = [t for t in page_last.items if getattr(t, "row", None) == 0]
+    assert any(getattr(t, "text", "") == "ROW 8 TO 10 OF 10" for t in row0)
+    assert any("BOTTOM OF DATA" in getattr(t, "text", "") for t in page_last.items)
+
+
 def test_list_field_row_status_shows_and_is_suppressed_under_a_full_width_title():
     # #220: a "ROW 1 TO y OF z" scroll status renders on the title line's right for
     # a table with data. It is suppressed when that region is already occupied (a
