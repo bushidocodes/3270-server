@@ -361,6 +361,8 @@ class _DTLParser(HTMLParser):
         self._pending_chofld = None   # open <chofld>'s attrs (a choice's entry field)
         self._chofld_choicetext = None  # the choice text captured before a <chofld>
         self._pending_scrfld = None   # a <scrfld> awaiting its <dtafld>/<lstcol>
+        self._assignl = None          # open <assignl> {"destvar", "pairs"} collecting <assigni>s
+        self._pending_assignl = None  # a finished <assignl> awaiting its <dtafld>
         self._keylist = None      # active <keyl> bindings dict, or None
         self._keylist_name = None  # <keyl name=...> (the list's name), or None
         self._keylist_applid = None  # <keyl applid=...> (its application id), or None
@@ -592,6 +594,25 @@ class _DTLParser(HTMLParser):
             if self._in_dtafldd and isinstance(self._dtafldd, list):
                 self._in_dtafldd, self._dtafldd = False, "".join(self._dtafldd)
             self._pending_scrfld = a
+            return
+        # <assignl>/<assigni> (assignment list): a value→result table attached to
+        # the enclosing <dtafld>. Like <scrfld> it annotates the field without
+        # closing it — each <assigni value=v result=r> adds a mapping; the finished
+        # list is attached when the <dtafld> is emitted (_attach_assignl). It is the
+        # surface syntax for an ISPF )PROC `&destvar = TRANS(&field v,'r' …)`
+        # assignment (see #55, docs/dtl-action-routing-plan.md Phase 2 PR B).
+        # Finalise an open <dtafldd> capture first so a description isn't swallowed.
+        if tag == "assignl":
+            if self._in_dtafldd and isinstance(self._dtafldd, list):
+                self._in_dtafldd, self._dtafldd = False, "".join(self._dtafldd)
+            self._assignl = {"destvar": a.get("destvar"), "pairs": []}
+            self._pending_assignl = self._assignl
+            return
+        if tag == "assigni":
+            # A VALUE with no RESULT assigns the empty string (ISPF's TRANS default);
+            # a stray <assigni> outside an <assignl> carries nowhere, so drop it.
+            if self._assignl is not None and a.get("value") is not None:
+                self._assignl["pairs"].append((a.get("value"), a.get("result", "")))
             return
         # Implicit end tags: a new block element closes the open content element
         # (DTL omits most end tags). <dtafldd> (a field's prompt/description) and
@@ -1187,10 +1208,16 @@ class _DTLParser(HTMLParser):
         if tag in ("hp", "rp") and self._runs is not None:
             self._end_hp()
             return
-        # </ps>, </chofld>, </scrfld>: inline/annotating children handled on their
-        # start tag. They must not close the enclosing content element (the choice/
-        # field/text they sit inside stays open), so a stray end tag is a no-op.
-        if tag in ("ps", "chofld", "scrfld"):
+        # </assignl>: closes the assignment list (no more <assigni> items) but keeps
+        # it pending for the enclosing <dtafld> to attach; the field it annotates
+        # stays open, so this must return before the implicit container flush below.
+        if tag == "assignl":
+            self._assignl = None
+            return
+        # </ps>, </chofld>, </scrfld>, </assigni>: inline/annotating children handled
+        # on their start tag. They must not close the enclosing content element (the
+        # choice/field/text they sit inside stays open), so a stray end tag is a no-op.
+        if tag in ("ps", "chofld", "scrfld", "assigni"):
             return
         # <varsub> is an empty tag: its text was injected on the start tag, so a
         # (rare) explicit </varsub> is a no-op — return before the implicit flush
@@ -1534,6 +1561,8 @@ class _DTLParser(HTMLParser):
         elif tag == "checki":  # a self-closing checki carries params in attrs
             self.handle_endtag(tag)
         elif tag == "xlati":  # a self-closing xlati (no external text)
+            self.handle_endtag(tag)
+        elif tag == "assignl":  # a self-closing (empty) assignment list; close it
             self.handle_endtag(tag)
         elif tag == "varclass":  # a self-closing varclass has no checks; close it
             self.handle_endtag(tag)
@@ -3148,6 +3177,9 @@ class _DTLParser(HTMLParser):
             vc = self._field_varclass(name)
             if vc and vc.get("xlati_in"):
                 self.screen.translations[name.upper()] = vc["xlati_in"]
+        # Attach a nested <assignl>/<assigni> value→result assignment list, keyed by
+        # this field's name (Screen.assigned_value reads it back on submit). #55.
+        self._attach_assignl(name)
         # USAGE=OUT is a display-only (output) field: show the variable's value as
         # protected text — like a list column — not an editable input box.
         if str(a.get("usage", "")).strip().lower() == "out":
@@ -3231,6 +3263,25 @@ class _DTLParser(HTMLParser):
                                  role="prompt"))
             if below and ctx is not None:
                 ctx["row"] += 1                     # the indicator occupies a line
+
+    def _attach_assignl(self, name):
+        """Attach a pending <assignl> value→result table to the <dtafld> named
+        ``name`` just emitted. Records it on the Screen keyed by the field name so
+        Screen.assigned_value can, on submit, look the field's value up and return
+        the (destvar, result) ISPF's )PROC assignment would set. Keys are
+        uppercased for case-insensitive token matching (the corpus fields are
+        FORMAT=upper). A list with no DESTVAR carries nowhere and is dropped."""
+        al = self._pending_assignl
+        self._pending_assignl = None
+        if al is None or not name or not al.get("destvar"):
+            return
+        mapping = {}
+        for value, result in al["pairs"]:
+            mapping.setdefault(str(value).strip().upper(), result)
+        if mapping:
+            self.screen.assignments[name.upper()] = {
+                "destvar": al["destvar"], "map": mapping,
+            }
 
     @staticmethod
     def _field_help(a):

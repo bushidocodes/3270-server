@@ -639,6 +639,12 @@ class Screen:
     # Field name (upper) → {external → internal} value translations, from a DTL
     # <xlatl>/<xlati>: maps a typed/displayed value back to its internal form.
     translations: Dict[str, dict] = _dc_field(default_factory=dict)
+    # Field name (upper) → {"destvar": str, "map": {value(upper) → result}}, from
+    # a DTL <dtafld><assignl destvar=X><assigni value=v result=r>. On submit, the
+    # field's value is looked up in the map and the matching RESULT assigned to the
+    # destination variable X — ISPF compiles the assignment list into a )PROC
+    # `&X = TRANS(&field v,'r' …)` assignment. Metadata: not rendered. See #55.
+    assignments: Dict[str, dict] = _dc_field(default_factory=dict)
     # Command name (upper) → {"action": str, "trunc": int}, from a DTL <cmdtbl>.
     # Lets the command line recognise named commands (with truncation).
     commands: Dict[str, dict] = _dc_field(default_factory=dict)
@@ -749,6 +755,24 @@ class Screen:
         if not m:
             return typed
         return m.get(typed, m.get(typed.upper(), typed))
+
+    def assigned_value(self, name: str, typed: str):
+        """Apply a field's <assignl>/<assigni> assignment list to a submitted
+        value: look ``typed`` up in the field's value→result map and return
+        ``(destvar, result)`` — the variable ISPF would assign and the value to
+        assign it — or ``None`` when the field has no assignment list or the
+        submitted value matches no <assigni>. Matching is case-insensitive (an
+        ISPF assignment list maps discrete tokens), mirroring how internal_value
+        reads an <xlatl> map. This is the read side of the )PROC assignment the
+        list compiles into; the server can use it to set the destination variable
+        when the field comes back."""
+        spec = self.assignments.get((name or "").upper())
+        if not spec:
+            return None
+        result = spec["map"].get((typed or "").strip().upper())
+        if result is None:
+            return None
+        return spec["destvar"], result
 
     def first_validation_error(self, fields_by_addr: Dict[int, str]):
         """Validate submitted fields against their <varclass> checks.

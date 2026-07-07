@@ -4337,6 +4337,64 @@ def test_xlatl_format_upper_is_order_independent():
     assert s.first_validation_error({addr: "nope"}) == ("BADM", {"VALUE": "nope"})
 
 
+def test_assignl_assigni_maps_a_field_value_to_its_assigned_result():
+    # #55: <dtafld><assignl destvar=X><assigni value=v result=r> is an assignment
+    # list — on submit the field's value is looked up and the matching RESULT is
+    # assigned to the destination variable X (an ISPF )PROC assignment).
+    s = load_dtl(
+        '<panel name=p width=50><area>'
+        '<dtafld datavar="room" entwidth="6" pmtwidth="15">Room type'
+        '  <assignl destvar="rmtype">'
+        '    <assigni value="SINGLE" result="1">'
+        '    <assigni value="DOUBLE" result="2">'
+        '  </assignl>'
+        '  <dtafldd>(Single or Double)'
+        '</area></panel>'
+    )
+    # The list is recorded on the field, keyed by the submitted field's name.
+    assert s.assignments["ROOM"] == {
+        "destvar": "rmtype", "map": {"SINGLE": "1", "DOUBLE": "2"}}
+    # Read-back: a submitted value resolves to (destvar, result); matching is
+    # case-insensitive and tolerates the field's blank padding.
+    assert s.assigned_value("room", "SINGLE") == ("rmtype", "1")
+    assert s.assigned_value("room", "double") == ("rmtype", "2")
+    assert s.assigned_value("room", "  DOUBLE  ") == ("rmtype", "2")
+    # A value matching no <assigni>, and a field with no list, both assign nothing.
+    assert s.assigned_value("room", "KING") is None
+    assert s.assigned_value("other", "SINGLE") is None
+    # The <assignl> does not swallow the trailing <dtafldd> description or the prompt.
+    texts = [it.text for it in s.items if isinstance(it, Text)]
+    assert any("Room type" in t for t in texts)
+    assert any("(Single or Double)" in t for t in texts)
+
+
+def test_assignl_renders_nothing_and_leaves_a_plain_field_intact():
+    # An assignment list is )PROC metadata: it adds no on-screen items, so a field
+    # carrying one lays out exactly like a plain <dtafld> (byte-identical render).
+    with_list = load_dtl(
+        '<panel name=p width=40><area>'
+        '<dtafld datavar="f" entwidth="4">Pick'
+        '<assignl destvar="d"><assigni value="A" result="1"></assignl>'
+        '</area></panel>')
+    without = load_dtl(
+        '<panel name=p width=40><area>'
+        '<dtafld datavar="f" entwidth="4">Pick'
+        '</area></panel>')
+    assert with_list.render() == without.render()
+    # But the mapping is still recorded (a VALUE with no RESULT assigns "").
+    assert with_list.assigned_value("f", "A") == ("d", "1")
+
+
+def test_assignl_from_the_reference_corpus_example():
+    # The verbatim guide example (ex089.dtl): a room-type field whose value is
+    # mapped to a numeric room-type code in rmtype.
+    src = (pathlib.Path(__file__).parent / "tests" / "dtl_examples"
+           / "ex089.dtl").read_text()
+    s = load_dtl(src)
+    assert s.assigned_value("room", "SINGLE") == ("rmtype", "1")
+    assert s.assigned_value("room", "DOUBLE") == ("rmtype", "2")
+
+
 def test_render_drops_items_past_the_panel_depth():
     # Flowed content that overruns the panel depth is dropped, not wrapped onto row
     # 0: the render buffer is depth*width and 3270 addressing wraps, so a row >=
