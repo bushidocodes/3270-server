@@ -2781,7 +2781,7 @@ class _DTLParser(HTMLParser):
         data = self._rows if self._rows else [None]
         clipped = False
         shown = 0
-        for entry in data:
+        for row_index, entry in enumerate(data):
             if row + entry_height + div_rows > self.screen.depth - 1:
                 clipped = True
                 break  # leave room; don't overrun the panel
@@ -2818,6 +2818,10 @@ class _DTLParser(HTMLParser):
                         color=c.get("color"), highlight=c.get("highlight"),
                         role="cell", help=c.get("help"), pad=c.get("pad"),
                         outline=c.get("outline"),
+                        # Record which model row this input cell is on, so the
+                        # server can read the table back per row despite every row's
+                        # cell in this column sharing the DATAVAR (Screen.read_table_rows).
+                        row_index=row_index,
                     ))
                 # TEXT description beside the cell, justified within its area
                 # (TEXTFMT); unformatted when the text overflows the reserved area.

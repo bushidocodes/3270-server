@@ -176,6 +176,38 @@ def test_ws3270_logs_in_and_navigates():
     assert "ZTERM" in out
 
 
+def test_ws3270_table_input_reads_rows_back():
+    """A real emulator types into an input ``<lstfld>`` table and the server reads
+    the modified cells back *per model row* (Screen.read_table_rows, #249): the
+    Dialog Test Table Input panel (PF5) echoes the row it read as
+    "Read 1 row(s): ABC=XYZ", proving the table-input read-back path works
+    end-to-end against a real terminal — not just synthetically."""
+    _require_emulator()
+    port = _serve_one_client()
+    out = _drive(port, [
+        "Wait(20,InputField)",
+        "String(IBMUSER)", "Tab()", "String(SYS1)", "Enter()",
+        "Wait(20,Output)",       # ISPF menu
+        "String(7)", "Enter()",  # option 7 → Dialog Test (variables)
+        "Wait(10,Output)",
+        "PF(5)",                 # → Table Input scratch panel
+        "Wait(10,InputField)",   # cursor lands on the first table cell
+        "String(ABC)",           # first row's Key
+        "Tab()",
+        "String(XYZ)",           # first row's Value
+        "Enter()",               # submit → server reads the table back
+        "Wait(10,Output)",
+        "Ascii()",
+        "PF(3)", "Wait(5,Output)",   # back to Dialog Test
+        "PF(3)", "Wait(5,Output)",   # back to the menu
+        "Quit()",
+    ])
+
+    assert "Dialog Test - Table Input" in out, out[-1500:]
+    # The server read exactly the row the emulator typed, distinguished by row.
+    assert "Read 1 row(s): ABC=XYZ" in out, out[-1500:]
+
+
 def test_ws3270_model_3_browse_uses_the_alternate_screen():
     """A model-3 emulator (32 rows) browsing a member sees more lines per page —
     proving ERASE/WRITE ALTERNATE and the larger geometry work on a real

@@ -1,0 +1,27 @@
+<!DOCTYPE DM SYSTEM>
+<!-- ISPF Dialog Test (option 7) -- Table Input scratch panel.
+     Unlike the read-only Variables display (dlgtest.dtl), this <lstfld> has
+     *input* columns: the user types into the cells and presses Enter, and the
+     server reads the modified rows back per row (Screen.read_table_rows) and
+     echoes them via &TABMSG. It exercises the table-input read-back path (#249)
+     -- the ISPF TBDISPL analogue -- end-to-end. Reached from Dialog Test with
+     PF5; PF3 returns. Auto-flow (ISPDTLC-idiomatic): no row/col; the title
+     centres itself and the <lstfld> flows below the top instruction. -->
+<panel name="tabinput" help="ispfhelp">Dialog Test - Table Input
+  <topinst>Type into the table and press Enter; the rows are read back. PF3 returns.</topinst>
+
+  <lstfld>
+    <lstgrp headline="yes">Scratch Table
+      <lstcol datavar="tkey" usage="in" colwidth="8">Key
+      <lstcol datavar="tval" usage="in" colwidth="20">Value
+    </lstgrp>
+  </lstfld>
+
+  <botinst>&TABMSG</botinst>
+
+  <keyl name="TABKEYS">
+    <keyi key="PF1" cmd="HELP">Help</keyi>
+    <keyi key="PF3" cmd="EXIT">Return</keyi>
+    <keyi key="PF15" cmd="EXIT">Return</keyi>
+  </keyl>
+</panel>

@@ -16,11 +16,12 @@
     </lstgrp>
   </lstfld>
 
-  <botinst>Enter PF3 to return to the Primary Option Menu.</botinst>
+  <botinst>Enter PF5 for Table Input, or PF3 to return to the Primary Option Menu.</botinst>
 
   <keyl name="DLGTKEYS">
     <keyi key="PF1" cmd="HELP">Help</keyi>
     <keyi key="PF3" cmd="EXIT">Return</keyi>
+    <keyi key="PF5" cmd="TABLE">Table</keyi>
     <keyi key="PF15" cmd="EXIT">Return</keyi>
   </keyl>
 </panel>

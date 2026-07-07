@@ -513,6 +513,12 @@ class Field:
     # Field-level help panel (DTL <dtafld help=...>): shown when the cursor is on
     # this field and HELP is pressed. Metadata — not rendered, not part of identity.
     help: Optional[str] = _dc_field(default=None, compare=False)
+    # Table (<lstfld>) input-cell identity: the model-row index this cell belongs
+    # to. Every input cell in a given column shares the column's DATAVAR (``name``),
+    # so the row index is what distinguishes one displayed row from the next when
+    # the modified cells are read back (see Screen.read_table_rows). None on a plain
+    # (non-table) field. Metadata — not rendered, not part of field identity.
+    row_index: Optional[int] = _dc_field(default=None, compare=False)
 
     @property
     def data_addr(self) -> int:
@@ -973,3 +979,33 @@ class Screen:
             if addr in addr_to_name
         }
         return aid, named
+
+    def read_table_rows(self, fields_by_addr: Dict[int, str]) -> List[Dict[str, str]]:
+        """Read a rendered ``<lstfld>`` table's input cells back as row data.
+
+        ``Screen.parse`` collapses a table: every displayed row's cell in a given
+        column shares the column's ``DATAVAR``, so a plain ``{name: text}`` map
+        keeps only the last row's value. This instead uses each input cell's
+        recorded ``row_index`` (see :class:`Field`) to keep the rows distinct,
+        returning ``[{datavar: value}, …]`` — one dict per displayed model row,
+        mirroring the ``rows=`` list :func:`dtl.load_panel` was given.
+
+        A cell the client did not modify is absent from ``fields_by_addr`` (only
+        modified fields are returned in an inbound reply); its originally rendered
+        value (the field's ``default``) is used, so the result reflects the full
+        table as it now stands, not just the edits. Rows with no input cells at all
+        (a fully display-only table) yield an empty list.
+        """
+        cells = [f for f in self.items
+                 if isinstance(f, Field) and f.row_index is not None]
+        if not cells:
+            return []
+        rows: List[Dict[str, str]] = [
+            {} for _ in range(max(f.row_index for f in cells) + 1)
+        ]
+        for f in cells:
+            text = fields_by_addr.get(f.data_addr)
+            value = text if text is not None else f.default
+            if f.name is not None:
+                rows[f.row_index][f.name] = value
+        return rows
