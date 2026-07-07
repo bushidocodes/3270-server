@@ -12,10 +12,13 @@ import socket
 import threading
 import time
 
+from dataclasses import replace
+
 import server
 from server import (
     read_partition_query, read_partition_query_list, parse_query_reply,
-    _iac_escape,
+    set_reply_mode, request_reply_mode, RM_FIELD, RM_EXTENDED_FIELD, RM_CHARACTER,
+    QR_REPLY_MODES, _iac_escape,
 )
 
 IAC, EOR, SE = 0xFF, 0xEF, 0xF0
@@ -88,6 +91,66 @@ def test_iac_escape_doubles_ff():
     # The partition byte 0xFF must be doubled so Telnet carries it as data.
     assert _iac_escape(read_partition_query_list()) == \
         bytes([0xF3, 0x00, 0x06, 0x01, 0xFF, 0xFF, 0x03, 0x80])
+
+
+# ── Set Reply Mode (#112) ────────────────────────────────────────────────────
+
+def test_set_reply_mode_bytes():
+    # F3 (WSF) + [len][len] 09 (Set Reply Mode) 00 (partition) <mode> [attr-types].
+    assert set_reply_mode(RM_FIELD) == bytes([0xF3, 0x00, 0x05, 0x09, 0x00, 0x00])
+    assert set_reply_mode(RM_EXTENDED_FIELD) == bytes([0xF3, 0x00, 0x05, 0x09, 0x00, 0x01])
+    assert set_reply_mode(RM_CHARACTER) == bytes([0xF3, 0x00, 0x05, 0x09, 0x00, 0x02])
+    # A Character-mode attribute-type list lengthens the field; len counts itself.
+    assert set_reply_mode(RM_CHARACTER, [0x41, 0x42]) == \
+        bytes([0xF3, 0x00, 0x07, 0x09, 0x00, 0x02, 0x41, 0x42])
+
+
+def test_request_reply_mode_sends_when_the_terminal_supports_it():
+    """A terminal that advertised Reply Modes is switched to Character mode: the
+    Set Reply Mode WSF is sent (IAC-escaped, IAC-EOR-terminated) and the model
+    records the active mode."""
+    srv, cli = socket.socketpair()
+    result = {}
+
+    def run():
+        model = replace(server.parse_terminal_type("IBM-3278-2-E"),
+                        query_caps=frozenset({QR_REPLY_MODES}))
+        result["model"] = server.request_reply_mode(srv, model, RM_CHARACTER)
+
+    t = threading.Thread(target=run, daemon=True); t.start()
+    try:
+        cli.settimeout(5)
+        got = cli.recv(64)
+        assert got == _iac_escape(set_reply_mode(RM_CHARACTER)) + bytes([IAC, EOR])
+        t.join(timeout=5)
+    finally:
+        srv.close(); cli.close()
+    assert result["model"].reply_mode == RM_CHARACTER
+
+
+def test_request_reply_mode_skips_a_terminal_without_the_capability():
+    """A terminal that did not advertise Reply Modes stays in Field mode and gets
+    no Set Reply Mode WSF (nothing is sent)."""
+    srv, cli = socket.socketpair()
+    result = {}
+
+    def run():
+        model = server.parse_terminal_type("IBM-3278-2-E")   # no query_caps
+        result["model"] = server.request_reply_mode(srv, model, RM_CHARACTER)
+
+    t = threading.Thread(target=run, daemon=True); t.start()
+    t.join(timeout=5)
+    try:
+        cli.settimeout(0.3)
+        sent = b""
+        try:
+            sent = cli.recv(64)
+        except socket.timeout:
+            pass
+        assert sent == b""                       # nothing was sent
+    finally:
+        srv.close(); cli.close()
+    assert result["model"].reply_mode == RM_FIELD
 
 
 # ── the reply parser ─────────────────────────────────────────────────────────

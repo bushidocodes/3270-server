@@ -201,6 +201,10 @@ The WSF stream is **IAC-escaped** before sending: its partition byte is `0xFF`, 
 
 When the user presses Enter or a PF key, the emulator sends an AID byte followed by the cursor address and the contents of all modified fields. The server decodes the 12-bit packed buffer addresses and reads each field's EBCDIC text, then strips whitespace and uppercases credential fields before comparing.
 
+### Reply modes (reading extended attributes back)
+
+By default a terminal returns modified fields in **Field** reply mode — text only. A terminal that advertises **Reply Modes** in its Query Reply (`QR_REPLY_MODES`, `0x88`) can be switched to a richer inbound mode with a **Set Reply Mode** Write Structured Field (`F3 00 05 09 00 <mode>`): **Extended Field** mode (`0x01`) prefixes each modified field with its extended attributes, and **Character** mode (`0x02`) additionally reports per-character attribute changes. The attributes ride inbound as **Set Attribute** (`SA`, `0x28`) orders — the same order used outbound by `Text.rich` — so `request_reply_mode` switches capable terminals to Character mode after the Query and `_parse_3270_reply` consumes each `SA type/value` triple as an attribute (recorded per field) instead of mistaking it for field text. Only basic-TN3270 `-E` terminals answer the Query, so under **TN3270E** the capability is never learned and the session stays in Field mode — where no `SA` orders appear and field text is read exactly as before. (Verified against ws3270: the Set Reply Mode WSF is accepted and a submitted field parses cleanly under Character mode.)
+
 ## Project structure
 
 ```
@@ -244,6 +248,7 @@ Key functions:
 | `parse_terminal_type` | Classifies a TERMINAL-TYPE string (e.g. `IBM-3279-4-E`) into a `TerminalModel` (model 2–5, size, colour) |
 | `query_terminal` | Sends a Read Partition Query List (IAC-escaped) to an extended terminal and folds its Query Reply (real size, colour, advertised QCODEs) into the `TerminalModel` |
 | `parse_query_reply` | Parses an inbound Query Reply record (AID `0x88`) into a capabilities dict |
+| `request_reply_mode` | Sends a Set Reply Mode WSF to a reply-modes-capable terminal so modified fields carry their extended attributes (`SA` orders) inbound |
 | `dtl.load_panel` | Parses a `panels/*.dtl` source into a `Screen` |
 | `screen.Screen.render` | Renders a `Screen` to a 3270 data stream |
 | `screen.Screen.parse` | Maps a client response onto named fields |

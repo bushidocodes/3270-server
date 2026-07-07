@@ -501,6 +501,12 @@ class TerminalModel:
     # QCODEs the terminal advertised in its Query Reply (basic-TN3270 -E only),
     # e.g. {0x81, 0x85, 0x86, 0x87}. Empty when no Query was answered.
     query_caps: frozenset = frozenset()
+    # The active inbound reply mode (#112): RM_FIELD (the default — text only),
+    # RM_EXTENDED_FIELD or RM_CHARACTER (modified fields carry extended attributes
+    # as SA orders). Raised by request_reply_mode when the terminal advertises
+    # QR_REPLY_MODES; stays RM_FIELD otherwise (and always under TN3270E, where the
+    # Query is unanswered).
+    reply_mode: int = 0     # RM_FIELD
     # Decoded from the Character Sets Query Reply (0x85) payload, so the send path
     # can gate features on what the terminal actually supports (see query_terminal).
     graphic_escape: bool = False    # advertises the alternate graphic (GE) set
@@ -591,6 +597,49 @@ def _iac_escape(data: bytes) -> bytes:
     than a command. The Read Partition query's partition byte is 0xFF, so an
     unescaped query is mis-framed by the terminal (it was, silently, until now)."""
     return data.replace(b"\xff", b"\xff\xff")
+
+
+# Set Reply Mode (#112): a Write Structured Field (0x09) that tells the terminal
+# which inbound reply mode to use for Read Modified. The mode governs whether a
+# modified field's extended attributes come back with it.
+SF_SET_REPLY_MODE = 0x09
+RM_FIELD = 0x00             # modified fields, text only (the default)
+RM_EXTENDED_FIELD = 0x01    # each field preceded by its extended attributes
+RM_CHARACTER = 0x02         # as Extended Field, plus per-character SA changes
+SA_ORDER = 0x28             # Set Attribute order — how those attributes ride inbound
+# Set Reply Mode is requested by default (below) for terminals that advertise it.
+_DEFAULT_REPLY_MODE = RM_CHARACTER
+
+
+def set_reply_mode(mode: int, attrs=()) -> bytes:
+    """The Set Reply Mode structured field: ``F3`` (WSF) then ``[len][len] 09 00
+    <mode> [attr-type…]`` — id 0x09, partition 0x00, the reply ``mode``, and (only
+    meaningful for Character mode) the list of attribute-type codes the terminal
+    should report (empty = all it supports). ``len`` counts itself. Logical bytes;
+    the caller IAC-escapes and IAC-EOR-terminates it, exactly like the Query."""
+    body = bytes([SF_SET_REPLY_MODE, 0x00, mode]) + bytes(attrs)
+    length = len(body) + 2
+    return bytes([WSF, (length >> 8) & 0xFF, length & 0xFF]) + body
+
+
+def request_reply_mode(client_socket, model: "TerminalModel",
+                       mode: int = _DEFAULT_REPLY_MODE, attrs=()) -> "TerminalModel":
+    """Ask the terminal to switch to reply ``mode`` so its Read Modified replies
+    carry extended attributes, and record the active mode on the returned model.
+
+    Sent only when the terminal advertised **Reply Modes** in its Query Reply
+    (``QR_REPLY_MODES`` in ``query_caps``) — i.e. basic-TN3270 ``-E`` terminals;
+    a TN3270E session never answers the Query, so it stays in Field mode. A terminal
+    that doesn't support the mode is left in Field mode (``model`` unchanged)."""
+    if QR_REPLY_MODES not in model.query_caps or mode == RM_FIELD:
+        return model
+    wsf = _iac_escape(set_reply_mode(mode, attrs)) + bytes([IAC, EOR])
+    try:
+        print("TX:", binascii.hexlify(wsf))
+        client_socket.sendall(wsf)
+    except OSError:
+        return model
+    return replace(model, reply_mode=mode)
 
 
 def read_partition_query() -> bytes:
@@ -1494,11 +1543,19 @@ class _SessionLogoff(Exception):
 
 
 def _parse_3270_reply(buffer):
-    """Decode one inbound 3270 AID reply into ``(aid, {addr: text}, cursor)``.
+    """Decode one inbound 3270 AID reply into ``(aid, {addr: text}, cursor,
+    {addr: [(attr_type, attr_value), …]})``.
 
     Byte 0 is the AID. A normal (non short-read) reply then carries the 12-bit
     cursor address, followed by SBA-addressed modified fields; short reads
     (CLEAR/PA) and synthetic test payloads start straight into an SBA/SF order.
+
+    Under Extended-Field / Character reply mode (#112) each modified field's data
+    is preceded (Character mode: also interleaved) by its extended attributes as
+    ``SA`` orders (``0x28 <type> <value>``). Those triples are consumed as
+    attributes — recorded per field in the fourth element — rather than being
+    mistaken for field text; in the default Field mode none are present, so the
+    text is read exactly as before.
     """
     aid = buffer[0]
     # Log only the AID (not the raw bytes) to avoid leaking password data in logs
@@ -1511,6 +1568,7 @@ def _parse_3270_reply(buffer):
         cursor = ((buffer[1] & 0x3F) << 6) | (buffer[2] & 0x3F)
 
     results = {}
+    field_attrs = {}
     i = 1
     while i < len(buffer):
         if buffer[i] == SBA_ORD and i + 2 < len(buffer):
@@ -1518,16 +1576,25 @@ def _parse_3270_reply(buffer):
             addr = ((addr_hi & 0x3F) << 6) | (addr_lo & 0x3F)
             i += 3
             field_bytes = bytearray()
+            attrs = []
             while i < len(buffer) and buffer[i] not in (SBA_ORD, SF_ORD):
-                field_bytes.append(buffer[i])
-                i += 1
+                if buffer[i] == SA_ORDER and i + 2 < len(buffer):
+                    # Extended-Field / Character reply mode: the field's (or a
+                    # character's) extended attribute, as an SA type/value pair.
+                    attrs.append((buffer[i + 1], buffer[i + 2]))
+                    i += 3
+                else:
+                    field_bytes.append(buffer[i])
+                    i += 1
             field_text = from_ebcdic(field_bytes).strip()
             if field_text:
                 results[addr] = field_text
+            if attrs:
+                field_attrs[addr] = attrs
         else:
             i += 1
 
-    return aid, results, cursor
+    return aid, results, cursor, field_attrs
 
 
 def read_client_input(client_socket):
@@ -1557,12 +1624,17 @@ def read_client_input(client_socket):
             if ev[0] == "attn":
                 _handle_attn(client_socket)
                 continue
-            return _parse_3270_reply(ev[2])   # ("record", data_type, payload)
+            # The session loops read field text; the reply-mode attributes (4th
+            # element) are available via _parse_3270_reply for a caller that wants
+            # them, but aren't threaded through the 3-tuple here.
+            aid, fields, cursor, _attrs = _parse_3270_reply(ev[2])
+            return aid, fields, cursor
 
     buffer = read_record(client_socket)
     if not buffer:
         return None
-    return _parse_3270_reply(buffer)
+    aid, fields, cursor, _attrs = _parse_3270_reply(buffer)
+    return aid, fields, cursor
 
 
 def _sscp_text(payload: bytes) -> str:
@@ -1993,6 +2065,10 @@ def handle_client(client_socket, addr):
     # terminal is left untouched. Uses the 60s negotiation timeout still in
     # effect, so a silent client can't wedge the session before the 600s below.
     model = query_terminal(client_socket, model)
+    # If the terminal advertised Reply Modes, switch it to a richer inbound reply
+    # mode so a modified field's extended attributes come back with it (#112). A
+    # no-op under TN3270E (the Query is unanswered, so no reply-modes capability).
+    model = request_reply_mode(client_socket, model)
     client_socket.settimeout(600)
     # Record the session's colour capability so every panel renders in colour on
     # a colour terminal (see _send_screen / _session).

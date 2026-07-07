@@ -23,8 +23,10 @@ from server import (
     field_attribute,
     read_client_input,
     write_control_character,
+    SA_ORDER,
     _dialog_vars,
     _is_cursor_select,
+    _parse_3270_reply,
     _run_tso_command,
     _library_members,
     _member_path,
@@ -265,6 +267,45 @@ def test_parse_cursor_select_reply():
     assert aid == AID_CURSOR_SELECT
     assert cursor == 5 * 80 + 4
     assert fields == {addr: ">CHOOSE"}
+
+
+# ── Set Reply Mode: inbound attribute parsing (#112) ─────────────────────────
+
+def test_parse_field_mode_reply_has_no_attributes():
+    """A default Field-mode reply carries no attributes; the 4th element is empty
+    and the field text is read exactly as before."""
+    addr = 5 * 80 + 11
+    payload = (bytes([AID_ENTER]) + encode_pack_addr(0, 0)
+               + _sba_bytes(addr) + "WORLD".encode("cp037"))
+    aid, fields, cursor, attrs = _parse_3270_reply(payload)
+    assert fields == {addr: "WORLD"}
+    assert attrs == {}
+
+
+def test_parse_character_reply_mode_strips_and_records_sa_attributes():
+    """Under Extended-Field / Character reply mode each field's extended attributes
+    ride inbound as SA orders (0x28 type value). They are consumed as attributes —
+    recorded per field — not mistaken for field text."""
+    addr = 5 * 80 + 11
+    # SA(color=0x42, red=0xF2) + SA(highlight=0x41, reverse=0xF2) then the data.
+    payload = (bytes([AID_ENTER]) + encode_pack_addr(0, 0) + _sba_bytes(addr)
+               + bytes([SA_ORDER, 0x42, 0xF2]) + bytes([SA_ORDER, 0x41, 0xF2])
+               + "HELLO".encode("cp037"))
+    aid, fields, cursor, attrs = _parse_3270_reply(payload)
+    assert fields == {addr: "HELLO"}                 # SA orders stripped from text
+    assert attrs == {addr: [(0x42, 0xF2), (0x41, 0xF2)]}
+
+
+def test_parse_character_reply_mode_mid_field_sa():
+    """Character mode may change attributes mid-field; every SA triple is consumed
+    and the surrounding characters still read as clean text."""
+    addr = 3 * 80 + 5
+    payload = (bytes([AID_ENTER]) + encode_pack_addr(0, 0) + _sba_bytes(addr)
+               + "AB".encode("cp037") + bytes([SA_ORDER, 0x42, 0xF4])
+               + "CD".encode("cp037"))
+    aid, fields, cursor, attrs = _parse_3270_reply(payload)
+    assert fields == {addr: "ABCD"}
+    assert attrs == {addr: [(0x42, 0xF4)]}
 
 
 # ── read_client_input: field-parsing ──────────────────────────────────────────
