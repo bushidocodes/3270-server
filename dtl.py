@@ -2870,27 +2870,64 @@ class _DTLParser(HTMLParser):
         out = vc.get("xlati_out") if vc else None
         return out.get(str(value).upper(), value) if out else value
 
+    # IBM date/time <varclass> TYPE classes → the exact character pattern ISPF
+    # produces for that system variable. IDATE/STDDATE are Gregorian (2- vs
+    # 4-digit year); JDATE/JSTD are Julian (year + day-of-year 001-366);
+    # ITIME/STDTIME are HH:MM(:SS). We model the class as a shape check — the
+    # value must match the format — rather than validating the calendar date.
+    _DATETIME_PATTERNS = {
+        "idate":   r"\d{2}/\d{2}/\d{2}",       # YY/MM/DD
+        "stddate": r"\d{4}/\d{2}/\d{2}",       # YYYY/MM/DD
+        "jdate":   r"\d{2}\.\d{3}",            # YY.DDD
+        "jstd":    r"\d{4}\.\d{3}",            # YYYY.DDD
+        "itime":   r"\d{2}:\d{2}",             # HH:MM
+        "stdtime": r"\d{2}:\d{2}:\d{2}",       # HH:MM:SS
+    }
+
     def _emit_varclass(self, a):
         name = a.get("name")
         if not name:
             raise DTLError("<varclass> missing required attribute 'name'")
-        # DTL TYPE is a kind plus (for CHAR/NUMERIC) a size, e.g. "char 8" or
-        # "numeric 5". We derive numeric-vs-not and enforce the size: CHAR caps the
-        # input length, NUMERIC caps the number of digits. Other kinds (DBCS, date
-        # /time, VMASK, …) are recognised but not enforced (#129).
+        # DTL TYPE is a kind plus, for the sized kinds, a maximum length — e.g.
+        # "char 8", "dbcs 4", "numeric 5 2". IBM's full set:
+        #   CHAR/DBCS/MIXED/EBCDIC/ANY/'%var' <size>  — a length cap
+        #   NUMERIC <total-digits> [<fractional-digits>]  — digit / precision cap
+        #   IDATE/STDDATE/JDATE/JSTD/ITIME/STDTIME  — a fixed date/time format
+        #   VMASK <size>  — an edit mask (length modelled, mask editing is not)
+        # We derive numeric-vs-not and translate the TYPE into validation checks
+        # the field validator enforces at submit time (#129). The raw kind is kept
+        # on the class so nothing is silently dropped, even when unenforced.
         parts = str(a.get("type", "char")).strip().lower().split()
         kind = parts[0] if parts else "char"
+        # The size is the first numeric operand after the kind (VMASK/CHAR/… take
+        # it as a length; %varname sizes are symbolic and stay unenforced).
         size = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
         numeric = kind in ("numeric", "num")
         checks = []
-        if size is not None:
-            if numeric:
+        if numeric:
+            # NUMERIC's operands are total-digits then (optionally) fractional-
+            # digits. With a non-zero fractional count the value is a fixed-point
+            # decimal: cap both the total and fractional digit counts. Without one
+            # it is a plain integer — the historical maxdigits cap.
+            frac = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+            if size is not None and frac > 0:
+                checks.append({"type": "decimal", "total": size, "frac": frac})
+            elif size is not None:
                 checks.append({"type": "maxdigits", "max": size})
-            elif kind == "char":
+        elif kind in ("char", "dbcs", "mixed", "ebcdic", "any", "vmask"):
+            # All the character kinds cap the input length. (DBCS counts double-
+            # byte characters; we model the declared character count, which is what
+            # a user types.) VMASK's mask editing isn't modelled — only its length.
+            if size is not None:
                 checks.append({"type": "maxlen", "max": size})
+        elif kind in self._DATETIME_PATTERNS:
+            # A date/time class: the value must match that format exactly.
+            checks.append({"type": "pattern",
+                           "regex": self._DATETIME_PATTERNS[kind]})
         self._cur_varclass = name.upper()
         self._varclasses[self._cur_varclass] = {
             "numeric": numeric,
+            "kind": kind,                 # raw TYPE kind (recorded even if unenforced)
             "checks": checks,
             "msg": a.get("msg"),          # class-level MSG (IBM's attribute name)
         }

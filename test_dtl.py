@@ -3709,6 +3709,63 @@ def test_varclass_numeric_precision_is_enforced():
     assert s.first_validation_error({addr: "12345"})[0] == "M2"
 
 
+def test_varclass_dbcs_mixed_ebcdic_cap_length():
+    # DBCS/MIXED/EBCDIC/ANY are character kinds like CHAR: the size caps the
+    # input length (previously only CHAR's size was enforced — #129).
+    for kind in ("dbcs", "mixed", "ebcdic", "any"):
+        s, addr = _varclass_panel(f'<varclass name="C" type="{kind} 4" msg="LN">')
+        assert s.validations["F"]["checks"] == [{"type": "maxlen", "max": 4}]
+        assert s.first_validation_error({addr: "ABCD"}) is None
+        msgid, subs = s.first_validation_error({addr: "ABCDE"})
+        assert msgid == "LN" and subs == {"VALUE": "ABCDE", "MAX": 4}
+
+
+def test_varclass_numeric_fractional_precision_is_enforced():
+    # TYPE="numeric total frac" is a fixed-point decimal: cap both the total and
+    # the fractional digit counts, and require the value to be numeric (#129).
+    s, addr = _varclass_panel('<varclass name="C" type="numeric 5 2" msg="ND">')
+    assert s.validations["F"]["checks"] == [{"type": "decimal", "total": 5, "frac": 2}]
+    assert s.first_validation_error({addr: "123.45"}) is None      # 5 total, 2 frac
+    assert s.first_validation_error({addr: "12"}) is None          # integer allowed
+    assert s.first_validation_error({addr: "1.234"})[0] == "ND"    # too many fractional
+    assert s.first_validation_error({addr: "1234.56"})[0] == "ND"  # too many total
+    assert s.first_validation_error({addr: "abc"})[0] == "ND"      # not a number
+
+
+def test_varclass_datetime_classes_enforce_a_format():
+    # The IDATE/STDDATE/JDATE/JSTD/ITIME/STDTIME classes each require the value to
+    # match that ISPF date/time format exactly (#129).
+    cases = {
+        "idate":   ("06/07/26",   "6/7/26"),
+        "stddate": ("2026/07/06", "26/07/06"),
+        "jdate":   ("26.187",     "26/187"),
+        "jstd":    ("2026.187",   "26.187"),
+        "itime":   ("12:30",      "12:30:00"),
+        "stdtime": ("12:30:00",   "12:30"),
+    }
+    for kind, (good, bad) in cases.items():
+        s, addr = _varclass_panel(f'<varclass name="C" type="{kind}" msg="DT">')
+        assert s.validations["F"]["checks"][0]["type"] == "pattern"
+        assert s.first_validation_error({addr: good}) is None, kind
+        assert s.first_validation_error({addr: bad}) == ("DT", {"VALUE": bad}), kind
+
+
+def test_varclass_vmask_caps_length():
+    # VMASK's edit mask isn't modelled, but its length is enforced so the TYPE
+    # isn't silently dropped (#129).
+    s, addr = _varclass_panel('<varclass name="C" type="vmask 9" msg="VM">')
+    assert s.validations["F"]["checks"] == [{"type": "maxlen", "max": 9}]
+    assert s.first_validation_error({addr: "123456789"}) is None
+    assert s.first_validation_error({addr: "1234567890"})[0] == "VM"
+
+
+def test_varclass_symbolic_size_type_does_not_crash():
+    # A '%varname size' TYPE has a symbolic (non-numeric) size: it loads without
+    # an enforceable length cap rather than crashing (#129).
+    s, addr = _varclass_panel('<varclass name="C" type="%len 8" msg="PC">')
+    assert s.first_validation_error({addr: "anything"}) is None
+
+
 def test_checkl_reads_ibm_msg_attribute():
     # IBM's attribute is MSG (we used to read a non-IBM "checkmsg").
     s, addr = _varclass_panel(
