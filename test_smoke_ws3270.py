@@ -353,6 +353,40 @@ def test_ws3270_basic_mode_answers_read_partition_query():
     assert "ISPF Primary Option Menu" in out, out[-1500:]
 
 
+def test_ws3270_accepts_erase_reset_structured_field():
+    """A real emulator accepts an Erase/Reset Write Structured Field (#102).
+
+    We prepend an Erase/Reset SF (id 0x03, ALTERNATE flag) to a screen and serve
+    both to a basic-TN3270 model-3 emulator. ws3270 parses the SF — its trace
+    shows ``WriteStructuredField EraseReset Alternate`` — resets to an implicit
+    partition of the alternate size, and then renders the screen we sent. As with
+    Set Reply Mode (#112), the headless acceptance (parsed, no
+    ``WriteStructuredField error``, session not dropped) is the verification: the
+    partition-size effect isn't separately observable in a headless Ascii() dump.
+    """
+    _require_emulator()
+    from screen import Screen, Text
+
+    scr = Screen().add(Text(1, 1, "ERASE RESET OK"))
+    # Frame the Erase/Reset SF exactly like the production query path: IAC-escape
+    # (a no-op here — no body byte is 0xFF) and IAC-EOR-terminate, then the screen.
+    record = (server._iac_escape(server.erase_reset(alternate=True))
+              + bytes([0xFF, 0xEF]) + scr.render())
+    port = _serve_one_screen(record)
+    out, trace = _drive_traced(port, [
+        "Wait(3,Output)",
+        "Ascii()",
+        "Wait(1,Seconds)",
+        "Quit()",
+    ], model="3", basic=True)
+
+    # Deterministic: the emulator parsed and accepted our Erase/Reset SF...
+    assert "EraseReset" in trace, trace[-2000:]
+    assert "WriteStructuredField error" not in trace, trace[-2000:]
+    # ...and still rendered the screen that followed it (session not derailed).
+    assert "ERASE RESET OK" in out, out[-1500:]
+
+
 def _serve_one_screen(record_bytes):
     """Serve a single hand-built 3270 record to one basic-TN3270 client, then
     half-close: the emulator renders the buffered screen and sees EOF. (Holding

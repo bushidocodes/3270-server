@@ -657,6 +657,34 @@ def read_partition_query_list() -> bytes:
     return bytes([WSF, 0x00, 0x06, SF_READ_PARTITION, 0xFF, SF_RP_QLIST, SF_RPQ_ALL])
 
 
+# Erase/Reset (#102): the simplest partition-control structured field. It tears
+# down any explicit partition state the host had set up and re-establishes a
+# single **implicit** partition covering the whole screen, then erases it — the
+# clean-slate a host issues before switching between the default and the
+# alternate screen size. The one parameter byte selects which size that implicit
+# partition uses, so this is the outbound SF a "split view then back to one
+# full-screen partition" use case would send to collapse back to one viewport.
+# (Field-format Create/Set/Destroy Partition SFs are a far larger surface; this
+# one field is self-contained, and — unlike them — every x3270-family terminal
+# implements it, which is what let us verify it end-to-end against ws3270.)
+SF_ERASE_RESET = 0x03       # structured-field id: Erase/Reset
+ER_DEFAULT = 0x00           # ...reset to an implicit partition of the DEFAULT size
+ER_ALTERNATE = 0x80         # ...reset to an implicit partition of the ALTERNATE size
+
+
+def erase_reset(alternate: bool = False) -> bytes:
+    """The Erase/Reset structured field: ``F3`` (WSF) then ``00 04 03 <flag>`` —
+    length 0x0004 (which counts the two length bytes, the id, and the flag), id
+    0x03 (Erase/Reset), and a single flag byte selecting the implicit partition's
+    screen size: :data:`ER_DEFAULT` (0x00) or :data:`ER_ALTERNATE` (0x80). The
+    flag is the *whole* body — GA23-0059 defines only its two high-order bits and
+    reserves the rest — so no other parameters follow. Logical bytes; the caller
+    IAC-escapes and IAC-EOR-terminates it, exactly like the Query and Set Reply
+    Mode. Kept opt-in: nothing in the bundled session sends this (see #102)."""
+    flag = ER_ALTERNATE if alternate else ER_DEFAULT
+    return bytes([WSF, 0x00, 0x04, SF_ERASE_RESET, flag])
+
+
 def parse_query_reply(record: bytes) -> dict:
     """Parse an inbound Query Reply record into a capabilities dict.
 
