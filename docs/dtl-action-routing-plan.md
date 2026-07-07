@@ -228,7 +228,14 @@ not-yet-converted bundled panel.
 ## Status
 
 - [ ] PR A — `Screen.vars` pool + `)INIT` assignment evaluator (no `)PROC` dep).
-- [ ] PR B — `<assignl>`/`<assigni>` assignment (closes the `#55` assign family).
+- [x] **PR B** — `<assignl>`/`<assigni>` value→result assignment lists on `<dtafld>` →
+  `Screen.assignments` + `Screen.assigned_value(field, typed)` (the read side of the )PROC
+  `&destvar = TRANS(&field v,'r' …)` assignment). Landed ahead of PR A's general `)INIT`
+  evaluator because the assignment tags are self-contained metadata on the field (they render
+  nothing, like `<source>`/`<xlatl>`), so they need no variable pool to be parsed and applied —
+  they were the last `❌ #55` display-relevant gap. Verified against the verbatim guide corpus
+  example `ex089.dtl` (SINGLE→1, DOUBLE→2 into `rmtype`). A future PR can fold the resulting map
+  into the general `TRANS` evaluator (PR C) once the variable pool exists.
 - [ ] PR C — generalise `TRANS`/`TRUNC`; fold Phase 1 ZSEL into `_eval_proc` (equivalence-gated).
 - [ ] PR D — `VER` validation + `<checkl>`/`<checki>` (gated by `#249`).
 - [ ] PR E — `IF/ELSE` + `.CURSOR`/`.MSG`/`.ALARM` control-variable writes.
