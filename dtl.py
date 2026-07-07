@@ -142,7 +142,8 @@ uppercase). An undefined reference is left untouched rather than blanked.
 import re
 from html.parser import HTMLParser
 
-from screen import Screen, Text, Field, DisplayIntensity, Color, Highlight, Outline
+from screen import (Screen, Text, Field, DisplayIntensity, Color, Highlight,
+                    Outline, GraphicText, Line)
 
 # An ISPF dialog-variable reference in panel source: ``&&`` (escaped literal
 # ampersand) or ``&NAME`` with an optional terminating ``.``. A name is 1–8
@@ -391,6 +392,7 @@ class _DTLParser(HTMLParser):
         self._title_rule = None   # the action-bar separator rule (retracted on collision)
         self._titline = True      # <panel titline=no> suppresses the on-screen title line
         self._panel_cursor = None # <panel cursor=field-name> places the cursor at that field
+        self._grpbox_pending = None  # a <region GRPBOX> whose title text is being captured
         self._lists = []          # stack of open <ul>/<ol> ({"type", "n"})
         self._note_hang = None    # hanging-indent col of an open <nt>, so its
                                   # nested blocks flow under the note body (#219)
@@ -525,6 +527,10 @@ class _DTLParser(HTMLParser):
         # below the action bar).
         if self._panel_title is not None:
             self._finalize_panel_title(tag)
+        # A group box's title (the text between <region GRPBOX> and its first child)
+        # ends at that first child tag — bank it and stop capturing (#125).
+        if self._grpbox_pending is not None:
+            self._finalize_grpbox_title()
         if tag in ("comment", "copyr", "compopt", "source"):
             # Non-rendering blocks: <comment>/<copyr>/<compopt> are dropped;
             # <source> ()INIT/)PROC logic renders nothing but its raw text is kept
@@ -686,6 +692,21 @@ class _DTLParser(HTMLParser):
             # replacement for the non-standard field-level cursor= (resolved in
             # close(), once every field has been emitted).
             self._panel_cursor = a.get("cursor")
+            # Window/key-list metadata (#125). KEYLIST names the panel's key-list;
+            # WINDOW=YES marks it a pop-up; WINTITLE is the pop-up's title; CURSOR is
+            # the start field. None of these change the rendered field stream — they
+            # are recorded on the Screen so the server/dialog can act on them (frame a
+            # window, activate a key-list, …). Reached both directly and via
+            # <pandef>/<helpdef> inheritance (the setdefault above), so honouring them
+            # here covers both paths.
+            if "keylist" in a:
+                self.screen.keylist_ref = a.get("keylist")
+            if "window" in a:
+                self.screen.window = _bool_attr(a, "window", default=False)
+            if "wintitle" in a:
+                self.screen.window_title = a.get("wintitle")
+            if a.get("cursor"):
+                self.screen.cursor_field = a.get("cursor")
             if self._override_cols is not None:
                 self.screen.width = self._override_cols
             elif "width" in a:
@@ -990,19 +1011,20 @@ class _DTLParser(HTMLParser):
                 # A horizontal rule spanning the rest of the flow box's width.
                 row = ctx["row"]
                 col = ctx["col"] if ctx else 1
-                if ctx is not None:
-                    ctx["row"] = row + 1
+                ctx["row"] = row + 1
                 # TYPE=NONE/BLANK is a blank spacer (consumes the row but draws no
-                # rule); SOLID (the default) / DASH draw a horizontal rule.
-                if str(a.get("type", "solid")).strip().lower() not in ("none", "blank"):
-                    if ctx is not None and ctx.get("width"):
+                # rule). Any other TYPE draws a rule; DASH/SOLID/TEXT differ in look,
+                # and TEXT lays out the divider's own text — which follows the start
+                # tag — so the rule is *deferred*: we fix its position now and emit it
+                # at the flush (like a captured content element, see _emit_divider).
+                if str(a.get("type", "dash")).strip().lower() not in ("none", "blank"):
+                    if ctx.get("width"):
                         width = ctx["width"]          # span the box's fixed width
                     else:
                         width = max(1, self.screen.width - col - 1)
-                    # A CUA rule (role=rule → blue on a colour terminal, mono
-                    # unchanged). The standard replacement for the non-standard
-                    # <info fill=->.
-                    self.screen.add(Text(row, col, "-" * width, role="rule"))
+                    a["_row"], a["_col"], a["_width"] = row, col, width
+                    self._tag, self._attrs, self._chars = "divider", a, []
+                    self._in_dtafldd, self._dtafldd = False, None
         elif tag == "ga":
             self._emit_ga(a)
         elif tag in ("area", "region"):
@@ -1015,10 +1037,18 @@ class _DTLParser(HTMLParser):
             # INDENT shifts the box's content that many columns to the right of its
             # origin (a <region indent=n>), nesting cumulatively.
             base_col = parent["col"] if parent else 1
+            indent = base_col + (int(a["indent"]) if "indent" in a else 0)
             row = parent["row"] if parent else 0
-            self._areas.append({
+            # <region GRPBOX=YES> frames its content in a group box: a GE box border
+            # (like the pull-down / other borders) with an optional title on the top
+            # edge (#125). The border is drawn at the box's close (once its content
+            # extent is known); here we just reserve the top-border row and inset the
+            # content one column past the left border. Only regions (not areas) can be
+            # group boxes, and only when GRPBOX is on — a plain box is unchanged.
+            grpbox = tag == "region" and _bool_attr(a, "grpbox", default=False)
+            box = {
                 "row": row, "row0": row, "maxbottom": row,
-                "col": base_col + (int(a["indent"]) if "indent" in a else 0),
+                "col": indent,
                 "fldgap": parent["fldgap"] if parent else 1,
                 "dir": str(a.get("dir", "vert")).strip().lower(),
                 "start_idx": len(self.screen.items),
@@ -1035,7 +1065,18 @@ class _DTLParser(HTMLParser):
                 # starts fresh.
                 "had_content": bool(parent and not explicit
                                     and parent.get("had_content")),
-            })
+            }
+            if grpbox:
+                box["grpbox"] = True
+                box["gb_row0"] = row                     # the top-border row
+                box["gb_col"] = indent                   # border's left column
+                box["gb_width"] = self._opt_int(a.get("grpwidth"))  # GRPWIDTH, or None
+                box["gb_title_chars"] = []
+                box["gb_title"] = ""
+                box["row"] = box["row0"] = box["maxbottom"] = row + 1  # content below top
+                box["col"] = indent + 2                  # inset past │ + a pad column
+                self._grpbox_pending = box               # capture the group-box title
+            self._areas.append(box)
         elif tag == "fig":
             # A figure: a flow sub-box, optionally framed by a horizontal rule
             # (FRAME=RULE, the default) above and below its content, with a
@@ -1106,6 +1147,9 @@ class _DTLParser(HTMLParser):
             self._keyi["chars"].append(data)   # a <keyi>'s FKA-text
         elif self._da is not None:
             self._da["body"].append(data)
+        elif self._grpbox_pending is not None:
+            # Text between <region GRPBOX> and its first child is the group-box title.
+            self._grpbox_pending["gb_title_chars"].append(data)
         elif self._tag is not None:
             self._chars.append(data)
         elif self._cmd_chars is not None:
@@ -1175,6 +1219,7 @@ class _DTLParser(HTMLParser):
                 self._da = None
             while self._areas and self._areas[-1].get("fig"):
                 self._close_fig()         # a <fig> whose </fig> was omitted
+            self._close_open_grpboxes()   # frame any <region GRPBOX> left open (#125)
             self._retract_title_if_collision()
             self._areas.clear()  # drop the panel's implicit flow box
             self._info_indent = 0
@@ -1280,6 +1325,12 @@ class _DTLParser(HTMLParser):
             self._info_indent = 0    # an <info> can't outlive its enclosing box
             if self._areas:
                 ctx = self._areas.pop()
+                if ctx.get("grpbox"):
+                    # A title-only group box may still be capturing; bank it first,
+                    # then frame the content and drop the flow below the bottom edge.
+                    if self._grpbox_pending is ctx:
+                        self._finalize_grpbox_title()
+                    self._draw_grpbox(ctx)
                 parent = ctx.get("parent")
                 if parent is not None and not ctx.get("explicit"):
                     # A horizontal child spans down to its tallest column; a
@@ -1322,8 +1373,20 @@ class _DTLParser(HTMLParser):
             self._emit_current()
         while self._areas and self._areas[-1].get("fig"):
             self._close_fig()             # a <fig> whose </fig> was omitted
+        self._close_open_grpboxes()       # frame any <region GRPBOX> left open (#125)
         self._retract_title_if_collision()
         self._place_panel_cursor()
+
+    def _close_open_grpboxes(self):
+        """Draw the border for any <region GRPBOX> still open at panel/EOF close
+        (DTL routinely omits end tags). Innermost first; the flow is being torn
+        down, so only the framing matters, not resuming a parent."""
+        for box in reversed(self._areas):
+            if box.get("grpbox") and not box.get("gb_drawn"):
+                if self._grpbox_pending is box:
+                    self._finalize_grpbox_title()
+                box["gb_drawn"] = True
+                self._draw_grpbox(box)
 
     def _place_panel_cursor(self):
         """Honour <panel cursor=field-name>: put the cursor in the named field.
@@ -1376,6 +1439,8 @@ class _DTLParser(HTMLParser):
             self._emit_defhead(tag, a, content)
         elif tag in ("dldiv", "pldiv"):
             self._emit_listdiv(a, content)
+        elif tag == "divider":
+            self._emit_divider(a, content)
         elif tag == "textseg":
             if self._textline is not None:
                 seg = " ".join(content.split())
@@ -2214,6 +2279,118 @@ class _DTLParser(HTMLParser):
             self.screen.add(Text(row, start + off, text, role="rule"))
         else:                                            # solid / dash → dashed rule
             self.screen.add(Text(row, start, "-" * span, role="rule"))
+
+    def _emit_divider(self, a, content):
+        """Emit an <area>/<region> <divider>, honouring TYPE and its divider-text.
+
+        The position was fixed when the tag opened (``a["_row"]/_col/_width``); the
+        row was already consumed. TYPE selects the look (#125):
+
+        * DASH — a hyphen rule. This is also the no-TYPE default, so a plain
+          ``<divider>`` (every bundled panel) renders byte-for-byte as before.
+        * SOLID — a solid GE line (── like the group-box / other borders); the
+          terminal draws it from the graphic set, so it reads as an unbroken rule.
+        * TEXT — the divider's own text, positioned within the span by FORMAT
+          (START/CENTER/END). Empty text falls back to nothing (just the spacer row).
+
+        GAP=YES leaves a one-character gap at each end of the rule/text.
+        """
+        row, col, span = a["_row"], a["_col"], a["_width"]
+        typ = str(a.get("type", "dash")).strip().lower()
+        start = col
+        if _bool_attr(a, "gap"):                         # 1-char gap at each end
+            start, span = col + 1, max(1, span - 2)
+        if typ == "text":
+            text = " ".join(content.split())[:span]
+            if not text:
+                return
+            fmt = str(a.get("format", "start")).strip().lower()
+            if fmt == "end":
+                off = span - len(text)
+            elif fmt == "center":
+                off = (span - len(text)) // 2
+            else:
+                off = 0
+            self.screen.add(Text(row, start + max(0, off), text, role="rule"))
+        elif typ == "solid":
+            # A GE solid line — an unbroken rule, distinct from DASH's hyphens.
+            self.screen.add(GraphicText.rule(row, start, span, role="rule"))
+        else:                                            # dash (and the default)
+            self.screen.add(Text(row, start, "-" * span, role="rule"))
+
+    def _finalize_grpbox_title(self):
+        """Bank the group-box title captured since <region GRPBOX> and stop
+        capturing (called at the first child tag, or at the region's close)."""
+        box = self._grpbox_pending
+        self._grpbox_pending = None
+        if box is not None:
+            box["gb_title"] = " ".join("".join(box["gb_title_chars"]).split())
+
+    def _draw_grpbox(self, ctx):
+        """Frame a closing <region GRPBOX>'s content in a GE box border (#125).
+
+        The content was flowed inset one column past the (reserved) left border and
+        one row below the (reserved) top border; now that its extent is known we draw
+        the four edges with :class:`GraphicText` (the same graphic set the pull-down
+        and other borders use). GRPWIDTH fixes the width; otherwise the box is sized
+        to the content. The title, if any, sits on the top edge (``┌── title ──┐``).
+        ``ctx`` is advanced to the row just below the bottom edge so the parent flow
+        resumes there.
+        """
+        gb_col = ctx["gb_col"]
+        top = ctx["gb_row0"]
+        title = " ".join((ctx.get("gb_title") or "").split())
+        # Content extent: rows gb_row0+1 .. bottom-1, last text column = right.
+        bottom, right = self._box_extent(ctx["start_idx"])
+        if bottom is None:                     # empty group box — a 1-row-tall frame
+            bottom = top + 2
+            right = ctx["col"]
+        # Width: GRPWIDTH if given, else sized to the content (+ a right pad column;
+        # the box spans visual columns gb_col+1 .. gb_col+width and content data ends
+        # at `right`, so right - gb_col + 2 leaves one pad column before ┐). A title
+        # needs len+7 columns (┌─ + a space + title + a space + ─┐ and the two
+        # field-attribute gaps); without GRPWIDTH the box grows to fit it, else the
+        # title is truncated to what GRPWIDTH allows.
+        if ctx.get("gb_width"):
+            width = ctx["gb_width"]
+            title = title[:max(0, width - 7)]
+        else:
+            width = max(right - gb_col + 2, (len(title) + 7) if title else 0, 4)
+        width = max(width, 4)                  # room for ┌┐ + a cell
+        for r in range(top + 1, bottom):       # left / right vertical edges
+            self.screen.add(GraphicText(r, gb_col, bytes([Line.VERTICAL.value]),
+                                        role="rule"))
+            self.screen.add(GraphicText(r, gb_col + width - 1,
+                                        bytes([Line.VERTICAL.value]), role="rule"))
+        for it in self._grpbox_top(top, gb_col, width, title):
+            self.screen.add(it)                # top edge (with the title)
+        self.screen.add(GraphicText.box_bottom(bottom, gb_col, width, role="rule"))
+        ctx["row"] = ctx["maxbottom"] = bottom + 1   # parent resumes below the box
+
+    def _grpbox_top(self, row, col, width, title):
+        """The top edge of a group box ``width`` cells wide (visual columns
+        ``col+1 .. col+width``). Without a title it is a plain ``┌────┐``. With one
+        the border is split into three adjacent fields — ``┌─`` + the title + ``──┐``
+        — so the heading sits in a clearing on the top edge (the field-attribute byte
+        between the fields reads as a blank, blending with the title's padding). The
+        caller guarantees ``title`` fits (``len ≤ width - 7``)."""
+        if not title or width < 8:             # no room to inset a title → plain edge
+            return [GraphicText.box_top(row, col, width, role="rule")]
+        label = " " + title + " "
+        lead = 2                               # ┌─ before the title
+        items = [GraphicText(row, col,
+                             bytes([Line.TOP_LEFT.value])
+                             + bytes([Line.HORIZONTAL.value]) * (lead - 1),
+                             role="rule")]
+        title_col = col + lead + 1             # attr byte follows ┌─'s last glyph
+        items.append(Text(row, title_col, label, role="rule"))
+        seg_c = title_col + 1 + len(label)     # attr byte follows the title's last char
+        fill = (col + width) - (seg_c + 1)     # horizontals before the ┐ at col+width
+        items.append(GraphicText(row, seg_c,
+                                 bytes([Line.HORIZONTAL.value]) * max(0, fill)
+                                 + bytes([Line.TOP_RIGHT.value]),
+                                 role="rule"))
+        return items
 
     def _emit_lines(self, a, content):
         """Emit a <lines> block: preformatted text whose authored line breaks

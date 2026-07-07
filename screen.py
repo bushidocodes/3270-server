@@ -577,14 +577,30 @@ class Screen:
     # Function-key → command map (e.g. {"PF3": "EXIT"}), from a DTL <keyl>.
     # Pure metadata: it is not rendered, so it never affects the data stream.
     keylist: Dict[str, str] = _dc_field(default_factory=dict)
-    # The keylist's NAME / APPLID (DTL <keyl name=.. applid=..>): the name a panel
-    # references via <panel keylist=name>, and the application it is scoped to.
-    # Metadata (not rendered); None when the panel declares no keylist.
+    # The keylist's NAME / APPLID (DTL <keyl name=.. applid=..>): the inline
+    # <keyl>'s own name, and the application it is scoped to. Metadata (not
+    # rendered); None when the panel declares no inline keylist.
     keylist_name: Optional[str] = None
     keylist_applid: Optional[str] = None
     # Function-key → its function-key-area label text (DTL <keyi>'s FKA-text, e.g.
     # {"PF3": "Exit"}); a key with FKA=NO or no text is absent. Metadata.
     keylist_fka: Dict[str, str] = _dc_field(default_factory=dict)
+    # The name of the key-list this panel activates by REFERENCE (DTL <panel/help
+    # KEYLIST=...>), or None. Distinct from `keylist_name` above (an inline <keyl>'s
+    # own NAME) and `keylist` (the actual bindings): this is just the referenced list
+    # name a dialog would ISPEXEC KEYLIST on. Pure metadata: not rendered.
+    keylist_ref: Optional[str] = None
+    # Pop-up window panel (DTL <panel WINDOW=YES>): the panel is meant to be shown
+    # in an ISPF ADDPOP/REMPOP window rather than full-screen. Metadata only — the
+    # server may frame it, but it does not change the rendered field stream here.
+    window: bool = False
+    # The pop-up window's title text (DTL <panel/help WINTITLE=...>), or None.
+    # Metadata only: not rendered.
+    window_title: Optional[str] = None
+    # The field the cursor should start in (DTL <panel CURSOR=field-name>), or None.
+    # Recorded as metadata; the actual IC placement is done on the matching Field
+    # (see DTLParser._place_panel_cursor).
+    cursor_field: Optional[str] = None
     # The panel's command-area input field (the ISPF "Option/Command ===>" line),
     # from a DTL <cmdarea>. None if the panel has no command area.
     command_field: Optional["Field"] = None
