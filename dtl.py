@@ -261,6 +261,31 @@ _HIGHLIGHTS = {
     "rvideo": Highlight.REVERSE,
 }
 
+# A text tag's TYPE= (on <hp>/<note>/<notel>/<nt>) names a CUA *attribute type*,
+# each of which ISPF renders in a fixed colour. These are the authoritative
+# defaults from the z/OS ISPF Dialog Developer's Guide, Table 11 "CUA TYPE default
+# keyword values" (COLOR column) — the same colours ISPF paints CUA-typed text.
+# TYPE=TEXT is deliberately absent: it is the non-CUA escape hatch that instead
+# enables the explicit COLOR/INTENS/HILITE attributes (which we already honour).
+#
+# COLOUR ONLY. Table 11 also fixes each type's HIGH/LOW intensity (ET/CH/CT/WT are
+# HIGH, the rest LOW), but we map *only* the colour: colour rides an SA order that
+# a mono terminal ignores, so panels stay byte-identical; an intensity lives in the
+# basic field-attribute byte, so honouring it would change mono output. (#218)
+_CUA_TYPE_COLORS = {
+    "et":   Color.TURQUOISE,  # emphasized text
+    "ch":   Color.BLUE,       # column heading
+    "ct":   Color.YELLOW,     # caution text
+    "fp":   Color.GREEN,      # field prompt
+    "lef":  Color.TURQUOISE,  # leading (entry) field
+    "li":   Color.WHITE,      # list item
+    "nt":   Color.GREEN,      # normal text
+    "pt":   Color.BLUE,       # panel title
+    "sac":  Color.WHITE,      # select-available choice
+    "wasl": Color.BLUE,       # work-area separator line
+    "wt":   Color.RED,        # warning text
+}
+
 # DTL OUTLINE=NONE | L | R | O | U | BOX → the 3270 field-outlining lines.
 _OUTLINES = {
     "none": Outline.NONE, "l": Outline.LEFT, "r": Outline.RIGHT,
@@ -422,6 +447,16 @@ class _DTLParser(HTMLParser):
         """The Color for a tag's COLOR= attribute (honouring %var), or None."""
         return _resolve_color(a.get("color"), self._subs)
 
+    def _text_colour(self, a):
+        """The heading/phrase colour for a CUA text tag (<hp>/<note>/<notel>/<nt>):
+        its explicit COLOR= if any, else the standard CUA colour named by TYPE=
+        (ET/CH/…; see _CUA_TYPE_COLORS). TYPE=TEXT and unknown TYPEs contribute
+        nothing (COLOR alone, or None). Applied only where a tag legitimately reads
+        TYPE as a CUA attribute type — not folded into _color, since other tags use
+        TYPE for unrelated meanings (e.g. <divider type=dash>). #218"""
+        return self._color(a) or _CUA_TYPE_COLORS.get(
+            str(a.get("type", "")).strip().lower())
+
     def _hilite(self, a):
         """The Highlight for a tag's HILITE= attribute, or None."""
         return _HIGHLIGHTS.get(str(a.get("hilite", "")).strip().lower())
@@ -490,7 +525,7 @@ class _DTLParser(HTMLParser):
             self._runs = []
         self._runs.append(("".join(self._chars), None, None, None))
         self._chars = []
-        self._hp = (self._color(a), self._hp_hilite(a), self._hp_intensity(a))
+        self._hp = (self._text_colour(a), self._hp_hilite(a), self._hp_intensity(a))
 
     def _end_hp(self):
         """Close the open <hp>: bank its text as an emphasised run."""
@@ -650,7 +685,7 @@ class _DTLParser(HTMLParser):
                 heading = (a.get("text") or "Notes:").strip()
                 indent = self._opt_int(a.get("indent"), 0)
                 self.screen.add(Text(ctx["row"], ctx["col"] + indent, heading,
-                                     _intensity(a, "intens"), color=self._color(a),
+                                     _intensity(a, "intens"), color=self._text_colour(a),
                                      highlight=self._hilite(a), role="text"))
                 ctx["row"] += 2               # heading + blank line before the items
             # SPACE sets the item-text indentation: YES → 3 columns, else 4.
@@ -2952,7 +2987,7 @@ class _DTLParser(HTMLParser):
         col += self._opt_int(a.get("indent"), 0)
         heading = (a.get("text") or "Note:").strip()
         h_int = _intensity(a, "intens")
-        h_col, h_hil = self._color(a), self._hilite(a)
+        h_col, h_hil = self._text_colour(a), self._hilite(a)
         head = heading + " "
         if tag == "nt":
             # Heading on the first line; body wrapped and hung under the text.
