@@ -111,3 +111,50 @@ def test_render_starts_with_erase_write_and_wcc():
     assert data[0] == 0xF5  # ERASE_WRITE
     assert data[1] == 0x43  # WCC: reset + keyboard-restore + reset-MDT
     assert data[-2:] == bytes([server.IAC, server.EOR])
+
+
+# ── Cursor Select / selector-pen detectable fields (#104) ────────────────────
+
+def _render(item):
+    """Render one screen item to bytes (mono)."""
+    buf = bytearray()
+    item.render(buf)
+    return bytes(buf)
+
+
+def test_field_designator_sets_detectable_attribute_and_leading_char():
+    # A Field with a designator is detectable (attribute bit 0x04) and renders the
+    # designator as its first data byte, ahead of the value.
+    detect = _render(Field(row=5, col=10, length=7, designator="?", default="AB"))
+    plain = _render(Field(row=5, col=10, length=7, default="AB"))
+    # attribute byte follows the SBA (3 bytes) + SF order (1 byte) → index 4
+    assert detect[4] == plain[4] | 0x04            # detectable bit set
+    assert detect[5] == server.to_ebcdic("?")[0]   # designator is the first data byte
+    assert plain[5] == server.to_ebcdic("A")[0]     # a plain field starts with its value
+
+
+def test_text_detectable_flag_sets_the_attribute():
+    detect = _render(Text(5, 10, "PICK", detectable=True))
+    plain = _render(Text(5, 10, "PICK"))
+    assert detect[4] == plain[4] | 0x04
+    # A plain Text (no designator) is otherwise byte-for-byte unchanged.
+    assert detect[5:] == plain[5:]
+
+
+def test_plain_field_and_text_render_unchanged():
+    # The detectable/designator defaults must not perturb ordinary items.
+    assert _render(Field(row=1, col=2, length=4, default="XY")) == \
+        _render(Field(row=1, col=2, length=4, default="XY"))
+    assert _render(Text(1, 2, "hello")) == _render(Text(1, 2, "hello"))
+
+
+def test_selected_designators_reads_toggled_selection_fields():
+    # A '?' selection field the operator cursor-selected comes back as '>' (MDT set);
+    # selected_designators returns those items, skipping the untoggled ones.
+    s = Screen()
+    a = Field(row=5, col=10, length=6, designator="?", name="north")
+    b = Field(row=6, col=10, length=6, designator="?", name="south")
+    s.add(a).add(b)
+    selected = s.selected_designators({a.data_addr: ">YES", b.data_addr: "?"})
+    assert [it.name for it in selected] == ["north"]
+    assert s.selected_designators({}) == []          # nothing modified → nothing selected

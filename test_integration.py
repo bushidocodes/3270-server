@@ -19,6 +19,7 @@ SBA, SF = 0x11, 0x1D
 DO, DONT, WILL, WONT, SB, SE = 0xFD, 0xFE, 0xFB, 0xFC, 0xFA, 0xF0
 BINARY, TERMINAL_TYPE, EOR_OPT = 0, 24, 25
 ENTER, PF1, PF3 = 0x7D, 0xF1, 0xF3
+CURSOR_SELECT = 0x7E
 ERASE_WRITE = 0xF5
 
 # Field addresses the server reads (row * 80 + data col).
@@ -201,6 +202,15 @@ def test_point_and_shoot_opens_utilities(session):
     _login(sock)
     # No typed option; cursor parked on the "3 Utilities" choice row (row 7).
     sock.sendall(_reply(cursor=7 * 80 + 5))
+    assert "Utility Selection Panel" in _text(_recv_screen(sock))
+
+
+def test_cursor_select_key_picks_a_menu_choice(session):
+    # The Cursor Select (selector-pen) key selects the choice under the cursor,
+    # exactly like Enter-on-a-row does — the redundant-but-complete path from #104.
+    sock, _ = session
+    _login(sock)
+    sock.sendall(_reply(aid=CURSOR_SELECT, cursor=7 * 80 + 5))   # on "3 Utilities"
     assert "Utility Selection Panel" in _text(_recv_screen(sock))
 
 

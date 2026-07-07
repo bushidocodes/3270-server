@@ -13,6 +13,7 @@ import pytest
 
 sys.path.insert(0, ".")
 from server import (
+    AID_CURSOR_SELECT,
     DisplayIntensity,
     EOR,
     FieldType,
@@ -23,6 +24,7 @@ from server import (
     read_client_input,
     write_control_character,
     _dialog_vars,
+    _is_cursor_select,
     _run_tso_command,
     _library_members,
     _member_path,
@@ -222,6 +224,47 @@ def test_aid_pf22_through_pf24():
 def test_aid_unknown_returns_hex_name():
     assert aid_to_string(0x01) == "Unknown AID 0x1"
     assert aid_to_string(0x00) == "Unknown AID 0x0"
+
+
+# ── Cursor Select / selector-pen (#104) ─────────────────────────────────────────
+
+def test_aid_cursor_select():
+    """The selector-pen / Cursor Select attention is AID 0x7E."""
+    assert AID_CURSOR_SELECT == 0x7E
+    assert aid_to_string(0x7E) == "CursorSelect"
+
+
+def test_is_cursor_select_covers_enter_and_cursor_select():
+    # Both Enter and Cursor Select mean "act on the field under the cursor".
+    assert _is_cursor_select("Enter")
+    assert _is_cursor_select("CursorSelect")
+    assert not _is_cursor_select("PF3")
+    assert not _is_cursor_select("Clear")
+
+
+def test_fa_detectable_normal_field():
+    """A normal-intensity selector-pen detectable field sets display bits 01 (0x04);
+    protected+detectable is 0x64 (same bits the CUA HIGHLIGHTED role uses)."""
+    assert field_attribute(protected=False, detectable=True) == 0x44   # unprotected, detectable
+    assert field_attribute(detectable=True) == 0x64          # protected (default) + detectable
+    # Intensified (HIGH) fields are already detectable; the flag doesn't change them.
+    assert field_attribute(protected=True, display=DisplayIntensity.HIGH,
+                           detectable=True) == 0x68
+    # Non-display can never be detectable — the flag is ignored.
+    assert field_attribute(protected=True, display=DisplayIntensity.NON_DISPLAY,
+                           detectable=True) == 0x6C
+
+
+def test_parse_cursor_select_reply():
+    """An inbound Cursor Select reply parses like any AID reply: AID 0x7E + cursor
+    address + the modified (selected) fields."""
+    addr = 5 * 80 + 21
+    payload = (bytes([AID_CURSOR_SELECT]) + encode_pack_addr(5, 4)
+               + _sba_bytes(addr) + ">CHOOSE".encode("cp037"))
+    aid, fields, cursor = read_client_input(_sock(payload))
+    assert aid == AID_CURSOR_SELECT
+    assert cursor == 5 * 80 + 4
+    assert fields == {addr: ">CHOOSE"}
 
 
 # ── read_client_input: field-parsing ──────────────────────────────────────────
