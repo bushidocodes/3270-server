@@ -13,6 +13,7 @@ match the hand-written screens exactly. The declarative DTL front-end
 (:mod:`dtl`) targets this model rather than emitting bytes directly.
 """
 
+import re
 from dataclasses import dataclass, field as _dc_field
 from enum import Enum
 from typing import List, Optional, Dict, Tuple
@@ -233,8 +234,10 @@ def _check_failure(check: dict, value: str):
     Mirrors a DTL ``<checki>``: ``range`` requires a number within [min, max];
     ``values`` requires membership in a fixed set (or, when ``negate``, absence
     from it); ``alpha`` requires all letters; ``name`` requires a valid symbol
-    name. The returned dict feeds the check's ``checkmsg`` (e.g.
-    ``{"VALUE": .., "MIN": .., "MAX": ..}``).
+    name. ``<varclass>`` TYPE forms add ``maxlen`` (character length cap),
+    ``maxdigits`` (integer digit cap), ``decimal`` (fixed-point precision) and
+    ``pattern`` (a date/time format the value must match). The returned dict
+    feeds the check's ``checkmsg`` (e.g. ``{"VALUE": .., "MIN": .., "MAX": ..}``).
     """
     if check["type"] == "range":
         try:
@@ -265,6 +268,21 @@ def _check_failure(check: dict, value: str):
         if sum(c.isdigit() for c in value) > check["max"]:
             return {"VALUE": value, "MAX": check["max"]}
         return None
+    if check["type"] == "decimal":        # <varclass type='numeric total frac'>
+        # A fixed-point number: optional sign, integer digits, an optional
+        # fractional part. Fail if it isn't numeric, or if it carries more total
+        # or fractional digits than the class allows.
+        m = re.fullmatch(r"[-+]?(\d*)(?:\.(\d+))?", value)
+        if not m or not (m.group(1) or m.group(2)):
+            return {"VALUE": value, "MAX": check["total"], "FRAC": check["frac"]}
+        int_digits = m.group(1) or ""
+        frac_digits = m.group(2) or ""
+        if (len(frac_digits) > check["frac"]
+                or len(int_digits) + len(frac_digits) > check["total"]):
+            return {"VALUE": value, "MAX": check["total"], "FRAC": check["frac"]}
+        return None
+    if check["type"] == "pattern":        # <varclass> date/time class format
+        return None if re.fullmatch(check["regex"], value) else {"VALUE": value}
     return None  # unknown check type: treat as passing
 
 
