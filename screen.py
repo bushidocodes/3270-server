@@ -322,6 +322,12 @@ class Text:
     # Field-level help panel (DTL <lstcol help=...> on a display column): shown when
     # the cursor is on this cell and HELP is pressed. Metadata — not part of identity.
     help: Optional[str] = _dc_field(default=None, compare=False)
+    # Selector-pen / Cursor Select detectable (#104): render the detectable
+    # attribute so the cursor-select key can pick this protected text. ``designator``,
+    # if set, is the leading designator character; setting it implies ``detectable``.
+    # Both default off, so ordinary text is byte-for-byte unchanged.
+    detectable: bool = False
+    designator: Optional[str] = None
 
     @property
     def data_addr(self) -> int:
@@ -345,22 +351,26 @@ class Text:
     def render(self, buf: bytearray, color: bool = False, cols: int = 80,
                rows: int = 24) -> None:
         _emit_sba(buf, self.row, self.col, cols)
-        fa = field_attribute(display=self.intensity, protected=True)
+        fa = field_attribute(display=self.intensity, protected=True,
+                             detectable=self.detectable or self.designator is not None)
         base_color = _role_colour(self.color, self.role) if color else None
         base_highlight = self.highlight if color else None
         _emit_field_start(buf, fa, base_color, base_highlight,
                           self.outline if color else None)
+        # A detectable text's leading designator character (the cursor-select
+        # key reads it) precedes the text.
+        text = (self.designator + self.text) if self.designator else self.text
         if self.runs is not None and color:
             _emit_attr_runs(buf, self.runs, base_color, base_highlight)
-        elif len(self.text) >= _RA_MIN_RUN and len(set(self.text)) == 1:
+        elif len(text) >= _RA_MIN_RUN and len(set(text)) == 1:
             # A long run of one character (a rule line / fill) — repeat it with a
             # single RA order instead of one byte per character. The field start
             # occupies self.col, so the run begins at self.col + 1.
             start = self.row * cols + self.col + 1
-            _emit_ra(buf, start + len(self.text), _display(self.text[0])[0],
+            _emit_ra(buf, start + len(text), _display(text[0])[0],
                      cols, rows)
         else:
-            buf.extend(_display(self.text))
+            buf.extend(_display(text))
 
 
 def _emit_graphic(buf: bytearray, row: int, col: int, codes: bytes,
@@ -473,6 +483,14 @@ class Field:
     # <lstcol> PAD/PADC pad character (NULLS → "\x00", a literal char, …). None
     # keeps the conventional space fill, so a field without PAD is byte-identical.
     pad: Optional[str] = None
+    # Selector-pen / Cursor Select detectable (#104): the field carries the
+    # detectable attribute so the cursor-select key can pick it. ``designator``, if
+    # set, is the field's leading designator character ("?"/">" = a deferred
+    # selection field, " "/"&" = an immediate attention field) rendered as the first
+    # data byte; setting it implies ``detectable``. A plain field (both defaults)
+    # renders byte-for-byte as before.
+    detectable: bool = False
+    designator: Optional[str] = None
     role: Optional[str] = _dc_field(default=None, compare=False)
     # Field-level help panel (DTL <dtafld help=...>): shown when the cursor is on
     # this field and HELP is pressed. Metadata — not rendered, not part of identity.
@@ -493,6 +511,7 @@ class Field:
             protected=False,
             field_type=ftype,
             mdt=self.mdt,
+            detectable=self.detectable or self.designator is not None,
         )
         # A hidden (password) field keeps its non-display attribute; colouring it
         # would be pointless and could fight the non-display intensity.
@@ -502,8 +521,12 @@ class Field:
             self.highlight if (color and not self.hidden) else None,
             self.outline if (color and not self.hidden) else None,
         )
+        # A detectable field's leading designator character occupies the first data
+        # byte (the cursor-select key reads/toggles it); the rest of the width holds
+        # the field value.
         fill = self.pad if self.pad is not None else " "
-        buf.extend(_display(self.default.ljust(self.length, fill)[: self.length]))
+        data = (self.designator + self.default) if self.designator else self.default
+        buf.extend(_display(data.ljust(self.length, fill)[: self.length]))
         if self.terminator:
             _emit_sba(buf, self.row, self.col + 1 + self.length, cols)
             buf.append(SF)
@@ -644,6 +667,21 @@ class Screen:
         field or nothing was marked."""
         return [sf["value"] for sf in self.selection_fields
                 if (fields_by_addr.get(sf["addr"], "") or "").strip()]
+
+    def selected_designators(self, fields_by_addr: Dict[int, str]) -> List[object]:
+        """The detectable *selection* fields (DTL/3270 designator ``?``/``>``) the
+        client selected — every such item whose returned leading designator came
+        back as ``>`` (selected). Cursor-select on a selection field toggles its
+        designator ``?``→``>`` and sets its MDT locally; the modified ``>`` fields
+        are then read on the next Enter (see #104). Returns the selected items (each
+        keeps its ``name``/``row``/``col`` for the caller to route)."""
+        selected = []
+        for it in self.items:
+            if getattr(it, "designator", None) in ("?", ">"):
+                returned = fields_by_addr.get(it.data_addr, "") or ""
+                if returned[:1] == ">":
+                    selected.append(it)
+        return selected
 
     def lookup_command(self, typed: Optional[str]) -> Optional[str]:
         """Resolve a typed command against the command table, honouring each

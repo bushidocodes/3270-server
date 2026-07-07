@@ -95,14 +95,20 @@ def field_attribute(
     protected: bool = True,
     field_type: FieldType = FieldType.ALPHANUMERIC,
     mdt: bool = False,
+    detectable: bool = False,
 ) -> int:
     attr = _FA_BASE
     if display == DisplayIntensity.HIGH:
-        attr |= 0x08          # FA_INT_HIGH_SEL (bits 3-2 = 10)
+        attr |= 0x08          # FA_INT_HIGH_SEL (bits 3-2 = 10): intensified + detectable
     elif display == DisplayIntensity.HIGHLIGHTED:
         attr |= 0x04          # FA_INT_NORM_SEL (bits 3-2 = 01)
     elif display == DisplayIntensity.NON_DISPLAY:
         attr |= 0x0C          # FA_INT_ZERO_NSEL (bits 3-2 = 11)
+    elif detectable:
+        # A normal-intensity selector-pen/cursor-select DETECTABLE field: display
+        # bits 01 (FA_INT_NORM_SEL). Intensified (HIGH, bits 10) is already
+        # detectable; non-display (bits 11) can never be. See #104.
+        attr |= 0x04
     if protected:
         attr |= 0x20          # FA_PROTECT
     if field_type == FieldType.NUMERIC:
@@ -552,6 +558,12 @@ WSF = 0xF3                  # Write Structured Field command (outbound)
 SF_READ_PARTITION = 0x01    # structured-field id: Read Partition
 SF_QUERY_REPLY = 0x81       # structured-field id: Query Reply (inbound)
 AID_SF = 0x88               # inbound AID that introduces Query Reply data
+AID_CURSOR_SELECT = 0x7E    # inbound AID from the selector-pen / Cursor Select key (#104)
+# 3270 selector-pen / cursor-select designator characters (the first byte of a
+# detectable field). '?'/'>' are *selection* designators (deferred: cursor-select
+# toggles ? <-> > and the field's MDT locally, and the modified '>' fields are read
+# on the next Enter); ' '/'&' are *attention* designators (immediate: cursor-select
+# sends the Cursor Select AID and a read-modified straight away). See #104.
 
 # Read Partition request types (byte after the partition id).
 SF_RP_QUERY = 0x02          # plain Query
@@ -1152,7 +1164,7 @@ def _show_member_list(client_socket, model=None):
             help_panel = screen.help_for(cursor) or screen.help
             if help_panel:
                 _show_overlay(client_socket, help_panel)
-        elif aid_str == "Enter" and cursor is not None:
+        elif _is_cursor_select(aid_str) and cursor is not None:
             member = member_by_row.get(cursor // cols)   # width-aware row decode
             if member:
                 path = _member_path(member)
@@ -1186,9 +1198,9 @@ def _show_submenu(client_socket, panel_name: str, initial=None, userid=None,
                 return
             aid_str, fields, cursor = action
             opt = (screen.command_value(fields) or "").strip().upper()
-            # Point-and-shoot: with nothing typed, Enter on a <ps> phrase sets the
-            # command variable, else Enter on a choice row selects that choice.
-            if not opt and aid_str == "Enter":
+            # Point-and-shoot: with nothing typed, Enter (or Cursor Select) on a
+            # <ps> phrase sets the command variable, else on a choice row selects it.
+            if not opt and _is_cursor_select(aid_str):
                 ps = screen.command_point_and_shoot(cursor)
                 opt = ps.strip().upper() if ps else (screen.selection_at(cursor) or "")
             if not opt:
@@ -1261,10 +1273,12 @@ def _show_overlay(client_socket, panel_name: str, rows=None, enter_returns=True)
             else:
                 abc_idx = (abc_idx + 1) % n if aid_str == "PF11" else (abc_idx - 1) % n
             continue
-        if aid_str == "Enter":
-            # Point-and-shoot: Enter with the cursor on an action-bar choice
-            # opens that choice's pull-down; otherwise Enter dismisses the
-            # overlay (help panels) or just redisplays it (display panels).
+        if _is_cursor_select(aid_str):
+            # Point-and-shoot: Enter (or Cursor Select) with the cursor on an
+            # action-bar choice opens that choice's pull-down; otherwise a plain
+            # Enter dismisses the overlay (help panels) or just redisplays it
+            # (display panels). Cursor Select only fires on a detectable field, so
+            # off a choice it just redisplays.
             choice = screen.action_choice_at(cursor)
             if choice and choice.get("pdc"):
                 action = _show_pulldown(client_socket, screen, choice)
@@ -1273,7 +1287,7 @@ def _show_overlay(client_socket, panel_name: str, rows=None, enter_returns=True)
                 if _run_pdc_action(client_socket, screen, action):
                     return  # the action left the overlay (e.g. EXIT)
                 continue
-            if enter_returns:
+            if aid_str == "Enter" and enter_returns:
                 return
             continue  # display panel: Enter stays; only PF3/PF15 exits
 
@@ -1348,7 +1362,7 @@ def _show_pulldown(client_socket, screen, choice):
             if on_item and crow in help_by_row:
                 _show_overlay(client_socket, help_by_row[crow])
             continue  # redisplay the pull-down either way
-        if aid_str == "Enter" and on_item:
+        if _is_cursor_select(aid_str) and on_item:
             return action_by_row[crow]
         return ""  # any other key closes the pull-down without selecting
 
@@ -1372,6 +1386,7 @@ def aid_to_string(aid: int):
     aid_codes = {
         0x60: "No AID",
         0x7D: "Enter",
+        0x7E: "CursorSelect",   # selector-pen / Cursor Select attention (#104)
         0x6D: "Clear",
         0x6C: "PA1",
         0x6E: "PA2",
@@ -1402,6 +1417,14 @@ def aid_to_string(aid: int):
         0x4C: "PF24",
     }
     return aid_codes.get(aid, f"Unknown AID {hex(aid)}")
+
+
+def _is_cursor_select(aid_str: str) -> bool:
+    """Whether an AID means "act on the field under the cursor": Enter or the
+    Cursor Select (selector-pen) key. Cursor Select means exactly "select what the
+    cursor is on", which for our point-and-shoot menus is what Enter-on-a-row does,
+    so the two share the cursor-selection paths (#104)."""
+    return aid_str in ("Enter", "CursorSelect")
 
 
 MAX_BUFFER_SIZE = 65536  # 64 KiB; a legitimate 3270 data stream is at most a few KB
@@ -2063,9 +2086,9 @@ def handle_client(client_socket, addr):
             # Read the option from the panel's <cmdarea> (its ZCMD command
             # field), resolved by role rather than a hard-coded address.
             option = (screen.command_value(fields) or "").strip().upper()
-            # Point-and-shoot: with no typed option, Enter on a <ps> phrase sets the
-            # command variable, else Enter on a choice row picks that choice.
-            if not option and aid_str == "Enter":
+            # Point-and-shoot: with no typed option, Enter (or Cursor Select) on a
+            # <ps> phrase sets the command variable, else on a choice row picks it.
+            if not option and _is_cursor_select(aid_str):
                 ps = screen.command_point_and_shoot(cursor)
                 option = ps.strip().upper() if ps else (screen.selection_at(cursor) or "")
 
