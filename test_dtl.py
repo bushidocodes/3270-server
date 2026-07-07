@@ -361,6 +361,86 @@ def test_info_hp_emphasis():
     assert s.items[0] == Text(0, 1, "hi", DisplayIntensity.HIGH, role="emphasis")
 
 
+def test_hp_intens_splits_line_into_fields():
+    # #212: an <hp intens=HIGH> phrase carries a display INTENSITY, which on 3270
+    # lives in the BASIC field-attribute byte (set only at an SF) — there is no
+    # extended-intensity SA order. So the line must SPLIT into a separate field per
+    # intensity run rather than an SA run inside one field. The inter-phrase space
+    # is consumed as the next field's attribute byte (a blank cell), so the columns
+    # match the single-field layout: "text" at col 1, the SF for "LOUD" lands on
+    # the space at col 5 (text at col 6), and "more"'s SF on the space at col 10.
+    s = load_dtl('<panel><info>text <hp intens=high>LOUD</hp> more</info></panel>')
+    N, H = DisplayIntensity.NORMAL, DisplayIntensity.HIGH
+    assert s.items[0] == Text(0, 1, "text", N, role="text")
+    assert s.items[1] == Text(0, 6, "LOUD", H, role="text")     # intensified field
+    assert s.items[2] == Text(0, 11, "more", N, role="text")
+
+
+def test_hp_intens_field_attribute_is_intensified():
+    # The split phrase's field really carries the intensified BASIC field attribute
+    # (0x68 = protected + high intensity), even on a mono terminal — that is the
+    # whole point (an SA run could not have done it).
+    s = load_dtl('<panel><info>text <hp intens=high>LOUD</hp> more</info></panel>')
+    loud = s.items[1]
+    buf = bytearray(); loud.render(buf, color=False)
+    assert loud.intensity is DisplayIntensity.HIGH
+    assert 0x68 in bytes(buf)                     # SF + intensified field attribute
+
+
+def test_hp_intens_non_is_non_display():
+    # INTENS=NON hides the phrase (non-display field), while HIGH→HIGH and there is
+    # no sub-normal 3270 level so LOW would fold to NORMAL (no split).
+    s = load_dtl('<panel><info>user <hp intens=non>SECRET</hp> ok</info></panel>')
+    secret = s.items[1]
+    assert secret.text == "SECRET"
+    assert secret.intensity is DisplayIntensity.NON_DISPLAY
+
+
+def test_hp_intens_keeps_colour_on_the_split_field():
+    # An <hp> with BOTH intensity and colour: the field splits (for the intensity)
+    # and the phrase's field still carries its colour via an SA run (Text.rich).
+    s = load_dtl('<panel><info>a <hp intens=high color=red>B</hp> c</info></panel>')
+    b = s.items[1]
+    assert b.intensity is DisplayIntensity.HIGH
+    assert b.runs == [("B", Color.RED, None)]
+
+
+def test_hp_colour_only_still_one_rich_field_unchanged():
+    # Regression guard: an <hp> with NO intens (the common colour/highlight case)
+    # must remain ONE Text.rich field — the intensity path must not touch it.
+    s = load_dtl('<panel><info>text <hp color=red>RED</hp> more</info></panel>')
+    assert len(s.items) == 1
+    assert s.items[0].text == "text RED more"
+    assert s.items[0].runs == [
+        ("text ", None, None), ("RED", Color.RED, None), (" more", None, None),
+    ]
+
+
+def test_hp_intens_survives_word_wrap():
+    # The split is applied per wrapped line: a multi-word intensified phrase keeps a
+    # single field across its interior space (not spuriously split), and each line's
+    # fields align to the plain wrap. "very loud" stays one HIGH field on row 1.
+    s = load_dtl('<panel name=p width=20>'
+                 '<p>please read the <hp intens=high>very loud</hp> notice now</p>'
+                 '</panel>')
+    N, H = DisplayIntensity.NORMAL, DisplayIntensity.HIGH
+    got = [(it.row, it.col, it.text, it.intensity)
+           for it in s.items if isinstance(it, Text)]
+    assert got == [
+        (0, 1, "please read the", N),
+        (1, 1, "very loud", H),
+        (1, 11, "notice", N),
+        (2, 1, "now", N),
+    ]
+
+
+def test_hp_intense_var_resolves_intensity():
+    # INTENSE=%var reads the intensity from a dialog variable (like COLOR=%var).
+    s = load_dtl('<panel><info>x <hp intense="%emph">Y</hp> z</info></panel>',
+                 emph="high")
+    assert s.items[1] == Text(0, 3, "Y", DisplayIntensity.HIGH, role="text")
+
+
 def test_dtafld_emits_prompt_then_field():
     s = load_dtl(
         '<panel><dtafld datavar="userid" '

@@ -350,7 +350,7 @@ class _DTLParser(HTMLParser):
         self._attrs = None
         self._chars = []
         self._runs = None         # inline <hp> mixed-content runs, or None
-        self._hp = None           # the open <hp>'s (color, highlight), or None
+        self._hp = None           # the open <hp>'s (color, highlight, intensity), or None
         self._selfld = None       # active <selfld> layout state, or None
         self._in_dtafldd = False  # capturing a <dtafldd> prompt child?
         self._dtafldd = None      # captured <dtafldd> prompt text, or None
@@ -445,20 +445,48 @@ class _DTLParser(HTMLParser):
         return (self._hilite(a)
                 or _HIGHLIGHTS.get(str(a.get("type", "")).strip().lower()))
 
+    def _hp_intensity(self, a):
+        """The DisplayIntensity an <hp> phrase forces via INTENS=HIGH|LOW|NON (or
+        INTENSE=%varname, resolved from a dialog variable like other %var attrs),
+        or None when neither is present. 3270 has no *sub-normal* level, so
+        LOW→NORMAL (documented); HIGH→HIGH, NON→NON_DISPLAY.
+
+        Unlike colour/highlight (which ride an SA order inside one field), an
+        intensity lives only in the BASIC field-attribute byte, set at a field
+        start (SF). So a phrase that changes it can't be an SA run — it forces the
+        enclosing line to SPLIT into separate fields (see _emit_flow_runs_intens).
+        A value that maps to None (or plain NORMAL from LOW) needs no split; the
+        common colour/highlight <hp> is untouched."""
+        raw = a.get("intense", a.get("intens"))
+        if raw is None:
+            return None
+        v = str(raw).strip()
+        if v.startswith("%"):                     # INTENSE=%var → dialog variable
+            v = str((self._subs or {}).get(v[1:].upper(), ""))
+        return {
+            "high": DisplayIntensity.HIGH,
+            "low": DisplayIntensity.NORMAL,
+            "non": DisplayIntensity.NON_DISPLAY,
+        }.get(v.strip().lower())
+
     def _begin_hp(self, a):
         """Start an inline <hp> run: bank the text captured so far as a plain run,
         then capture the phrase as an emphasised run. The enclosing text element
-        becomes a mixed-content Text.rich field (see _finalize_runs)."""
+        becomes a mixed-content Text.rich field (see _finalize_runs). Each run is
+        ``(text, color, highlight, intensity)``; a plain run's emphasis is all
+        None. INTENSITY (unlike colour/highlight) can't ride an SA order, so it is
+        carried separately and, when non-normal, splits the line (see _emit_info /
+        _emit_flow_runs_intens)."""
         if self._runs is None:
             self._runs = []
-        self._runs.append(("".join(self._chars), None, None))
+        self._runs.append(("".join(self._chars), None, None, None))
         self._chars = []
-        self._hp = (self._color(a), self._hp_hilite(a))
+        self._hp = (self._color(a), self._hp_hilite(a), self._hp_intensity(a))
 
     def _end_hp(self):
         """Close the open <hp>: bank its text as an emphasised run."""
-        color, hilite = self._hp
-        self._runs.append(("".join(self._chars), color, hilite))
+        color, hilite, intensity = self._hp
+        self._runs.append(("".join(self._chars), color, hilite, intensity))
         self._chars = []
         self._hp = None
 
@@ -470,7 +498,7 @@ class _DTLParser(HTMLParser):
         if self._hp is not None:        # tolerate an <hp> left open at flush
             self._end_hp()
         else:
-            self._runs.append(("".join(self._chars), None, None))
+            self._runs.append(("".join(self._chars), None, None, None))
         self._chars = []
         return [r for r in self._runs if r[0]] or None
 
@@ -508,8 +536,8 @@ class _DTLParser(HTMLParser):
         # the CUA point-and-shoot link style.
         if tag in ("hp", "rp") and self._tag in _TEXT_TAGS:
             self._begin_hp(a)
-            if tag == "rp" and self._hp == (None, None):
-                self._hp = (None, Highlight.UNDERSCORE)
+            if tag == "rp" and self._hp == (None, None, None):
+                self._hp = (None, Highlight.UNDERSCORE, None)
             return
         # <varsub var=NAME> substitutes a dialog variable inside message text: emit
         # an ISPF ``&NAME.`` reference into the text being captured, resolved at
@@ -1818,13 +1846,133 @@ class _DTLParser(HTMLParser):
         if ctx is not None:
             ctx["row"] = row + len(lines)
 
+    @staticmethod
+    def _wrap_runs_intens(runs, width):
+        """Word-wrap INTENS-bearing <hp> ``runs`` [(text, color, hilite, intens)]
+        into lines, each a FLAT list of ``(char, color, hilite, intens)`` (unlike
+        _wrap_runs it does not coalesce — the per-field split at emit needs the
+        char-level intensity). Whitespace is collapsed to single spaces exactly as
+        the plain flow path, and a wrap boundary drops its joining space, so the
+        wrapped text matches _wrap byte-for-byte."""
+        chars, prev_space = [], True         # collapse runs of whitespace to one space
+        for text, color, hilite, intens in runs:
+            for ch in text:
+                if ch.isspace():
+                    if not prev_space:
+                        chars.append((" ", color, hilite, intens))
+                    prev_space = True
+                else:
+                    chars.append((ch, color, hilite, intens))
+                    prev_space = False
+        while chars and chars[-1][0] == " ":
+            chars.pop()
+        words, cur = [], []                  # split into words + the space after each
+        for c in chars:
+            if c[0] == " ":
+                words.append((cur, c)); cur = []
+            else:
+                cur.append(c)
+        if cur:
+            words.append((cur, None))
+        # Greedy pack words to width. The joiner between two words on a line is the
+        # space that FOLLOWED the previous word (prev_sp) — it keeps that space's
+        # own emphasis/intensity, so a same-intensity phrase's interior space is not
+        # spuriously demoted (and thus not split into two fields). A wrap drops it.
+        lines, line, w, prev_sp = [], [], 0, None
+        for word, sp in words:
+            if not line:
+                line, w = list(word), len(word)
+            elif w + 1 + len(word) <= width:
+                line.append(prev_sp if prev_sp else (" ", None, None, None))
+                line.extend(word); w += 1 + len(word)
+            else:                            # wrap: the joining space is dropped
+                lines.append(line); line, w = list(word), len(word)
+            prev_sp = sp
+        if line:
+            lines.append(line)
+        return lines or [[]]
+
+    def _emit_flow_runs_intens(self, runs, row, col, ctx, role):
+        """Emit <hp> runs when a phrase carries a non-normal INTENS (HIGH / NON).
+
+        3270 has NO extended-intensity SA order — display intensity lives in the
+        BASIC field-attribute byte, set only at a field start (SF). So a mid-line
+        intensity change can't be an SA run inside one field; the line must be
+        SPLIT into a separate protected field per intensity run, each with its own
+        SF (and thus its own DisplayIntensity). The inter-phrase space is CONSUMED
+        as the next field's attribute byte — which itself displays as a blank — so
+        the visible column layout is identical to the single-field version; only
+        now the phrase's field carries the intensified / non-display attribute.
+        Colour/highlight WITHIN a split segment still ride SA runs (Text.rich).
+
+        Word-wrap is honoured (each wrapped line is split independently). A caveat:
+        an intensity change that is NOT on a word boundary (no space to reuse for
+        the SF byte) can't be split without shifting a column — such mid-word
+        <hp intens=…> is vanishingly rare in ISPF panels and is left as-is."""
+        lines = self._wrap_runs_intens(runs, max(1, self.screen.width - (col + 1)))
+        for i, line in enumerate(lines):
+            self._emit_intens_segments(line, row + i, col, role)
+        if ctx is not None:
+            ctx["row"] = row + len(lines)
+
+    def _emit_intens_segments(self, line, row, col, role):
+        """Split one collapsed line of ``(char, color, hilite, intens)`` into a
+        field per intensity run and add them. Each field's SF attribute byte sits
+        one column left of its first character — on the inter-phrase space that the
+        grouping trims away — so the SF (a blank cell) lands exactly where that
+        space was and the columns match the single-field layout. LOW/None collapse
+        to NORMAL (no distinct 3270 level), so only HIGH / NON_DISPLAY actually
+        break the line."""
+        if not line:
+            return
+        N = DisplayIntensity.NORMAL
+        def eff(ii):                          # LOW/None/unknown → NORMAL
+            return ii if ii in (DisplayIntensity.HIGH,
+                                DisplayIntensity.NON_DISPLAY) else N
+        segs, cur, cur_int = [], [], None     # group consecutive same-intensity chars
+        for j, (ch, cc, hh, ii) in enumerate(line):
+            e = eff(ii)
+            if cur and e is cur_int:
+                cur.append((j, ch, cc, hh))
+            else:
+                if cur:
+                    segs.append((cur, cur_int))
+                cur, cur_int = [(j, ch, cc, hh)], e
+        if cur:
+            segs.append((cur, cur_int))
+        for grp, intens in segs:
+            # Trim the boundary spaces: those cells become the adjacent fields' SF
+            # attribute bytes (which render blank), keeping the columns aligned.
+            k0, k1 = 0, len(grp)
+            while k0 < k1 and grp[k0][1] == " ":
+                k0 += 1
+            while k1 > k0 and grp[k1 - 1][1] == " ":
+                k1 -= 1
+            kept = grp[k0:k1]
+            if not kept:
+                continue
+            # single-field column of char index jj is col+1+jj; its SF is one left.
+            sf_col = col + kept[0][0]
+            sub = []                          # coalesce into (text, color, hilite)
+            for _, ch, cc, hh in kept:
+                if sub and sub[-1][1] == cc and sub[-1][2] == hh:
+                    sub[-1] = (sub[-1][0] + ch, cc, hh)
+                else:
+                    sub.append((ch, cc, hh))
+            if any(cc is not None or hh is not None for _, cc, hh in sub):
+                self.screen.add(Text.rich(row, sf_col, sub,
+                                          intensity=intens, role=role))
+            else:
+                self.screen.add(Text(row, sf_col, "".join(t for t, _, _ in sub),
+                                     intens, role=role))
+
     def _emit_listitem(self, a, content, runs=None):
         """Emit one <li>: a depth-based bullet/number plus the item text, flowed,
         word-wrapped with a hanging indent, one level deeper per nested list. An
         inline <hp> phrase banks its text into ``runs``, leaving ``content`` empty —
         use the runs' concatenation so the item is not dropped."""
         if runs is not None:
-            content = "".join(t for t, _, _ in runs)
+            content = "".join(t for t, *_ in runs)
         text = " ".join(content.split())
         if not text:
             return
@@ -2435,7 +2583,7 @@ class _DTLParser(HTMLParser):
         # ``runs`` (from inline <hp>) is a list of (text, color, highlight); the
         # concatenation is the field's plain text, so mono renders identically.
         if runs is not None and not content:
-            content = "".join(t for t, _, _ in runs)
+            content = "".join(t for t, *_ in runs)
         # An admonition (<note>/<warning>/…) flows as a labelled callout. CAUTION
         # is special: heading on its own line + emphasised body (handled below).
         label = _ADMONITIONS.get(tag)
@@ -2458,8 +2606,10 @@ class _DTLParser(HTMLParser):
         whole_hp = runs is not None and len(runs) == 1
         if whole_hp:
             role = "emphasis"
-            runs = None                       # render as a plain emphasised Text
-            emph = DisplayIntensity.HIGH
+            # A whole-line <hp> renders as one plain emphasised Text; honour an
+            # explicit INTENS (e.g. NON → non-display) but default to CUA HIGH.
+            emph = runs[0][3] or DisplayIntensity.HIGH
+            runs = None
         else:
             emph = _intensity(a)
         # Flowed text: normalize whitespace and word-wrap to the panel width.
@@ -2499,9 +2649,19 @@ class _DTLParser(HTMLParser):
                                   intensity=DisplayIntensity.HIGH)
             return
         if runs is not None:
-            # Flowed text with inline <hp>: keep each phrase's colour/highlight
-            # across the word-wrap (SA runs per line), instead of dropping to plain.
-            self._emit_flow_runs(runs, row, col, ctx, role)
+            # A phrase carrying non-normal INTENS (HIGH/NON) can't ride an SA run,
+            # so the line is split into separate fields (one SF per intensity run);
+            # otherwise keep the single-field colour/highlight SA path (byte-for-byte
+            # unchanged — the common <hp> case). See _hp_intensity / #212.
+            if any(r[3] in (DisplayIntensity.HIGH, DisplayIntensity.NON_DISPLAY)
+                   for r in runs):
+                self._emit_flow_runs_intens(runs, row, col, ctx, role)
+            else:
+                # Flowed text with inline <hp>: keep each phrase's colour/highlight
+                # across the word-wrap (SA runs per line), dropping the unused 4th
+                # (intensity) field so the existing 3-tuple path is untouched.
+                self._emit_flow_runs([(t, c, h) for t, c, h, _ in runs],
+                                     row, col, ctx, role)
             return
         self._emit_flow_lines(text, row, col, ctx, role=role, intensity=emph)
         # A TOPINST is followed by a blank line (COMPACT suppresses it).
