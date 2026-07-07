@@ -3120,6 +3120,49 @@ def test_dl_leading_blank_and_noskip():
     assert "A" in nos[i2 + 1]                           # no blank — term immediately after
 
 
+# #210: every ISPDTLC block element takes a leading blank line ("skip") before it,
+# which NOSKIP and COMPACT suppress. The DTL Guide documents the skip in prose (the
+# guide's compressed ASCII figures omit it); e.g. UL/OL/SL: "The conversion utility
+# adds a blank line before the first item in the list"; NOTE/NT/NOTEL/LINES/XMP/
+# FIG/LP: NOSKIP "causes the blank line normally placed before the … to be skipped".
+# Each case here follows the tag's first line of body content with a marker word, so
+# the assertions probe the row immediately after the intro paragraph.
+# (tag → template, marker word on the block's FIRST rendered line). We probe the
+# row just above that marker: blank by default, non-blank once NOSKIP/COMPACT drop
+# the skip. <lp> is valid only inside a list, so its <ul> parent (which takes its
+# own separate leading skip) precedes it; the marker "Body" is the LP's own line.
+_BLOCK_SKIP_CASES = {
+    "lines": ("<lines %s>Body</lines>", "Body"),
+    "xmp":   ("<xmp %s>Body</xmp>", "Body"),
+    "lp":    ("<ul compact><li>Item<lp %s>Body</ul>", "Body"),
+    "ul":    ("<ul %s><li>Body</ul>", "Body"),
+    "ol":    ("<ol %s><li>Body</ol>", "Body"),
+    "sl":    ("<sl %s><li>Body</sl>", "Body"),
+    "note":  ("<note %s>Body</note>", "Body"),
+    "nt":    ("<nt %s>Body</nt>", "Body"),
+    "notel": ("<notel %s><li>Body</notel>", "Notes:"),   # heading is the first line
+    "fig":   ("<fig %s frame=none><p>Body</fig>", "Body"),
+}
+
+
+@pytest.mark.parametrize("tag,tpl,marker", [(k, v[0], v[1])
+                                            for k, v in _BLOCK_SKIP_CASES.items()])
+def test_block_element_leading_skip_and_noskip_compact(tag, tpl, marker):
+    # The modifier lands on the block whose skip we probe (for <lp>, on the <lp>).
+    def row_above_block(mod):
+        src = ('<panel name=p width=40><area><info><p>Intro'
+               + (tpl % mod) + '</info></area></panel>')
+        lines = [ln.rstrip() for ln in _ascii_snapshot(load_dtl(src)).split("\n")]
+        i = next(k for k, ln in enumerate(lines) if marker in ln)
+        return lines[i - 1].strip()
+
+    # By default the block's first rendered line is preceded by a blank line;
+    # NOSKIP/COMPACT suppress it, butting the block against the line above.
+    assert row_above_block("") == "", f"{tag}: expected a leading blank before the block"
+    for mod in ("noskip", "compact"):
+        assert row_above_block(mod) != "", f"{tag}: {mod} should suppress the leading skip"
+
+
 def test_dl_multicolumn_tsize_lays_terms_side_by_side():
     # #120: TSIZE='w1 w2 …' gives multiple definition-term COLUMNS; one <dt> per
     # width lays them side by side, with the <dd> past every term column.
@@ -3236,10 +3279,17 @@ def test_caution_reference_figure_snapshot():
 
 
 def test_nt_reference_figure_snapshot():
-    """NT-reference Figure 1: "Note:" then the body hung indented under the text.
+    """NT-reference Figure 141: "Note:" then the body hung indented under the text.
 
     The nested <p> ("If the librarian ...") hangs under the note body too, at the
-    same indent as the first paragraph — matching the reference figure (#219)."""
+    same indent as the first paragraph — matching the reference figure (#219).
+
+    A leading blank line precedes the note: the DTL Guide NT reference states
+    NOSKIP "causes the note to be formatted without creating a blank line before
+    the note", so ISPDTLC inserts that blank by default (#210). The guide's ASCII
+    Figure 141 is compressed and omits inter-block blanks — the P reference proves
+    it: its source says "Notice the line skip between the paragraphs" yet Figure
+    143 shows none. We follow the documented spacing model, not the compressed art."""
     src = ("<!DOCTYPE DM SYSTEM>\n<HELP NAME=nt DEPTH=20>Book / Periodical Search Help\n"
            "<AREA>\n<INFO>\n"
            "<P>This entry screen allows you to locate a desired book or periodical "
@@ -3253,6 +3303,7 @@ def test_nt_reference_figure_snapshot():
         "",                                          # title/body separator
         " This entry screen allows you to locate a desired book or periodical by",
         " entering the title in the entry field.",
+        "",                                          # leading skip before the note (#210)
         " Note: If the item you are trying to locate is not in stock and you would like",
         "       to reserve it, please see the librarian at the front desk.",
         "",                                          # blank before the nested paragraph
@@ -3280,7 +3331,12 @@ def test_nt_nested_block_hangs_and_boundary_clears():
 
 
 def test_notel_reference_figure_snapshot():
-    """NOTEL-reference Figure 1: "Notes:" + a blank line + numbered items."""
+    """NOTEL-reference Figure 140: "Notes:" + a blank line + numbered items.
+
+    A leading blank line precedes the note list: the DTL Guide NOTEL reference
+    states NOSKIP "causes the list to format without creating a blank line before
+    the first line of the list", so ISPDTLC inserts that blank by default (#210).
+    (Figure 140's compressed ASCII omits it, like the other reference figures.)"""
     src = ("<!DOCTYPE DM SYSTEM>\n<HELP NAME=notel DEPTH=20>Book / Periodical Search Help\n"
            "<AREA>\n<INFO>\n"
            "<P>This entry screen allows you to locate a desired book or periodical "
@@ -3295,6 +3351,7 @@ def test_notel_reference_figure_snapshot():
         "",                                          # title/body separator
         " This entry screen allows you to locate a desired book or periodical by",
         " entering the title in the entry field.",
+        "",                                          # leading skip before the note list (#210)
         " Notes:",
         "",
         " 1.  If the item you are trying to locate is not in stock and you would like to",
@@ -3385,6 +3442,12 @@ def test_lstgrp_nested_groups_reference_figure_snapshot():
 def test_nested_unordered_lists_matches_guide_figure():
     # IBM DTL Guide "Nested Unordered Lists" figure: a centered title, then o/-/--
     # bullets by depth with increasing indentation. (Verbatim guide source.)
+    # Each UL (outer and every nested one) takes a leading blank line: the DTL
+    # Guide UL reference states "The conversion utility adds a blank line before
+    # the first item in the list", suppressed only by COMPACT/NOSKIP (#210). None
+    # of these lists is COMPACT, so all three get the skip — corroborated by the OL
+    # reference (Figure 142), which codes its nested list <OL COMPACT> precisely to
+    # suppress that otherwise-present blank.
     s = load_dtl(
         '<!doctype dm system>\n'
         '<panel name=ulists width=42>Nested Unordered Lists\n'
@@ -3399,12 +3462,15 @@ def test_nested_unordered_lists_matches_guide_figure():
     N = DisplayIntensity.NORMAL
     assert s.items == [
         Text(0, 10, "Nested Unordered Lists", N),
-        Text(1, 1, "o", N),  Text(1, 5, "First level, first item", N),
-        Text(2, 1, "o", N),  Text(2, 5, "First level, second item", N),
-        Text(3, 5, "-", N),  Text(3, 9, "Second level, first item", N),
-        Text(4, 5, "-", N),  Text(4, 9, "Second level, second item", N),
-        Text(5, 9, "--", N), Text(5, 13, "Third level, only item", N),
-        Text(6, 1, "o", N),  Text(6, 5, "Back to the first level", N),
+        # row 1 blank: leading skip before the outer <ul> (#210)
+        Text(2, 1, "o", N),  Text(2, 5, "First level, first item", N),
+        Text(3, 1, "o", N),  Text(3, 5, "First level, second item", N),
+        # row 4 blank: leading skip before the second-level <ul>
+        Text(5, 5, "-", N),  Text(5, 9, "Second level, first item", N),
+        Text(6, 5, "-", N),  Text(6, 9, "Second level, second item", N),
+        # row 7 blank: leading skip before the third-level <ul>
+        Text(8, 9, "--", N), Text(8, 13, "Third level, only item", N),
+        Text(9, 1, "o", N),  Text(9, 5, "Back to the first level", N),
     ]
 
 
@@ -3429,27 +3495,32 @@ def test_widget_help_matches_guide_figure():
     N = DisplayIntensity.NORMAL
     assert s.title == "Widget Assembly Help"
     # The title/body separator (a blank below the title) puts the first paragraph
-    # on row 2; the list and the trailing <p> follow with their own blank lines.
+    # on row 2. The outer <OL> then takes its guide-mandated leading blank ("The
+    # conversion utility adds a blank line before the first item in the list");
+    # the inner <OL COMPACT> takes none (COMPACT suppresses it — the reason the
+    # guide codes it COMPACT), and the trailing <p> takes its own leading blank
+    # (#210).
     assert s.items == [
         Text(0, 20, "Widget Assembly Help", N),
         Text(2, 1, "To assemble your new Widget, you should:", N),
-        Text(3, 1, "1.", N),
-        Text(3, 5, "Attach the gizmo flexure component to the main", N),
-        Text(4, 5, "steering mechanism of the doohickey.", N),
-        Text(5, 5, "a.", N),
-        Text(5, 9, "If slot A fits snugly on retaining pin B, proceed", N),
-        Text(6, 9, "to step 2.", N),
-        Text(7, 5, "b.", N),
-        Text(7, 9, "If slot A does not fit snugly on retaining pin B,", N),
-        Text(8, 9, "throw the Widget away and buy a new one.", N),
-        Text(9, 1, "2.", N),
-        Text(9, 5, "Use a screwdriver to turn the power drive unit on.", N),
-        Text(10, 1, "3.", N),
-        Text(10, 5, "Stand back and watch the fun!", N),
-        # A <p> after the list items gets its guide-mandated leading blank (as the
-        # nested <p> does in NOTEL Figure 145).
-        Text(12, 5, "Wake up the kids and call the neighbors, they won't", N),
-        Text(13, 5, "want to miss it!", N),
+        # row 3 blank: leading skip before the outer <ol> (#210)
+        Text(4, 1, "1.", N),
+        Text(4, 5, "Attach the gizmo flexure component to the main", N),
+        Text(5, 5, "steering mechanism of the doohickey.", N),
+        # no blank before the nested <ol compact> (COMPACT suppresses the skip)
+        Text(6, 5, "a.", N),
+        Text(6, 9, "If slot A fits snugly on retaining pin B, proceed", N),
+        Text(7, 9, "to step 2.", N),
+        Text(8, 5, "b.", N),
+        Text(8, 9, "If slot A does not fit snugly on retaining pin B,", N),
+        Text(9, 9, "throw the Widget away and buy a new one.", N),
+        Text(10, 1, "2.", N),
+        Text(10, 5, "Use a screwdriver to turn the power drive unit on.", N),
+        Text(11, 1, "3.", N),
+        Text(11, 5, "Stand back and watch the fun!", N),
+        # A <p> after the list items gets its guide-mandated leading blank.
+        Text(13, 5, "Wake up the kids and call the neighbors, they won't", N),
+        Text(14, 5, "want to miss it!", N),
     ]
 
 

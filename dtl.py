@@ -289,10 +289,12 @@ _FLOW_TEXT_TAGS = ("p", "li", "dt", "dd", "pt", "pd", "lp", "lines", "xmp") + tu
 # <pnlinst> (panel), and <botinst> (bottom) instructions.
 _INSTRUCTION_TAGS = ("topinst", "pnlinst", "botinst")
 _TEXT_TAGS = ("info",) + _INSTRUCTION_TAGS + _FLOW_TEXT_TAGS
-# ISPDTLC inserts a blank line BEFORE a flowed paragraph or panel instruction (and
-# before a bottom instruction, which we anchor separately); COMPACT suppresses it.
-# A TOPINST instead gets a blank line AFTER it. See the P/TOPINST tag references.
-_BLANK_BEFORE_TAGS = ("p", "pnlinst")
+# ISPDTLC inserts a blank line BEFORE a flowed paragraph (<p>), a labelled
+# paragraph (<lp>), or a panel instruction; COMPACT/NOSKIP suppress it (#210). A
+# TOPINST instead gets a blank line AFTER it. See the P/LP/TOPINST tag references.
+# (The other block elements — <lines>/<xmp>, <ul>/<ol>/<sl>/<notel>, <note>/<nt>,
+# <dl>/<parml>, <fig> — take the same leading skip at their own emit sites.)
+_BLANK_BEFORE_TAGS = ("p", "lp", "pnlinst")
 _CONTENT_TAGS = _TEXT_TAGS + ("dtafld", "cmdarea", "choice", "figcap",
                               "dthd", "ddhd", "dldiv", "pldiv", "textseg",
                               "dtseg", "ptseg")
@@ -603,6 +605,9 @@ class _DTLParser(HTMLParser):
             # the list a heading line above its items; INDENT shifts the whole list
             # right; SPACE sets the item-text indentation (YES → 3 cols, else 4),
             # inherited by every <li> that does not carry its own SPACE (#123).
+            # ISPDTLC also inserts a leading blank line before the list, ahead of any
+            # heading (COMPACT/NOSKIP suppress it — #210).
+            self._skip_blank_before(a)
             ctx = self._areas[-1] if self._areas else None
             indent = self._opt_int(a.get("indent"), 0)
             heading = str(a.get("text", "")).strip()
@@ -616,6 +621,9 @@ class _DTLParser(HTMLParser):
         elif tag == "notel":
             # A note list: a "Notes:" heading (TEXT= override, INTENS/COLOR/HILITE
             # style it), a blank line, then NUMBERED <li> items (1. 2. …).
+            # ISPDTLC inserts a leading blank line before the heading (COMPACT/
+            # NOSKIP suppress it — #210).
+            self._skip_blank_before(a)
             ctx = self._areas[-1] if self._areas else None
             if ctx is not None:
                 heading = (a.get("text") or "Notes:").strip()
@@ -1082,6 +1090,10 @@ class _DTLParser(HTMLParser):
             # (FRAME=RULE, the default) above and below its content, with a
             # <figcap> caption line beneath. Its children (<p>, lists, <xmp>, …)
             # flow through the box like an <area>.
+            # ISPDTLC inserts a leading blank line before the figure (COMPACT/
+            # NOSKIP suppress it — #210); it advances the parent flow cursor before
+            # we snapshot the figure's origin row below.
+            self._skip_blank_before(a)
             parent = self._areas[-1] if self._areas else None
             col = parent["col"] if parent else 1
             row = parent["row"] if parent else 0
@@ -2407,6 +2419,9 @@ class _DTLParser(HTMLParser):
         indents = [len(ln) - len(ln.lstrip()) for ln in raw if ln.strip()]
         cut = min(indents) if indents else 0
         lines = [ln[cut:].rstrip() for ln in raw]
+        # ISPDTLC block spacing: a preformatted <lines>/<xmp> block is preceded by
+        # a leading blank line (COMPACT/NOSKIP suppress it — #210).
+        self._skip_blank_before(a)
         row, col, ctx = self._resolve_pos(a, "lines")
         width = max(1, self.screen.width - (col + 1))
         for i, ln in enumerate(lines):
@@ -2899,6 +2914,9 @@ class _DTLParser(HTMLParser):
         the left margin; ``<nt>`` hangs its body indented under the text (aligned
         past the heading), and may carry nested paragraphs."""
         text = " ".join(content.split())
+        # ISPDTLC block spacing: an admonition (<note>/<nt>) is preceded by a
+        # leading blank line (COMPACT/NOSKIP suppress it — #210).
+        self._skip_blank_before(a)
         row, col, ctx = self._resolve_pos(a, tag)
         if self._lists:
             col += len(self._lists) * self._LIST_INDENT
