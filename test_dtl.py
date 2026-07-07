@@ -1762,6 +1762,53 @@ def test_lstcol_caps_default_off():
     assert s.read_table_rows({cell.data_addr: "abc"}) == [{"k": "abc"}]
 
 
+def _required_table(rows):
+    src = (
+        '<panel name="t">T<lstfld>'
+        '<lstcol datavar="k" usage="in" required="yes" msg="KEYREQ" colwidth="6">Key'
+        '<lstcol datavar="v" usage="in" colwidth="10">Val'
+        '</lstfld></panel>'
+    )
+    return load_dtl(src, rows=rows)
+
+
+def test_lstcol_required_parses_onto_input_cell():
+    # <lstcol REQUIRED=YES MSG=id> marks the cell required and carries its MSG.
+    s = _required_table([{"k": "", "v": ""}])
+    cells = {f.name: f for f in s.items
+             if isinstance(f, Field) and f.row_index is not None}
+    assert cells["k"].required is True and cells["k"].msg == "KEYREQ"
+    assert cells["v"].required is False and cells["v"].msg is None
+
+
+def test_required_blank_on_modified_row_is_an_error():
+    # A row the user modified whose required cell is blank yields the column MSG;
+    # a row left untouched is not validated (#236).
+    s = _required_table([{"k": "", "v": ""}, {"k": "", "v": ""}])
+    cells = [f for f in s.items if isinstance(f, Field) and f.row_index is not None]
+    # user types into row 0's Value only (row 0 modified, its Key still blank);
+    # row 1 is left entirely untouched
+    modified = {f.data_addr: "hello"
+                for f in cells if f.name == "v" and f.row_index == 0}
+    errors = s.table_required_errors(modified)
+    assert errors == [(0, "k", "KEYREQ")]
+
+
+def test_required_satisfied_when_cell_filled():
+    # The required cell is non-blank on the modified row → no error.
+    s = _required_table([{"k": "", "v": ""}])
+    cells = [f for f in s.items if isinstance(f, Field) and f.row_index is not None]
+    modified = {f.data_addr: ("KEY1" if f.name == "k" else "val")
+                for f in cells if f.row_index == 0}
+    assert s.table_required_errors(modified) == []
+
+
+def test_required_ignored_on_display_only_table():
+    # No input cells → nothing to validate.
+    s = load_panel("dlgtest", rows=[{"vname": "ZUSER", "vvalue": "X"}])
+    assert s.table_required_errors({}) == []
+
+
 # ── message members (<msgmbr>/<msg>) ─────────────────────────────────────────
 
 def test_msg_member_parses_and_formats_with_substitution():

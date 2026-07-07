@@ -524,6 +524,13 @@ class Field:
     # the typed value to uppercase on read-back (Screen.read_table_rows). Metadata —
     # not rendered, not part of field identity.
     caps: bool = _dc_field(default=False, compare=False)
+    # DTL <lstcol REQUIRED=YES MSG=id>: this input cell must be non-blank on a
+    # modified row. ISPF compiles it to VER(var, NONBLANK, MSG=id) in the panel
+    # )PROC; this server validates it on read-back (Screen.table_required_errors),
+    # surfacing ``msg`` when a required cell is left blank. Metadata — not rendered,
+    # not part of field identity.
+    required: bool = _dc_field(default=False, compare=False)
+    msg: Optional[str] = _dc_field(default=None, compare=False)
 
     @property
     def data_addr(self) -> int:
@@ -1018,3 +1025,30 @@ class Screen:
             if f.name is not None:
                 rows[f.row_index][f.name] = value
         return rows
+
+    def table_required_errors(
+        self, fields_by_addr: Dict[int, str]
+    ) -> List[Tuple[int, Optional[str], Optional[str]]]:
+        """Validate the ``<lstcol REQUIRED=YES>`` cells of a rendered table.
+
+        Mirrors ISPF's ``VER(var, NONBLANK, MSG=id)`` on a table display: for each
+        **modified** model row (a row the client returned any cell for), a required
+        input cell that is left blank is an error. Returns
+        ``[(row_index, datavar, msg), …]`` — one per offending cell, in row order —
+        so the caller can redisplay with the column's ``MSG`` and reposition. An
+        unmodified row is not validated (the user never touched it), matching how
+        ISPF only verifies rows processed on this pass.
+        """
+        cells = [f for f in self.items
+                 if isinstance(f, Field) and f.row_index is not None]
+        if not cells:
+            return []
+        modified_rows = {f.row_index for f in cells if f.data_addr in fields_by_addr}
+        errors: List[Tuple[int, Optional[str], Optional[str]]] = []
+        for f in sorted(cells, key=lambda c: c.row_index):
+            if not f.required or f.row_index not in modified_rows:
+                continue
+            value = fields_by_addr.get(f.data_addr, f.default)
+            if not value.strip():
+                errors.append((f.row_index, f.name, f.msg))
+        return errors
