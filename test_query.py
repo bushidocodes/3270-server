@@ -18,7 +18,7 @@ import server
 from server import (
     read_partition_query, read_partition_query_list, parse_query_reply,
     set_reply_mode, request_reply_mode, RM_FIELD, RM_EXTENDED_FIELD, RM_CHARACTER,
-    QR_REPLY_MODES, _iac_escape,
+    QR_REPLY_MODES, _iac_escape, erase_reset,
 )
 
 IAC, EOR, SE = 0xFF, 0xEF, 0xF0
@@ -151,6 +151,21 @@ def test_request_reply_mode_skips_a_terminal_without_the_capability():
     finally:
         srv.close(); cli.close()
     assert result["model"].reply_mode == RM_FIELD
+
+
+# ── Erase/Reset (#102) ───────────────────────────────────────────────────────
+
+def test_erase_reset_bytes():
+    # F3 (WSF) + [len][len] 03 (Erase/Reset) <flag>. len 0x0004 counts itself.
+    assert erase_reset() == bytes([0xF3, 0x00, 0x04, 0x03, 0x00])            # default size
+    assert erase_reset(alternate=False) == bytes([0xF3, 0x00, 0x04, 0x03, 0x00])
+    assert erase_reset(alternate=True) == bytes([0xF3, 0x00, 0x04, 0x03, 0x80])  # alt size
+
+
+def test_erase_reset_iac_escape_is_a_noop():
+    # No body byte is 0xFF, so IAC-escaping the SF leaves it unchanged — but the
+    # send path still frames it with IAC EOR the same way as the Query.
+    assert _iac_escape(erase_reset(alternate=True)) == erase_reset(alternate=True)
 
 
 # ── the reply parser ─────────────────────────────────────────────────────────

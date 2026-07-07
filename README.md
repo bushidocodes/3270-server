@@ -205,6 +205,10 @@ When the user presses Enter or a PF key, the emulator sends an AID byte followed
 
 By default a terminal returns modified fields in **Field** reply mode — text only. A terminal that advertises **Reply Modes** in its Query Reply (`QR_REPLY_MODES`, `0x88`) can be switched to a richer inbound mode with a **Set Reply Mode** Write Structured Field (`F3 00 05 09 00 <mode>`): **Extended Field** mode (`0x01`) prefixes each modified field with its extended attributes, and **Character** mode (`0x02`) additionally reports per-character attribute changes. The attributes ride inbound as **Set Attribute** (`SA`, `0x28`) orders — the same order used outbound by `Text.rich` — so `request_reply_mode` switches capable terminals to Character mode after the Query and `_parse_3270_reply` consumes each `SA type/value` triple as an attribute (recorded per field) instead of mistaking it for field text. Only basic-TN3270 `-E` terminals answer the Query, so under **TN3270E** the capability is never learned and the session stays in Field mode — where no `SA` orders appear and field text is read exactly as before. (Verified against ws3270: the Set Reply Mode WSF is accepted and a submitted field parses cleanly under Character mode.)
 
+### Erase/Reset (partition control)
+
+Beyond the Query, the server can build one **partition-control** Write Structured Field: **Erase/Reset** (`F3 00 04 03 <flag>`, id `0x03`). It tears down any explicit partition state and re-establishes a single **implicit** partition covering the whole screen, then erases it — the clean slate a host issues before switching between the default and the alternate screen size. The one flag byte selects that implicit partition's size: `0x00` (default) or `0x80` (alternate). `erase_reset(alternate=…)` returns the logical bytes; the caller IAC-escapes and IAC-EOR-terminates them exactly like the Query. This is the concrete, self-contained partition SF called for by #102 (a "collapse a split view back to one full-screen partition" primitive) rather than the much larger field-format Create/Set/Destroy Partition surface. It is **opt-in**: nothing in the bundled session sends it, so no panel changes behaviour. Verified against ws3270 — the emulator parses and accepts it (`WriteStructuredField EraseReset Alternate` in its trace, no `WriteStructuredField error`) and renders the screen that follows.
+
 ## Project structure
 
 ```
@@ -249,6 +253,7 @@ Key functions:
 | `query_terminal` | Sends a Read Partition Query List (IAC-escaped) to an extended terminal and folds its Query Reply (real size, colour, advertised QCODEs) into the `TerminalModel` |
 | `parse_query_reply` | Parses an inbound Query Reply record (AID `0x88`) into a capabilities dict |
 | `request_reply_mode` | Sends a Set Reply Mode WSF to a reply-modes-capable terminal so modified fields carry their extended attributes (`SA` orders) inbound |
+| `erase_reset` | Builds an Erase/Reset WSF (`F3 00 04 03 <flag>`) that resets to one implicit partition of the default or alternate size — an opt-in partition-control primitive (#102), unused by the bundled session |
 | `dtl.load_panel` | Parses a `panels/*.dtl` source into a `Screen` |
 | `screen.Screen.render` | Renders a `Screen` to a 3270 data stream |
 | `screen.Screen.parse` | Maps a client response onto named fields |
