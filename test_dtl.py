@@ -1321,6 +1321,151 @@ class _Sock2:
     def close(self): pass
 
 
+# ── action-bar / command attributes (#126) ──────────────────────────────────
+
+def test_action_bar_absepstr_draws_separator_between_choices():
+    # ABSEPSTR is the string drawn between the action-bar choices; the choices lay
+    # out flush against it (no default gap), so " | " gives "File | Edit".
+    s = load_dtl(
+        '<panel><ab absepstr=" | ">'
+        '<abc>File<pdc>Open<action run=x></pdc>'
+        '<abc>Edit<pdc>Cut<action run=y></pdc>'
+        '</ab></panel>'
+    )
+    assert s.items[0] == Text(0, 1, "File", DisplayIntensity.HIGH)
+    assert s.items[1] == Text(0, 5, " | ", DisplayIntensity.HIGH)   # after "File"
+    assert s.items[2] == Text(0, 8, "Edit", DisplayIntensity.HIGH)  # 5 + len(" | ")
+    assert [c["col"] for c in s.action_bar] == [1, 8]
+
+
+def test_action_bar_absepchar_draws_separator_line_below_bar():
+    # ABSEPCHAR is the character of the separator *line* under the action bar
+    # (dividing the bar from the panel body): a full-width rule on the next row.
+    s = load_dtl(
+        '<panel><ab absepchar="=">'
+        '<abc>File<pdc>Open<action run=x></pdc>'
+        '</ab></panel>'
+    )
+    rules = [it for it in s.items if getattr(it, "role", None) == "rule"]
+    assert len(rules) == 1
+    assert rules[0].row == 1 and rules[0].col == 1     # row below the bar
+    assert set(rules[0].text) == {"="} and len(rules[0].text) == 80 - 1 - 1
+
+
+def test_action_bar_without_separators_is_byte_identical():
+    # Neither attribute present → the default gap layout is unchanged (regression).
+    s = load_dtl(
+        '<panel><ab>'
+        '<abc>Menu<pdc>Exit<action run="exit"></pdc></abc>'
+        '<abc>Help<pdc>About<action run="passthru"></pdc></abc>'
+        '</ab></panel>'
+    )
+    assert s.items[0] == Text(0, 1, "Menu", DisplayIntensity.HIGH)
+    assert s.items[1] == Text(0, 8, "Help", DisplayIntensity.HIGH)   # gap of 3
+    assert not [it for it in s.items if getattr(it, "role", None) == "rule"]
+
+
+def test_pdc_unavail_marks_item_unavailable_by_variable():
+    # UNAVAIL=var makes the pull-down item unavailable when the variable is true
+    # (shown but greyed + unselectable); false/absent leaves it available.
+    on = load_dtl(
+        '<panel><ab><abc>View'
+        '<pdc unavail=nolist>Refresh<action run=ref>'
+        '</ab></panel>', nolist="1")
+    off = load_dtl(
+        '<panel><ab><abc>View'
+        '<pdc unavail=nolist>Refresh<action run=ref>'
+        '</ab></panel>', nolist="0")
+    assert on.action_bar[0]["pdc"][0]["unavail"] is True
+    assert "unavail" not in off.action_bar[0]["pdc"][0]   # available: key omitted
+
+
+def test_pdc_checkvar_match_marks_current_item():
+    # CHECKVAR=var MATCH=x flags the item as the current setting when the variable
+    # equals MATCH (the pull-down analogue of <choice checkvar>); else no flag.
+    s = load_dtl(
+        '<panel><ab><abc>Sort'
+        '<pdc checkvar=order match=NAME>By Name<action run=byname>'
+        '<pdc checkvar=order match=DATE>By Date<action run=bydate>'
+        '</ab></panel>', order="NAME")
+    pdc = s.action_bar[0]["pdc"]
+    assert pdc[0].get("checked") is True
+    assert "checked" not in pdc[1]
+
+
+def test_pdc_unavailable_item_is_dimmed_and_unselectable():
+    # In the open pull-down, an unavailable item renders at NORMAL (dimmed)
+    # intensity and cannot be selected; the cursor lands on the first available
+    # item, or on the CHECKVAR-current item when one is present.
+    import server
+    from server import encode_pack_addr
+    from screen import Screen
+    pdc = [
+        {"label": "Refresh", "action": "ref", "mnemonic": None, "help": None,
+         "unavail": True},
+        {"label": "By Name", "action": "byname", "mnemonic": None, "help": None,
+         "checked": True},
+        {"label": "By Date", "action": "bydate", "mnemonic": None, "help": None},
+    ]
+    choice = {"label": "View", "row": 0, "col": 1, "pdc": pdc}
+
+    def reply(aid, row, col):
+        return bytes([aid]) + encode_pack_addr(row, col) + bytes([0xFF, 0xEF])
+
+    # Cursor lands on the checked "By Name" (row 3), not the greyed row.
+    scr = Screen()
+    server._show_pulldown(_Sock2([bytes([0xF3, 0xFF, 0xEF])]), scr, choice)
+    intens = {it.row: it.intensity for it in scr.items
+              if it.col == 1 and hasattr(it, "intensity")}
+    assert intens[2] == DisplayIntensity.NORMAL      # unavailable Refresh: dimmed
+    assert intens[3] == DisplayIntensity.HIGH        # available By Name
+    assert scr.cursor_at == (3, 2)                    # on the current (checked) item
+    # Enter on the greyed Refresh row (2) does not select it.
+    assert server._show_pulldown(_Sock2([reply(0x7D, 2, 3)]), Screen(), choice) == ""
+    # Enter on an available item selects its action.
+    assert server._show_pulldown(_Sock2([reply(0x7D, 4, 3)]), Screen(), choice) == "bydate"
+
+
+def test_action_setvar_and_togvar_are_modelled():
+    # <action setvar=/togvar=> record the variable an action assigns/toggles so the
+    # dialog can model an on/off "Settings"-style pull-down item; TYPE is captured.
+    s = load_dtl(
+        '<panel><ab><abc>Opts'
+        '<pdc>Word wrap<action run=noop togvar=WRAP value1=OFF value2=ON>'
+        '<pdc>Reset<action run=noop setvar=WRAP value=OFF type=cmd>'
+        '</ab></panel>'
+    )
+    wrap, reset = s.action_bar[0]["pdc"]
+    assert wrap["togvar"] == ("WRAP", "OFF", "ON")
+    assert reset["setvar"] == ("WRAP", "OFF")
+    assert reset["type"] == "cmd"
+
+
+def test_keyl_records_name_and_applid():
+    # <keyl name=.. applid=..> records the keylist's identity (a panel references it
+    # via KEYLIST=name); the key→command bindings still populate .keylist.
+    s = load_dtl(
+        '<panel><keyl name=MYKEYS applid=ISR>'
+        '<keyi key=PF3 cmd=EXIT>Exit</keyi>'
+        '</keyl></panel>'
+    )
+    assert s.keylist == {"PF3": "EXIT"}
+    assert s.keylist_name == "MYKEYS"
+    assert s.keylist_applid == "ISR"
+
+
+def test_keyi_fka_text_recorded_and_suppressed_by_fka_no():
+    # A <keyi>'s content is its function-key-area label; FKA=NO suppresses it.
+    s = load_dtl(
+        '<panel><keyl>'
+        '<keyi key=PF1 cmd=HELP>Help</keyi>'
+        '<keyi key=PF3 cmd=EXIT>Exit</keyi>'
+        '<keyi key=PF12 cmd=CANCEL fka=no>Cancel</keyi>'
+        '</keyl></panel>'
+    )
+    assert s.keylist_fka == {"PF1": "Help", "PF3": "Exit"}   # PF12 (FKA=NO) omitted
+
+
 def test_rp_reference_phrase_is_inline_underlined_link():
     # <rp> (reference phrase — a link to another help panel) emphasises a phrase
     # in place, like <hp>: one Text.rich whose phrase run is underlined.
