@@ -2087,6 +2087,7 @@ def handle_client(client_socket, addr):
         # Logon loop
         error_msg = None
         error_alarm = False
+        error_help = None   # help panel of the showing error <msg help=>, if any
         userid = None
         while True:
             screen = send_tso_logon(client_socket, error_msg, model=model,
@@ -2103,9 +2104,11 @@ def handle_client(client_socket, addr):
                 # Keylist bound this key (PF3/PF15) to EXIT — log off.
                 return
             if cmd == "HELP":
-                # Field-level help (cursor on a field with its own help) wins over
+                # A showing message's own help panel (<msg help=>) wins, the way
+                # ISPF routes HELP on a displayed message to its help; then
+                # field-level help (cursor on a field with its own help), then
                 # the panel's general help.
-                help_panel = screen.help_for(cursor) or screen.help
+                help_panel = error_help or screen.help_for(cursor) or screen.help
                 if help_panel:
                     _show_overlay(client_socket, help_panel)
                     continue
@@ -2117,6 +2120,7 @@ def handle_client(client_socket, addr):
                 msgid, subs = verr
                 error_msg = _messages().format(msgid, **subs)
                 error_alarm = _messages().alarm(msgid)
+                error_help = _messages().help(msgid)
                 continue
 
             userid_raw = fields.get(LOGON_USERID_ADDR, "").strip().upper()
@@ -2125,11 +2129,13 @@ def handle_client(client_socket, addr):
             if not userid_raw:
                 error_msg = _messages().format("IKJ56700I")
                 error_alarm = _messages().alarm("IKJ56700I")
+                error_help = _messages().help("IKJ56700I")
                 continue
 
             if _CREDENTIALS.get(userid_raw) != password_raw:
                 error_msg = _messages().format("IKJ56425I", USERID=userid_raw)
                 error_alarm = _messages().alarm("IKJ56425I")
+                error_help = _messages().help("IKJ56425I")
                 continue
 
             userid = userid_raw

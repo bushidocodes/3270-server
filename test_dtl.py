@@ -1455,6 +1455,42 @@ def test_msg_short_message_and_member_width():
     assert cat.short("P") == "P Plain"                   # falls back to long form
 
 
+def test_msg_help_pointer_and_msgtype_carried():
+    cat = load_messages(
+        '<msgmbr name="M">'
+        '<msg msgid="H" msgtype="ACTION" help="HHELP">Do something</msg>'
+        '<msg msgid="P">Plain</msg>'
+        '</msgmbr>'
+    )
+    assert cat.help("H") == "HHELP"                      # <msg help=> carried
+    assert cat.help("h") == "HHELP"                      # id lookup is case-fold
+    assert cat.help("P") is None                         # no help pointer
+    assert cat.help("NOSUCH") is None                    # unknown id
+    assert cat.msgtype("H") == "action"                  # MSGTYPE carried, folded
+    assert cat.msgtype("P") is None                      # untyped message
+
+
+def test_msg_member_width_wraps_long_message():
+    cat = load_messages(
+        '<msgmbr name="M" width="20" ccsid="37">'
+        '<msg msgid="L">The value &N is not valid in this context</msg>'
+        '</msgmbr>'
+    )
+    assert cat.ccsid == 37                               # <msgmbr ccsid=> carried
+    # Long text word-wrapped to the member WIDTH, substituting &N at the same time.
+    assert cat.lines("L", N="X") == [
+        "The value X is not", "valid in this", "context"]
+
+
+def test_msg_lines_default_width_keeps_single_line():
+    # With no <msgmbr width=>, ISPF's default width (76) applies, so a short
+    # message stays one line — and the id is not prefixed (that's format()'s job).
+    cat = load_messages('<msgmbr name="M"><msg msgid="P">Plain text</msg></msgmbr>')
+    assert cat.width is None and cat.ccsid is None
+    assert cat.lines("P") == ["Plain text"]
+    assert cat.lines("NOSUCH") == ["NOSUCH"]             # unknown id echoes
+
+
 def test_shipped_tso_error_messages_sound_the_alarm():
     cat = load_message_member("tsomsgs")
     for mid in ("IKJ56425I", "IKJ56700I", "TSO001"):
