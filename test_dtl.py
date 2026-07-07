@@ -2710,6 +2710,28 @@ def test_pandef_supplies_panel_defaults():
     assert s2.width == 40                          # panel own overrides pandef
 
 
+def test_helpdef_supplies_help_panel_defaults():
+    # #54: <helpdef id=…> is the help-panel analogue of <pandef> — a <help HELPDEF=id>
+    # inherits its shared defaults (HELP/WIDTH/DEPTH/…), the help panel's own winning.
+    s = load_dtl("<helpdef id=hd help=exthlp width=50 depth=12>"
+                 "<help name=h1 helpdef=hd>Help Title"
+                 "<area><p>Help body</area></help>")
+    assert s.width == 50                           # inherited
+    assert s.depth == 12                           # inherited
+    assert s.help == "exthlp"                      # inherited extended-help panel
+    assert s.title == "Help Title"
+
+    # The help panel's own attribute wins over the helpdef default.
+    s2 = load_dtl("<helpdef id=hd width=50 depth=12>"
+                  "<help name=h2 helpdef=hd width=40>Own"
+                  "<area><p>x</area></help>")
+    assert s2.width == 40                          # help own overrides helpdef
+
+    # A <helpdef> renders nothing on its own (it only supplies defaults).
+    s3 = load_dtl("<helpdef id=hd width=50 depth=12>")
+    assert s3.items == []
+
+
 def test_textline_no_expand_centres_the_whole_line():
     # With no EXPAND the accumulated segments centre as the panel title.
     s = load_dtl("<panel name=t width=40><textline>"

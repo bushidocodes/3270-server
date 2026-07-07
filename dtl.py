@@ -380,6 +380,7 @@ class _DTLParser(HTMLParser):
         self._panel_title = None  # capturing the panel's title text, or None
         self._textline = None     # <textline> segments [(text, expand)], or None
         self._pandefs = {}        # <pandef id> → default attrs for <panel pandef=id>
+        self._helpdefs = {}       # <helpdef id> → default attrs for <help helpdef=id>
         self._skip = None         # inside a non-rendering block [tag, chars, attrs]
                                   # — <comment>/<copyr>/<compopt>/<source>
         self._title_item = None   # the centered title Text (retracted on collision)
@@ -607,17 +608,27 @@ class _DTLParser(HTMLParser):
             pid = str(a.get("id", "")).strip().lower()
             if pid:
                 self._pandefs[pid] = {k: v for k, v in a.items() if k != "id"}
+        elif tag == "helpdef":
+            # <helpdef id=…> is the help-panel analogue of <pandef>: shared help
+            # defaults (HELP/DEPTH/WIDTH/KEYLIST/…) inherited by any <help HELPDEF=id>.
+            # It renders nothing (#54).
+            hid = str(a.get("id", "")).strip().lower()
+            if hid:
+                self._helpdefs[hid] = {k: v for k, v in a.items() if k != "id"}
         elif tag in ("dtdiv", "dthdiv", "ptdiv"):
             # A vertical `|` between definition-term (or -heading) columns; the
             # preceding <dt>/<dthd> was flushed just above, so its column state is set.
             self._emit_defdiv(tag)
         if tag in ("panel", "help"):
-            # A <panel PANDEF=id> inherits the named <pandef>'s defaults — the
-            # panel's own attributes win (setdefault fills only what it omits).
-            pd = self._pandefs.get(str(a.get("pandef", "")).strip().lower())
-            if pd:
-                for k, v in pd.items():
-                    a.setdefault(k, v)
+            # A <panel PANDEF=id> / <help HELPDEF=id> inherits the named default
+            # block's attributes — the panel's own attributes win (setdefault fills
+            # only what it omits). A panel carries PANDEF, a help panel HELPDEF (#54);
+            # in practice only one is present, so applying both is harmless.
+            for defaults in (self._pandefs.get(str(a.get("pandef", "")).strip().lower()),
+                             self._helpdefs.get(str(a.get("helpdef", "")).strip().lower())):
+                if defaults:
+                    for k, v in defaults.items():
+                        a.setdefault(k, v)
             # A top-level <help> is itself a (help) panel — same flow root. The
             # title is the panel's content text (panel-title-text), captured into
             # screen.title by _finalize_panel_title — not an attribute.
