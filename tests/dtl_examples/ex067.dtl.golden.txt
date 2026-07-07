@@ -1,0 +1,13 @@
+                   Order Numbers
+
+ The order number assigned to each inventory item
+ represents specific information about the item.
+
+ Specifically,
+
+ 123       The first 3 digits represent the
+           department the item is stocked in.
+ 456       The fourth, fifth, and sixth digits
+           represent the item.
+ 78        The seventh and eighth digits represent
+           the lot number of the item.

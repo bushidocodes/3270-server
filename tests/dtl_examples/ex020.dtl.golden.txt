@@ -1,0 +1,17 @@
+                                 Item Selection
+ Select one of the following items and press Enter.
+
+ __  1.  Automotive
+     2.  Hardware
+     3.  Health and beauty
+     4.  Lawn and garden
+     5.  Sporting goods
+
+
+
+
+
+
+
+
+ To exit the application, press F3.
