@@ -367,8 +367,9 @@ class _DTLParser(HTMLParser):
         self._in_msgmbr = False   # inside a <msgmbr>?
         self._msgmbr_name = ""    # current <msgmbr name=...> (for <msg suffix>)
         self._msgmbr_width = None  # <msgmbr width=...>, or None
+        self._msgmbr_ccsid = None  # <msgmbr ccsid=...>, or None
         self.messages = {}        # <msg> msgid (upper) → message text
-        self._msg_attrs = {}      # <msg> msgid (upper) → {alarm, msgtype, smsg}
+        self._msg_attrs = {}      # <msg> msgid (upper) → {alarm, msgtype, smsg, help}
         self._areas = []          # stack of <area>/<region> flow contexts
         self._in_cmdtbl = False   # inside a <cmdtbl>?
         self._cur_cmd = None      # current <cmd> dict awaiting its <cmdact>
@@ -428,13 +429,15 @@ class _DTLParser(HTMLParser):
     def _message_attrs(a) -> dict:
         """Presentation attributes of a <msg>. ALARM defaults from MSGTYPE:
         WARNING/ACTION/CRITICAL messages sound the alarm, INFO does not (an
-        explicit ALARM=YES/NO overrides). SMSG is the short-message text."""
+        explicit ALARM=YES/NO overrides). SMSG is the short-message text; HELP
+        names the help panel the user reaches (PF1) while the message shows."""
         msgtype = str(a.get("msgtype", "")).strip().lower()
         if "alarm" in a:
             alarm = _truthy(a.get("alarm"))
         else:
             alarm = msgtype in ("warning", "action", "critical")
-        return {"alarm": alarm, "msgtype": msgtype or None, "smsg": a.get("smsg")}
+        return {"alarm": alarm, "msgtype": msgtype or None,
+                "smsg": a.get("smsg"), "help": a.get("help")}
 
     def _hp_hilite(self, a):
         """The Highlight for an <hp> phrase: its HILITE= or the DTL TYPE= (both
@@ -980,6 +983,7 @@ class _DTLParser(HTMLParser):
             self._in_msgmbr = True
             self._msgmbr_name = a.get("name", "")
             self._msgmbr_width = self._opt_int(a.get("width"))
+            self._msgmbr_ccsid = self._opt_int(a.get("ccsid"))
         elif tag == "msg":
             if not self._in_msgmbr:
                 raise DTLError("<msg> outside of a <msgmbr>")
@@ -3435,10 +3439,16 @@ class MessageCatalog:
     also carries presentation attributes (see :meth:`alarm` / :meth:`short`).
     """
 
-    def __init__(self, messages: dict, attrs: dict = None, width: int = None):
+    # ISPF's default long-message field width when a <msgmbr> declares none;
+    # the DTL Guide documents WIDTH=76|68 with 76 as the default.
+    DEFAULT_WIDTH = 76
+
+    def __init__(self, messages: dict, attrs: dict = None, width: int = None,
+                 ccsid: int = None):
         self.messages = messages
         self.attrs = attrs or {}
         self.width = width          # <msgmbr width=>, or None
+        self.ccsid = ccsid          # <msgmbr ccsid=> (metadata), or None
 
     def format(self, msgid: str, **subs) -> str:
         text = self.messages.get(msgid.upper())
@@ -3451,12 +3461,46 @@ class MessageCatalog:
         (<msg alarm=> / its MSGTYPE default). Unknown ids don't alarm."""
         return bool(self.attrs.get(msgid.upper(), {}).get("alarm"))
 
+    def msgtype(self, msgid: str):
+        """The <msg msgtype=> (info|warning|action|critical) lower-cased, or
+        None. Carried so a caller can colour/badge a message by severity."""
+        return self.attrs.get(msgid.upper(), {}).get("msgtype")
+
     def short(self, msgid: str, **subs) -> str:
         """The short-message text (<msg smsg=>) if present, else the long form."""
         smsg = self.attrs.get(msgid.upper(), {}).get("smsg")
         if smsg is None:
             return self.format(msgid, **subs)
         return _substitute(smsg, subs)
+
+    def help(self, msgid: str):
+        """The help-panel name a user reaches (PF1) while this message shows
+        (<msg help=>), or None. Lets the server offer message-specific help,
+        the way ISPF routes HELP on a displayed message to its help panel."""
+        return self.attrs.get(msgid.upper(), {}).get("help")
+
+    def lines(self, msgid: str, **subs):
+        """The (substituted) long message text word-wrapped to the member's
+        WIDTH (<msgmbr width=>, else the ISPF default 76), as a list of display
+        lines. Honours WIDTH the way DTL formats a long message that overflows
+        its field; a message within the width stays a single line."""
+        text = self.messages.get(msgid.upper())
+        if text is None:
+            return [msgid]
+        text = _substitute(text, subs)
+        width = self.width or self.DEFAULT_WIDTH
+        words, out, cur = text.split(), [], ""
+        for w in words:
+            if not cur:
+                cur = w
+            elif len(cur) + 1 + len(w) <= width:
+                cur += " " + w
+            else:
+                out.append(cur)
+                cur = w
+        if cur:
+            out.append(cur)
+        return out or [""]
 
 
 def load_messages(source: str) -> MessageCatalog:
@@ -3468,7 +3512,8 @@ def load_messages(source: str) -> MessageCatalog:
     parser = _DTLParser()
     parser.feed(source)
     parser.close()
-    return MessageCatalog(parser.messages, parser._msg_attrs, parser._msgmbr_width)
+    return MessageCatalog(parser.messages, parser._msg_attrs,
+                          parser._msgmbr_width, parser._msgmbr_ccsid)
 
 
 def load_message_member(name: str, directory: str = None) -> MessageCatalog:
