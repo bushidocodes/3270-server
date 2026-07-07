@@ -1659,6 +1659,50 @@ def test_ordered_list_numbers_items():
     ]
 
 
+def test_list_indent_shifts_items_and_markers_right():
+    # INDENT=n on a <ul> shifts the whole list — bullet and item text — n columns
+    # to the right of the flow margin (#123).
+    s = load_dtl('<panel name="p"><ul indent=6><li>apple<li>pear</ul></panel>')
+    N = DisplayIntensity.NORMAL
+    assert s.items == [
+        Text(0, 7, "o", N), Text(0, 11, "apple", N),
+        Text(1, 7, "o", N), Text(1, 11, "pear", N),
+    ]
+
+
+def test_list_space_sets_item_text_indentation():
+    # SPACE=YES on the list narrows the marker-to-text gap to 3 columns (default
+    # 4), inherited by every <li> that does not carry its own SPACE (#123).
+    s = load_dtl('<panel name="p"><ul space=yes><li>apple<li>pear</ul></panel>')
+    N = DisplayIntensity.NORMAL
+    assert s.items == [
+        Text(0, 1, "o", N), Text(0, 4, "apple", N),
+        Text(1, 1, "o", N), Text(1, 4, "pear", N),
+    ]
+
+
+def test_list_text_renders_a_heading_above_the_items():
+    # TEXT= gives the list a heading line (then a blank) above its items (#123).
+    s = load_dtl("<panel name=\"p\"><ul text='Choose:'><li>apple</ul></panel>")
+    N = DisplayIntensity.NORMAL
+    assert s.items == [
+        Text(0, 1, "Choose:", N),               # heading on its own line
+        Text(2, 1, "o", N), Text(2, 5, "apple", N),   # blank line at row 1
+    ]
+
+
+def test_paragraph_indent_shifts_the_whole_paragraph_right():
+    # INDENT=n on a <p> shifts the flowed paragraph n columns right (#123). The
+    # first paragraph flows at the margin; the blank-before spacing puts the
+    # second on row 2.
+    s = load_dtl('<panel name="p"><p>flush<p indent=8>shifted</p></panel>')
+    N = DisplayIntensity.NORMAL
+    assert s.items == [
+        Text(0, 1, "flush", N),
+        Text(2, 9, "shifted", N),
+    ]
+
+
 def test_definition_list_pairs_term_and_description_on_one_line():
     # <dl> default break=none: each <dt> term and its <dd> description share a
     # line, the description in a column tsize (default 10) to the right.

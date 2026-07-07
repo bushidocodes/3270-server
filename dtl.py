@@ -562,8 +562,20 @@ class _DTLParser(HTMLParser):
             self._emit_current()
         if tag in ("ul", "ol", "sl"):
             # <ul>/<ol> mark each item with a bullet/number; <sl> (simple list)
-            # indents its items with no marker (see _emit_listitem).
-            self._lists.append({"type": tag, "n": 0})
+            # indents its items with no marker (see _emit_listitem). TEXT= gives
+            # the list a heading line above its items; INDENT shifts the whole list
+            # right; SPACE sets the item-text indentation (YES → 3 cols, else 4),
+            # inherited by every <li> that does not carry its own SPACE (#123).
+            ctx = self._areas[-1] if self._areas else None
+            indent = self._opt_int(a.get("indent"), 0)
+            heading = str(a.get("text", "")).strip()
+            if ctx is not None and heading:
+                self.screen.add(Text(ctx["row"], ctx["col"] + indent, heading,
+                                     role="text"))
+                ctx["row"] += 2               # heading + a blank line before the items
+            self._lists.append({"type": tag, "n": 0,
+                                "indent": indent,
+                                "space": self._space_indent(a)})
         elif tag == "notel":
             # A note list: a "Notes:" heading (TEXT= override, INTENS/COLOR/HILITE
             # style it), a blank line, then NUMBERED <li> items (1. 2. …).
@@ -1823,8 +1835,10 @@ class _DTLParser(HTMLParser):
         base = (self._note_hang if self._note_hang is not None
                 else (ctx["col"] if ctx else 1)) + self._info_indent
         depth = max(len(self._lists), 1)
-        bullet_col = base + (depth - 1) * self._LIST_INDENT
         lst = self._lists[-1] if self._lists else None
+        # INDENT on the list shifts its items (marker included) right (#123).
+        bullet_col = base + (depth - 1) * self._LIST_INDENT \
+            + (lst.get("indent", 0) if lst else 0)
         if lst and lst["type"] == "sl":
             marker = None                       # simple list: indented, no bullet
         elif lst and lst["type"] == "ol":
@@ -2461,6 +2475,9 @@ class _DTLParser(HTMLParser):
         if self._lists:
             # A paragraph inside a list aligns with the list's item text.
             col += len(self._lists) * self._LIST_INDENT
+        if tag == "p":
+            # A <p> may carry INDENT=n to shift the whole paragraph right (#123).
+            col += self._opt_int(a.get("indent"), 0)
         if tag == "botinst" and ctx is not None:
             # A bottom instruction anchors near the foot of the panel (leaving the
             # last row free, as ISPF keeps for the key area), dropping below the
