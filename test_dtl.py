@@ -2844,6 +2844,72 @@ def test_lstfld_out_of_scope_attributes_are_accepted_and_ignored():
     assert b.render() == a.render()
 
 
+def test_choice_divider_solid_draws_a_rule_and_separates_choices():
+    # #53: <chdiv type=solid> draws a dashed rule across the choice area between
+    # groups of choices, pushing the following choices down a row.
+    s = load_dtl(
+        '<panel name="p">M<selfld type="menu">Pick'
+        '<choice>One<action run="a">'
+        '<chdiv type="solid">'
+        '<choice selchar="X">Exit<action run="exit" type="exit">'
+        '</selfld></panel>'
+    )
+    rules = [t for t in s.items if isinstance(t, Text) and set(t.text) == {"-"}]
+    assert len(rules) == 1
+    rule = rules[0]
+    ones = [t for t in s.items if isinstance(t, Text) and t.text == "One"]
+    exits = [t for t in s.items if isinstance(t, Text) and t.text == "Exit"]
+    # the rule sits between the two choices
+    assert ones[0].row < rule.row < exits[0].row
+
+
+def test_choice_divider_default_is_a_blank_separator():
+    # A bare <chdiv> (TYPE=NONE default, no text) is a blank separator: it draws
+    # nothing but advances the choice flow, so the next choice drops a row.
+    with_div = load_dtl(
+        '<panel name="p">M<selfld type="menu">Pick'
+        '<choice>One<action run="a"><chdiv>'
+        '<choice selchar="X">Exit<action run="exit" type="exit"></selfld></panel>'
+    )
+    without = load_dtl(
+        '<panel name="p">M<selfld type="menu">Pick'
+        '<choice>One<action run="a">'
+        '<choice selchar="X">Exit<action run="exit" type="exit"></selfld></panel>'
+    )
+    assert not [t for t in with_div.items if isinstance(t, Text) and set(t.text) == {"-"}]
+    exit_with = next(t for t in with_div.items if isinstance(t, Text) and t.text == "Exit")
+    exit_without = next(t for t in without.items if isinstance(t, Text) and t.text == "Exit")
+    assert exit_with.row == exit_without.row + 1   # the divider consumed one row
+
+
+def test_choice_divider_text_writes_a_caption():
+    # <chdiv type=text> (or a bare divider with text) writes the caption line.
+    s = load_dtl(
+        '<panel name="p">M<selfld type="menu">Pick'
+        '<choice>One<action run="a">'
+        '<chdiv type="text">More options'
+        '<choice selchar="X">Exit<action run="exit" type="exit"></selfld></panel>'
+    )
+    assert any(isinstance(t, Text) and t.text == "More options" for t in s.items)
+
+
+def test_lstvar_is_accepted_with_no_display_effect():
+    # #53: <lstvar> declares a non-displayed model variable in a <lstfld>. In this
+    # display server it has no rendering — a table with an <lstvar> renders
+    # byte-for-byte like one without (accepted, not rejected).
+    with_var = (
+        '<panel name="p">T<lstfld>'
+        '<lstvar datavar="hid" line="1">'
+        '<lstcol datavar="a" colwidth="6">A</lstfld></panel>'
+    )
+    without = (
+        '<panel name="p">T<lstfld>'
+        '<lstcol datavar="a" colwidth="6">A</lstfld></panel>'
+    )
+    rows = [{"a": "1", "hid": "9"}, {"a": "2", "hid": "8"}]
+    assert load_dtl(with_var, rows=rows).render() == load_dtl(without, rows=rows).render()
+
+
 def test_list_field_bottom_of_data_only_when_not_clipped():
     # #220: "BOTTOM OF DATA" is drawn when the end of the table is on screen; when
     # the rows are clipped by the panel depth (more data on the next page) it is
