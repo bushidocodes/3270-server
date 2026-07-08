@@ -3432,6 +3432,18 @@ def test_helpdef_supplies_help_panel_defaults():
     s3 = load_dtl("<helpdef id=hd width=50 depth=12>")
     assert s3.items == []
 
+    # #54: the FULL default set is inherited — KEYLIST/WINDOW/WINTITLE too, not just
+    # the geometry — and the help panel's own attribute still overrides.
+    s4 = load_dtl('<helpdef id=hd keylist=HKEYS window=yes wintitle="Help Win">'
+                  '<help name=h4 helpdef=hd>Help<area><p>x</area></help>')
+    assert s4.keylist_ref == "HKEYS"                # inherited key-list reference
+    assert s4.window is True                        # inherited pop-up flag
+    assert s4.window_title == "Help Win"            # inherited window title
+    s5 = load_dtl('<helpdef id=hd window=yes wintitle="Def">'
+                  '<help name=h5 helpdef=hd window=no wintitle="Own">Help'
+                  '<area><p>x</area></help>')
+    assert s5.window is False and s5.window_title == "Own"   # help own overrides
+
 
 def test_textline_no_expand_centres_the_whole_line():
     # With no EXPAND the accumulated segments centre as the panel title.
