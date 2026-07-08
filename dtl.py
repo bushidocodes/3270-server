@@ -1193,6 +1193,13 @@ class _DTLParser(HTMLParser):
                 "div": str(a.get("div", "none")).strip().lower(),
                 "divtext": " ".join(str(a.get("text", "")).split()),
                 "divformat": str(a.get("format", "start")).strip().lower(),
+                # DEPTH=n reserves a fixed height: the box occupies at least n rows
+                # (the parent resumes DEPTH rows below its start), padding with blank
+                # rows when the content is shorter. DEPTH=* / absent → the content's
+                # own height (unchanged). #125.
+                "depth": (self._opt_int(a["depth"])
+                          if "depth" in a and str(a["depth"]).strip() != "*"
+                          else None),
                 # A box that transparently continues the parent's flow inherits its
                 # content state, so the first paragraph below a panel title still
                 # gets the CUA title/body separator. An explicitly-positioned box
@@ -1485,8 +1492,17 @@ class _DTLParser(HTMLParser):
             self._info_indent = 0    # an <info> can't outlive its enclosing box
             if self._areas:
                 ctx = self._areas.pop()
+                # DEPTH=n reserves a fixed height: pad the box out to n rows so the
+                # parent flow resumes DEPTH rows below the box's start.
+                if ctx.get("depth"):
+                    floor = ctx["row0"] + ctx["depth"]
+                    if ctx["row"] < floor:
+                        ctx["row"] = floor
+                    ctx["maxbottom"] = max(ctx.get("maxbottom", ctx["row"]), ctx["row"])
                 # DIV draws a divider as the box's last line (SOLID/DASH a rule,
                 # BLANK a spacer, TEXT the divider text), advancing the box cursor.
+                # With DEPTH, the box was padded first, so the rule sits at the
+                # reserved bottom edge.
                 if ctx.get("div") not in (None, "none", ""):
                     self._emit_area_div(ctx)
                 if ctx.get("grpbox"):

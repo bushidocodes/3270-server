@@ -4578,6 +4578,22 @@ def test_area_div_draws_a_closing_divider():
     assert not [t for t in plain.items if isinstance(t, Text) and set(t.text) == {"-"}]
 
 
+def test_area_region_depth_reserves_a_fixed_height():
+    # #125: <area>/<region> DEPTH=n reserves a fixed height — the parent flow
+    # resumes DEPTH rows below the box start even if the content is shorter.
+    # DEPTH=* / absent uses the content's own height (unchanged).
+    sized = load_dtl('<panel name="p" width="40">T<region depth="6">'
+                     '<info>A<info>B</region><info>After</info></panel>')
+    a = next(t.row for t in sized.items if isinstance(t, Text) and t.text == "A")
+    after = next(t.row for t in sized.items if isinstance(t, Text) and t.text == "After")
+    assert after == a + 6                             # parent resumes DEPTH rows below
+    plain = load_dtl('<panel name="p" width="40">T<region>'
+                     '<info>A<info>B</region><info>After</info></panel>')
+    a2 = next(t.row for t in plain.items if isinstance(t, Text) and t.text == "A")
+    after2 = next(t.row for t in plain.items if isinstance(t, Text) and t.text == "After")
+    assert after2 == a2 + 2                            # default: just past the content
+
+
 def test_regions_lay_out_side_by_side_columns():
     s = load_dtl(
         '<panel>'
