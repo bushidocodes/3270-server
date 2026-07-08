@@ -1039,6 +1039,24 @@ def test_chofld_adds_an_entry_field_within_the_choice():
     assert renewal.row == desc.row + 2
 
 
+def test_chofld_autotab_recorded():
+    # AUTOTAB=YES is a client cursor-advance behaviour with no 3270 data-stream
+    # bit; like <dtafld>, it is recorded on the Field as metadata and does not
+    # alter the rendered stream (#115).
+    on = load_dtl(
+        '<panel name=m menu><selfld type=menu>'
+        '<choice>Opt<chofld datavar=cf entwidth=6 autotab=yes>d</selfld></panel>'
+    )
+    off = load_dtl(
+        '<panel name=m menu><selfld type=menu>'
+        '<choice>Opt<chofld datavar=cf entwidth=6>d</selfld></panel>'
+    )
+    field = next(it for it in on.items if isinstance(it, Field) and it.name == "cf")
+    assert field.autotab is True
+    # Metadata only: the rendered stream is byte-identical with/without AUTOTAB.
+    assert on.render() == off.render()
+
+
 def test_chofld_usage_out_is_a_display_field():
     # USAGE=OUT makes the choice data field display-only: the variable's value as
     # protected text, not an editable field.
@@ -1191,6 +1209,23 @@ def test_cmdtbl_parses_commands_and_actions():
     assert s.commands["KEYLIST"]["trunc"] == 3       # from the <t> marker (KEY|LIST)
     assert s.commands["KEYLIST"]["descr"] == "Keys"  # ALTDESCR (metadata)
     assert s.commands["BYE"]["action"] == "alias exit"
+
+
+def test_cmdtbl_applid_recorded_and_sort_is_a_no_op():
+    # #126: <cmdtbl APPLID=> is recorded (Screen.commands_applid); SORT has no
+    # host-display effect (the table renders nothing — it feeds command lookup).
+    s = load_dtl('<panel name="p">M<cmdarea>Option ===></cmdarea>'
+                 '<cmdtbl applid="ISR" sort="yes">'
+                 '<cmd name="BYE" altdescr="Leave"><cmdact action="alias exit"></cmd>'
+                 '</cmdtbl></panel>')
+    assert s.commands_applid == "ISR"
+    assert s.commands["BYE"] == {"action": "alias exit", "trunc": 0, "descr": "Leave"}
+    # SORT=yes vs no renders identically (no visual effect)
+    def render(sort):
+        return load_dtl(f'<panel name="p">M<cmdtbl applid="X" {sort}>'
+                        '<cmd name="A"><cmdact action="passthru"></cmd>'
+                        '</cmdtbl></panel>').render()
+    assert render('sort="yes"') == render('sort="no"')
 
 
 def test_lookup_command_with_truncation():
@@ -1451,6 +1486,28 @@ def test_action_bar_records_pdcvar_and_pdc_accelerators():
         '</abc></ab></panel>').render()
 
 
+def test_action_bar_mnemgen_auto_underlines_first_letter():
+    # #126: <ab MNEMGEN=YES> auto-assigns the first letter of a choice as its
+    # mnemonic (underlined) when the choice has no explicit <M>. It is opt-in:
+    # absent / MNEMGEN=NO leaves bare labels byte-identical, and an explicit <M>
+    # always wins over the auto-generated one.
+    from screen import Highlight
+    def runs(markup):
+        s = load_dtl('<panel name="p">T<ab ' + markup +
+                     '><abc>File<pdc>Open<action run="x"></pdc></abc></ab></panel>')
+        return [t.runs for t in s.items if getattr(t, "runs", None)]
+    assert runs('mnemgen="yes"') == [[("F", None, Highlight.UNDERSCORE),
+                                      ("ile", None, None)]]
+    assert runs('') == []                             # absent → no auto-mnemonic
+    assert runs('mnemgen="no"') == []                 # NO → no auto-mnemonic
+    # an explicit <M> wins (underlines the marked letter, not the first)
+    s = load_dtl('<panel name="p">T<ab mnemgen="yes">'
+                 '<abc>F<M>ile<pdc>Open<action run="x"></pdc></abc></ab></panel>')
+    r = next(t.runs for t in s.items if getattr(t, "runs", None))
+    assert r == [("F", None, None), ("i", None, Highlight.UNDERSCORE),
+                 ("le", None, None)]
+
+
 def test_action_bar_absepstr_draws_separator_between_choices():
     # ABSEPSTR is the string drawn between the action-bar choices; the choices lay
     # out flush against it (no default gap), so " | " gives "File | Edit".
@@ -1610,16 +1667,11 @@ def test_keyi_case_mixed_preserves_command_case_and_parm_appended():
     assert s.keylist["PF4"] == "FIND ALL"    # upper-folded verb + parm appended
 
 
-def test_cmdtbl_records_applid_and_sort():
-    # #126: <cmdtbl applid=.. sort=YES> records the table's application scope and
-    # sort flag (codegen). SORT default NO.
+def test_cmdtbl_records_applid_from_cmd_panel_helper():
+    # #126: the _cmd_panel helper's <cmdtbl applid="ISR"> is recorded on the Screen
+    # (Screen.commands_applid); SORT has no host-display effect and is not stored.
     s = _cmd_panel()
-    assert s.command_table_applid == "ISR"
-    assert s.command_table_sort is False
-    srt = load_dtl(
-        '<panel><cmdtbl applid=ISR sort=yes>'
-        '<cmd name=X>x<cmdact action=passthru></cmd></cmdtbl></panel>')
-    assert srt.command_table_sort is True
+    assert s.commands_applid == "ISR"
 
 
 def test_keyi_fka_text_recorded_and_suppressed_by_fka_no():
@@ -1632,6 +1684,18 @@ def test_keyi_fka_text_recorded_and_suppressed_by_fka_no():
         '</keyl></panel>'
     )
     assert s.keylist_fka == {"PF1": "Help", "PF3": "Exit"}   # PF12 (FKA=NO) omitted
+
+
+def test_keyi_case_folds_the_fka_label():
+    # #126: <keyi CASE=UPPER|LOWER> folds the function-key-area label; ASIS/absent
+    # keeps the authored case.
+    def fka(case):
+        s = load_dtl(f'<panel><keyl><keyi key=PF3 cmd=EXIT case="{case}">Exit Now</keyi>'
+                     '</keyl></panel>')
+        return s.keylist_fka["PF3"]
+    assert fka("upper") == "EXIT NOW"
+    assert fka("lower") == "exit now"
+    assert fka("") == "Exit Now"                     # absent → authored case kept
 
 
 def test_rp_reference_phrase_is_inline_underlined_link():
@@ -4660,6 +4724,22 @@ def test_area_div_draws_a_closing_divider():
     # default (no DIV) → no rule
     plain = load_dtl('<panel name="p" width="30">T<area><info>Body</info></area></panel>')
     assert not [t for t in plain.items if isinstance(t, Text) and set(t.text) == {"-"}]
+
+
+def test_area_region_depth_reserves_a_fixed_height():
+    # #125: <area>/<region> DEPTH=n reserves a fixed height — the parent flow
+    # resumes DEPTH rows below the box start even if the content is shorter.
+    # DEPTH=* / absent uses the content's own height (unchanged).
+    sized = load_dtl('<panel name="p" width="40">T<region depth="6">'
+                     '<info>A<info>B</region><info>After</info></panel>')
+    a = next(t.row for t in sized.items if isinstance(t, Text) and t.text == "A")
+    after = next(t.row for t in sized.items if isinstance(t, Text) and t.text == "After")
+    assert after == a + 6                             # parent resumes DEPTH rows below
+    plain = load_dtl('<panel name="p" width="40">T<region>'
+                     '<info>A<info>B</region><info>After</info></panel>')
+    a2 = next(t.row for t in plain.items if isinstance(t, Text) and t.text == "A")
+    after2 = next(t.row for t in plain.items if isinstance(t, Text) and t.text == "After")
+    assert after2 == a2 + 2                            # default: just past the content
 
 
 def test_regions_lay_out_side_by_side_columns():

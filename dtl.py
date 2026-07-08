@@ -913,10 +913,11 @@ class _DTLParser(HTMLParser):
             self._emit_keyi(a)
         elif tag == "cmdtbl":
             self._in_cmdtbl = True
-            # APPLID scopes the table to an application; SORT=YES alphabetises the
-            # generated table (codegen only). Both recorded as Screen metadata.
-            self.screen.command_table_applid = a.get("applid")
-            self.screen.command_table_sort = _bool_attr(a, "sort")
+            # APPLID scopes the command table to an application (metadata). SORT is
+            # a compile-time ordering of the table with no host-display effect (the
+            # table renders nothing — it only feeds command recognition). #126.
+            if a.get("applid"):
+                self.screen.commands_applid = a.get("applid")
         elif tag == "cmd":
             if not self._in_cmdtbl:
                 raise DTLError("<cmd> outside of a <cmdtbl>")
@@ -948,14 +949,15 @@ class _DTLParser(HTMLParser):
             # blanks; we keep the wider gap when it is absent so bundled panels stay
             # byte-identical). ABSEPCHAR is the character of the separator *line*
             # ISPF draws on the row below the bar — both default to nothing shown.
-            # MNEMGEN=YES|NO governs ISPDTLC auto-generation of choice mnemonics
-            # (the )BODY highlighting it emits). This server honours only explicit
-            # <m> mnemonics — auto-generation is a codegen concern — so MNEMGEN is
-            # recorded but does not synthesise mnemonics. Default YES.
             self._ab = {"row": 0, "col": 1, "gap": 3, "choices": [],
                         "absepstr": a.get("absepstr"),
                         "absepchar": a.get("absepchar"),
-                        "mnemgen": _bool_attr(a, "mnemgen", default=True)}
+                        # MNEMGEN=YES auto-assigns the first letter of a choice as
+                        # its mnemonic when it carries no explicit <M>. Treated as
+                        # opt-in (absent → off) so existing bare-label action bars
+                        # stay byte-identical; MNEMGEN=NO is also off. #126.
+                        "mnemgen": str(a.get("mnemgen", "")).strip().lower()
+                        == "yes"}
         elif tag == "abc":
             if self._ab is None:
                 raise DTLError("<abc> outside of an <ab>")
@@ -1218,6 +1220,13 @@ class _DTLParser(HTMLParser):
                 "div": str(a.get("div", "none")).strip().lower(),
                 "divtext": " ".join(str(a.get("text", "")).split()),
                 "divformat": str(a.get("format", "start")).strip().lower(),
+                # DEPTH=n reserves a fixed height: the box occupies at least n rows
+                # (the parent resumes DEPTH rows below its start), padding with blank
+                # rows when the content is shorter. DEPTH=* / absent → the content's
+                # own height (unchanged). #125.
+                "depth": (self._opt_int(a["depth"])
+                          if "depth" in a and str(a["depth"]).strip() != "*"
+                          else None),
                 # A box that transparently continues the parent's flow inherits its
                 # content state, so the first paragraph below a panel title still
                 # gets the CUA title/body separator. An explicitly-positioned box
@@ -1513,8 +1522,17 @@ class _DTLParser(HTMLParser):
             self._info_indent = 0    # an <info> can't outlive its enclosing box
             if self._areas:
                 ctx = self._areas.pop()
+                # DEPTH=n reserves a fixed height: pad the box out to n rows so the
+                # parent flow resumes DEPTH rows below the box's start.
+                if ctx.get("depth"):
+                    floor = ctx["row0"] + ctx["depth"]
+                    if ctx["row"] < floor:
+                        ctx["row"] = floor
+                    ctx["maxbottom"] = max(ctx.get("maxbottom", ctx["row"]), ctx["row"])
                 # DIV draws a divider as the box's last line (SOLID/DASH a rule,
                 # BLANK a spacer, TEXT the divider text), advancing the box cursor.
+                # With DEPTH, the box was padded first, so the rule sits at the
+                # reserved bottom edge.
                 if ctx.get("div") not in (None, "none", ""):
                     self._emit_area_div(ctx)
                 if ctx.get("grpbox"):
@@ -4265,6 +4283,9 @@ class _DTLParser(HTMLParser):
                 color=self._color(a) or color, role="field",
                 highlight=self._hilite(a), outline=self._outline(a),
                 help=self._field_help(a), pad=self._pad_char(a),
+                # AUTOTAB=YES: cursor auto-advance on fill (client behaviour, no
+                # 3270 data-stream bit) — recorded as metadata (#115, as on <dtafld>).
+                autotab=_bool_attr(a, "autotab"),
             ))
             self._attach_validation(name, a)
         desc = " ".join((description or "").split())
@@ -4329,6 +4350,10 @@ class _DTLParser(HTMLParser):
             label = choice["label"]
             choice["row"], choice["col"] = ab["row"], col
             m = choice.get("mnemonic")
+            # MNEMGEN=YES: a choice with no explicit <M> mnemonic gets its first
+            # letter underlined as the auto-generated shortcut.
+            if m is None and ab.get("mnemgen") and label:
+                m = 0
             if m is not None and 0 <= m < len(label):
                 # Underline the mnemonic letter (the shortcut), as ISPF does. Mono
                 # renders the concatenation identically to a plain Text.
@@ -4387,6 +4412,8 @@ class _DTLParser(HTMLParser):
         # FKA=NO suppresses it) so the FKA line can be labelled.
         self._keyi = {"key": key.upper(),
                       "show": str(a.get("fka", "yes")).strip().lower() != "no",
+                      # CASE folds the FKA label (UPPER/LOWER; ASIS/MIXED keep it).
+                      "case": str(a.get("case", "")).strip().lower(),
                       "chars": []}
 
     def _finalize_keyi(self):
@@ -4397,6 +4424,10 @@ class _DTLParser(HTMLParser):
         if ki is None:
             return
         text = "".join(ki["chars"]).strip()
+        if ki.get("case") == "upper":
+            text = text.upper()
+        elif ki.get("case") == "lower":
+            text = text.lower()
         if ki["show"] and text:
             self.screen.keylist_fka[ki["key"]] = text
 

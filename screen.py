@@ -774,11 +774,10 @@ class Screen:
     # Command name (upper) → {"action": str, "trunc": int}, from a DTL <cmdtbl>.
     # Lets the command line recognise named commands (with truncation).
     commands: Dict[str, dict] = _dc_field(default_factory=dict)
-    # The command table's APPLID (application scope) and SORT flag (DTL <cmdtbl
-    # applid=.. sort=YES>). SORT alphabetises the generated table — codegen only,
-    # no host-display effect. Both metadata; None/False when absent.
-    command_table_applid: Optional[str] = None
-    command_table_sort: bool = False
+    # The <cmdtbl APPLID=...> application id the command table is scoped to, or
+    # None. Metadata (the table renders nothing); the SORT attribute has no
+    # host-display effect. See #126.
+    commands_applid: Optional[str] = None
     # Action-bar choices from a DTL <ab>: [{"label": str, "pdc": [...]}]. The
     # choice labels are also emitted as Text items; the pull-down structure is
     # kept here for future point-and-shoot interaction.
