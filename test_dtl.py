@@ -4548,6 +4548,26 @@ def test_divider_type_text_lays_out_its_text_positioned_by_format():
     assert end.items[0] == Text(0, 1 + (78 - 7), "Options", role="rule")
 
 
+def test_divider_text_keeps_inline_hp_runs():
+    # #125: inline <hp> inside a TYPE=TEXT divider no longer truncates the caption
+    # (previously it stopped at the tag) — the full text renders, the emphasised
+    # phrase keeping its highlight run (mono renders identically to the plain text).
+    s = load_dtl('<panel><area>'
+                 '<divider type="text">Part <hp hilite="reverse">Two</hp> here</divider>'
+                 '</area></panel>')
+    it = s.items[0]
+    assert it.text == "Part Two here"
+    assert it.runs == [
+        ("Part", None, None),
+        (" Two", None, Highlight.REVERSE),
+        (" here", None, None),
+    ]
+    # No inline emphasis → a plain Text (byte-identical to before).
+    plain = load_dtl('<panel><area><divider type="text">Part Two here</divider></area></panel>')
+    assert plain.items[0] == Text(0, 1, "Part Two here", role="rule")
+    assert getattr(plain.items[0], "runs", None) is None
+
+
 def test_region_grpbox_frames_content_in_a_box_border():
     # #125: <region GRPBOX=YES> draws a GE box border around its content, with the
     # content inset past the left border and one row below the top border.

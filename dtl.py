@@ -605,7 +605,8 @@ class _DTLParser(HTMLParser):
         # (reference phrase — a hypertext link to another help panel) is the same
         # kind of inline emphasis; with no explicit emphasis it renders underlined,
         # the CUA point-and-shoot link style.
-        if tag in ("hp", "rp") and self._tag in _TEXT_TAGS:
+        if tag in ("hp", "rp") and (self._tag in _TEXT_TAGS
+                                    or self._tag == "divider"):
             self._begin_hp(a)
             if tag == "rp" and self._hp == (None, None, None):
                 self._hp = (None, Highlight.UNDERSCORE, None)
@@ -1631,7 +1632,7 @@ class _DTLParser(HTMLParser):
         elif tag in ("dldiv", "pldiv"):
             self._emit_listdiv(a, content)
         elif tag == "divider":
-            self._emit_divider(a, content)
+            self._emit_divider(a, content, runs)
         elif tag == "textseg":
             if self._textline is not None:
                 seg = " ".join(content.split())
@@ -2515,7 +2516,38 @@ class _DTLParser(HTMLParser):
         else:                                            # solid / dash → dashed rule
             self.screen.add(Text(row, start, "-" * span, role="rule"))
 
-    def _emit_divider(self, a, content):
+    @staticmethod
+    def _collapse_runs(runs, width):
+        """Whitespace-collapse mixed-content ``runs`` (4-tuples from ``<hp>``) into
+        ``(text, color, highlight)`` 3-tuples for :meth:`Text.rich`, matching the
+        ``" ".join(text.split())`` normalisation the plain path uses, and truncating
+        the total to ``width`` characters. Runs of blanks (within or across pieces)
+        become a single space; leading/trailing blanks are dropped."""
+        out = []
+        used = 0
+        pending_space = False
+        started = False
+        for text, color, hilite, _ in runs:
+            parts = text.split()
+            has_lead = text[:1].isspace()
+            has_trail = text[-1:].isspace()
+            piece = ""
+            if started and (pending_space or has_lead) and parts:
+                piece += " "
+            piece += " ".join(parts)
+            pending_space = has_trail if parts else (pending_space or has_lead)
+            if parts:
+                started = True
+            if not piece:
+                continue
+            piece = piece[: max(0, width - used)]
+            if not piece:
+                break
+            used += len(piece)
+            out.append((piece, color, hilite))
+        return out or [("", None, None)]
+
+    def _emit_divider(self, a, content, runs=None):
         """Emit an <area>/<region> <divider>, honouring TYPE and its divider-text.
 
         The position was fixed when the tag opened (``a["_row"]/_col/_width``); the
@@ -2527,8 +2559,13 @@ class _DTLParser(HTMLParser):
           terminal draws it from the graphic set, so it reads as an unbroken rule.
         * TEXT — the divider's own text, positioned within the span by FORMAT
           (START/CENTER/END). Empty text falls back to nothing (just the spacer row).
+          Inline ``<hp>`` in the text is kept as a coloured/emphasised run (mono
+          renders identically to the plain text).
 
-        GAP=YES leaves a one-character gap at each end of the rule/text.
+        GAP=YES leaves a one-character gap at each end of the rule/text. NOENDATTR
+        suppresses the trailing field-attribute byte a *field* would carry; a
+        divider is protected display text (no such attribute), so it has no effect
+        here and is accepted as a no-op.
         """
         row, col, span = a["_row"], a["_col"], a["_width"]
         typ = str(a.get("type", "dash")).strip().lower()
@@ -2536,7 +2573,10 @@ class _DTLParser(HTMLParser):
         if _bool_attr(a, "gap"):                         # 1-char gap at each end
             start, span = col + 1, max(1, span - 2)
         if typ == "text":
-            text = " ".join(content.split())[:span]
+            # Inline <hp> in the divider text builds runs; the plain concatenation
+            # is what positions the text (FORMAT) and what a mono terminal shows.
+            text = (" ".join("".join(r[0] for r in runs).split()) if runs
+                    else " ".join(content.split()))[:span]
             if not text:
                 return
             fmt = str(a.get("format", "start")).strip().lower()
@@ -2546,7 +2586,14 @@ class _DTLParser(HTMLParser):
                 off = (span - len(text)) // 2
             else:
                 off = 0
-            self.screen.add(Text(row, start + max(0, off), text, role="rule"))
+            at = start + max(0, off)
+            if runs and any(r[1] or r[2] for r in runs):
+                # Keep the <hp> colour/highlight runs across the (whitespace-
+                # collapsed) text; rebuild the runs against the collapsed string.
+                self.screen.add(Text.rich(row, at, self._collapse_runs(runs, span),
+                                          role="rule"))
+            else:
+                self.screen.add(Text(row, at, text, role="rule"))
         elif typ == "solid":
             # A GE solid line — an unbroken rule, distinct from DASH's hyphens.
             self.screen.add(GraphicText.rule(row, start, span, role="rule"))
