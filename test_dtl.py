@@ -670,6 +670,23 @@ def test_selfld_selchar_overrides_the_auto_number():
     assert set(s.selections) == {"1", "2", "8", "X"}  # each is selectable by its value
 
 
+def test_selfld_fchoice_sets_the_first_choice_number():
+    # #128: FCHOICE is the number of the first auto-numbered choice (default 1);
+    # FCHOICE=0 numbers the choices 0..n-1 (as the ISPF primary menu does, where
+    # option 0 = Settings), and each is selectable by its number.
+    s = load_dtl('<panel name="p"><selfld type="menu" fchoice="0">'
+                 '<choice>Alpha<choice>Beta<choice>Gamma</selfld></panel>')
+    shown = [it.text.strip() for it in s.items
+             if isinstance(it, Text) and getattr(it, "role", None) == "num"]
+    assert shown == ["0", "1", "2"]
+    assert s.selections == {"0": "Alpha", "1": "Beta", "2": "Gamma"}
+    # default (no FCHOICE) still numbers from 1
+    d = load_dtl('<panel name="p"><selfld type="menu">'
+                 '<choice>A<choice>B</selfld></panel>')
+    assert [it.text.strip() for it in d.items
+            if isinstance(it, Text) and getattr(it, "role", None) == "num"] == ["1", "2"]
+
+
 def test_selfld_type_multi_renders_a_mark_field_per_choice():
     # TYPE=MULTI is a multiple-selection field: each choice gets its own 1-char
     # input field to mark (in place of a number), so several can be selected.

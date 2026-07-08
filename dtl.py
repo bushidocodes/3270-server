@@ -840,6 +840,10 @@ class _DTLParser(HTMLParser):
                 "multi": str(a.get("type", "single")).strip().lower() == "multi",
                 "name": (a.get("name") or "").strip(),
                 "count": 0,
+                # FCHOICE is the number assigned to the first auto-numbered choice
+                # (default 1); FCHOICE=0 numbers the choices 0..n-1, as the ISPF
+                # primary menu does (option 0 = Settings). #128.
+                "fchoice": self._opt_int(a.get("fchoice"), 1),
                 # The field-prompt text (between <selfld ...> and the first
                 # <choice>) — a caption above the list (PMTLOC=ABOVE, default) or
                 # beside it (PMTLOC=BEFORE). Captured here, emitted before the first
@@ -3813,7 +3817,7 @@ class _DTLParser(HTMLParser):
         sel = a.get("selchar")
         disp = sel.split(",")[0].strip() if sel is not None else None
         auto_num = disp is None and not sf.get("multi")
-        num = str(sf["count"] + 1) if auto_num else (disp or "")
+        num = str(sf["count"] + sf.get("fchoice", 1)) if auto_num else (disp or "")
         # A <ps value=*> inside a choice uses the choice's number (or SELCHAR value)
         # as its point-and-shoot value — resolve it now that the number is known.
         if self._pending_ps is not None and self._pending_ps[1] == "*":
