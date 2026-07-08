@@ -2377,6 +2377,17 @@ def test_note_type_colours_the_heading():
     assert head.runs[1][1] is None                       # body run stays default
 
 
+def test_note_explicit_color_text_and_indent():
+    # #116: <note COLOR=> paints the heading run explicitly; TEXT= overrides the
+    # heading label; INDENT shifts the whole block right.
+    s = load_dtl('<panel name="p" width="60">T<area>'
+                 '<note color="green" text="Tip:" indent="4">Be careful</note></area></panel>')
+    head = next(t for t in s.items
+                if getattr(t, "runs", None) and t.runs[0][0].startswith("Tip:"))
+    assert head.runs[0] == ("Tip: ", Color.GREEN, None)   # COLOR + TEXT applied
+    assert head.col == 1 + 4                               # INDENT shifts the block
+
+
 def test_nt_type_colours_the_hung_heading():
     # <nt> hangs its body under the heading; TYPE colours just the heading Text
     # (SAC → white), not the body lines.
