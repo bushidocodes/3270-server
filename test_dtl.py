@@ -4453,6 +4453,23 @@ def test_panel_records_window_and_keylist_metadata():
     assert s.cursor_field == "zcmd"
 
 
+def test_panel_tmargin_and_bmargin_reserve_top_and_bottom_rows():
+    # #125: TMARGIN shifts the whole panel (title + body) down n rows; BMARGIN keeps
+    # content out of the last n rows. Both default to 0 (byte-identical when absent).
+    plain = load_dtl('<panel name="p" width="40">Title<area><info>Body</area></panel>')
+    assert next(t.row for t in plain.items if isinstance(t, Text) and t.text == "Title") == 0
+
+    shifted = load_dtl('<panel name="p" width="40" tmargin="3">Title'
+                       '<area><info>Body</area></panel>')
+    assert next(t.row for t in shifted.items if isinstance(t, Text) and t.text == "Title") == 3
+    assert next(t.row for t in shifted.items if isinstance(t, Text) and t.text == "Body") == 4
+
+    # BMARGIN=3 on a depth-10 panel keeps content at/below row depth-1-bmargin = 6
+    tall = load_dtl('<panel name="p" width="40" depth="10" bmargin="3">T<area>'
+                    + "".join(f"<info>L{i}" for i in range(20)) + "</area></panel>")
+    assert max(t.row for t in tall.items if isinstance(t, Text)) <= 10 - 1 - 3
+
+
 def test_regions_lay_out_side_by_side_columns():
     s = load_dtl(
         '<panel>'
