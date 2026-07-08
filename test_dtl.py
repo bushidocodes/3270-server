@@ -687,6 +687,40 @@ def test_selfld_fchoice_sets_the_first_choice_number():
             if isinstance(it, Text) and getattr(it, "role", None) == "num"] == ["1", "2"]
 
 
+def test_choice_behavioural_attributes_are_accepted_no_ops():
+    # #128: NOMATCH (the )PROC value when CHECKVAR doesn't match), TRUNC (command
+    # matching truncation) and AUTOSEL (auto-select) are runtime/)PROC behaviours
+    # with no host-display effect — accepted and rendered identically to their
+    # absence.
+    with_attrs = load_dtl(
+        '<panel name="p"><selfld type=single>Pick'
+        '<choice checkvar=X match=1 nomatch=0 trunc=3 autosel=yes>One</choice>'
+        '<choice>Two</choice></selfld></panel>')
+    without = load_dtl(
+        '<panel name="p"><selfld type=single>Pick'
+        '<choice checkvar=X match=1>One</choice>'
+        '<choice>Two</choice></selfld></panel>')
+    assert with_attrs.render() == without.render()
+
+
+def test_selfld_pad_and_outline_apply_to_the_selection_field():
+    # #128: PAD/PADC fill the selection entry and OUTLINE draws box lines around
+    # it — applied to the single-select input field and each MULTI mark field.
+    from screen import Outline
+    s = load_dtl('<panel><selfld type=single pad=nulls outline=box>Pick'
+                 '<choice>One<choice>Two</selfld></panel>')
+    inp = next(it for it in s.items if isinstance(it, Field))
+    assert inp.pad == "\x00" and inp.outline == Outline.BOX
+    m = load_dtl('<panel><selfld type=multi pad=nulls outline=box>Pick'
+                 '<choice name=A>One<choice name=B>Two</selfld></panel>')
+    marks = [it for it in m.items if isinstance(it, Field)]
+    assert marks and all(f.pad == "\x00" and f.outline == Outline.BOX for f in marks)
+    # No PAD/OUTLINE → plain defaults (byte-identical).
+    d = load_dtl('<panel><selfld type=single>Pick<choice>One<choice>Two</selfld></panel>')
+    di = next(it for it in d.items if isinstance(it, Field))
+    assert di.pad is None and di.outline is None
+
+
 def test_selfld_type_multi_renders_a_mark_field_per_choice():
     # TYPE=MULTI is a multiple-selection field: each choice gets its own 1-char
     # input field to mark (in place of a number), so several can be selected.

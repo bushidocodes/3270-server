@@ -870,6 +870,11 @@ class _DTLParser(HTMLParser):
                 "pmtloc": str(a.get("pmtloc", "above")).strip().lower(),
                 "pmtwidth": self._opt_int(a.get("pmtwidth")),
                 "selwidth": self._opt_int(a.get("selwidth")),
+                # PAD/PADC fill the selection entry; OUTLINE draws box lines around
+                # it (applied to the field the user types into — the single-select
+                # input field or each MULTI mark field). None → the plain defaults.
+                "pad": self._pad_char(a),
+                "outline": self._outline(a),
                 "prompt_chars": [],
                 "prompt_done": False,
             }
@@ -4072,6 +4077,7 @@ class _DTLParser(HTMLParser):
                 row=row, col=sf["numcol"], length=1,
                 name=(a.get("name") or f'{sf["name"]}{sf["count"]}') or None,
                 color=explicit, role="field",
+                pad=sf.get("pad"), outline=sf.get("outline"),
             )
             self.screen.add(mark)
         else:
@@ -4081,7 +4087,8 @@ class _DTLParser(HTMLParser):
                 # it. Its name is the SELFLD's NAME (per the CHOICE reference).
                 self.screen.add(Field(
                     row=row, col=sf["inputcol"], length=sf["entwidth"],
-                    name=sf["name"] or None, color=explicit, role="field"))
+                    name=sf["name"] or None, color=explicit, role="field",
+                    pad=sf.get("pad"), outline=sf.get("outline")))
             # SINGLE choices are numbered "N." (number + period); a MENU/explicit
             # field uses the bare number padded to numwidth.
             num_text = num + "." if sf.get("period") else num.ljust(sf["numwidth"])
