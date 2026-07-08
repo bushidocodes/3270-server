@@ -3522,6 +3522,15 @@ def test_textline_no_expand_centres_the_whole_line():
     assert s.title == "AlphaBeta"
 
 
+def test_textseg_width_pads_the_segment():
+    # #117: TEXTSEG WIDTH reserves a fixed field for the segment (padded), so the
+    # following segment starts at a fixed column regardless of the text length.
+    s = load_dtl("<panel name=t width=40><textline>"
+                 "<textseg width=10>Hi<textseg>End</textline><p>Body</panel>")
+    # the composed title pads "Hi" to width 10 before "End"
+    assert s.title == "Hi        End"
+
+
 def test_info_indent_shifts_content_and_clears_after():
     # #123: <info indent=n> shifts the whole information region (its text, nested
     # paragraphs, and lists) right by n columns; a sibling block after </info>
