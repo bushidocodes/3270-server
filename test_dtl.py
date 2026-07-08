@@ -3009,6 +3009,27 @@ def test_grphdr_headline_draws_a_dashed_rule_around_the_text():
     assert rule.intensity is DisplayIntensity.HIGH
 
 
+def test_grphdr_fmtwidth_justifies_within_its_own_field():
+    # FMTWIDTH is the field the heading is FORMAT-justified within (vs WIDTH).
+    s = load_dtl('<panel name="p" width="40">T<area>'
+                 '<grphdr format="end" fmtwidth="8" width="30">Hi</area></panel>')
+    hdr = next(t for t in s.items if isinstance(t, Text) and t.text == "Hi")
+    assert hdr.col == 1 + (8 - len("Hi"))            # right-justified within FMTWIDTH
+
+
+def test_choice_divider_gutter_insets_the_rule():
+    # #53: <chdiv> GUTTER=n insets the divider rule n characters at each end.
+    def rule(markup):
+        s = load_dtl('<panel name="p" width="40">M<selfld type="menu">Pick'
+                     '<choice>One<action run="a">' + markup +
+                     '<choice selchar="X">Exit<action run="exit" type="exit"></selfld></panel>')
+        return next(t for t in s.items if isinstance(t, Text) and set(t.text) == {"-"})
+    full = rule('<chdiv type="solid">')
+    inset = rule('<chdiv type="solid" gutter="3">')
+    assert inset.col == full.col + 3
+    assert len(inset.text) == len(full.text) - 6
+
+
 def test_grphdr_div_draws_dividers_at_divloc():
     # DIV=SOLID with DIVLOC=BOTH draws a dashed rule before and after the heading.
     s = load_dtl('<panel name="p" width="20">T<area>'

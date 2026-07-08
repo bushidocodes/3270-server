@@ -2983,6 +2983,10 @@ class _DTLParser(HTMLParser):
         row, col, ctx = self._resolve_pos(a, "grphdr")
         col += self._opt_int(a.get("indent"), 0)
         width = self._opt_int(a.get("width")) or max(1, self.screen.width - col - 1)
+        # FMTWIDTH is the field the heading text is FORMAT-justified within (defaults
+        # to WIDTH). STRIP trims the heading's surrounding blanks — already done by
+        # the whitespace-normalising split() above, so it is inherently honoured.
+        fmtwidth = self._opt_int(a.get("fmtwidth")) or width
         fmt = str(a.get("format", "start")).strip().lower()
         div = str(a.get("div", "none")).strip().lower()
         divloc = str(a.get("divloc", "after")).strip().lower()
@@ -3009,9 +3013,9 @@ class _DTLParser(HTMLParser):
                 line = (inner + "-" * pad)[:width]
             self.screen.add(Text(r, col, line, H, role="heading"))
         else:
-            t = text[:width]
-            off = (max(0, (width - len(t)) // 2) if fmt == "center"
-                   else max(0, width - len(t)) if fmt == "end" else 0)
+            t = text[:fmtwidth]
+            off = (max(0, (fmtwidth - len(t)) // 2) if fmt == "center"
+                   else max(0, fmtwidth - len(t)) if fmt == "end" else 0)
             self.screen.add(Text(r, col + off, t, H, role="heading"))
         r += 1
         if divloc in ("after", "both"):
@@ -3933,6 +3937,10 @@ class _DTLParser(HTMLParser):
         if start is None:
             start = sf["numcol"]
         width = sf.get("selwidth") or max(1, self.screen.width - start - 1)
+        # GUTTER=n insets the divider n characters at each end.
+        gutter = self._opt_int(a.get("gutter"), 0) or 0
+        if gutter > 0:
+            start, width = start + gutter, max(1, width - 2 * gutter)
         typ = str(a.get("type", "none")).strip().lower()
         text = " ".join(content.split())
         N = DisplayIntensity.NORMAL
