@@ -4034,6 +4034,9 @@ class _DTLParser(HTMLParser):
                 color=self._color(a) or color, role="field",
                 highlight=self._hilite(a), outline=self._outline(a),
                 help=self._field_help(a), pad=self._pad_char(a),
+                # AUTOTAB=YES: cursor auto-advance on fill (client behaviour, no
+                # 3270 data-stream bit) — recorded as metadata (#115, as on <dtafld>).
+                autotab=_bool_attr(a, "autotab"),
             ))
             self._attach_validation(name, a)
         desc = " ".join((description or "").split())

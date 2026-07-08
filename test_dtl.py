@@ -1005,6 +1005,24 @@ def test_chofld_adds_an_entry_field_within_the_choice():
     assert renewal.row == desc.row + 2
 
 
+def test_chofld_autotab_recorded():
+    # AUTOTAB=YES is a client cursor-advance behaviour with no 3270 data-stream
+    # bit; like <dtafld>, it is recorded on the Field as metadata and does not
+    # alter the rendered stream (#115).
+    on = load_dtl(
+        '<panel name=m menu><selfld type=menu>'
+        '<choice>Opt<chofld datavar=cf entwidth=6 autotab=yes>d</selfld></panel>'
+    )
+    off = load_dtl(
+        '<panel name=m menu><selfld type=menu>'
+        '<choice>Opt<chofld datavar=cf entwidth=6>d</selfld></panel>'
+    )
+    field = next(it for it in on.items if isinstance(it, Field) and it.name == "cf")
+    assert field.autotab is True
+    # Metadata only: the rendered stream is byte-identical with/without AUTOTAB.
+    assert on.render() == off.render()
+
+
 def test_chofld_usage_out_is_a_display_field():
     # USAGE=OUT makes the choice data field display-only: the variable's value as
     # protected text, not an editable field.
