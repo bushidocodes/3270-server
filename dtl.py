@@ -423,6 +423,8 @@ class _DTLParser(HTMLParser):
         self._title_item = None   # the centered title Text (retracted on collision)
         self._title_rule = None   # the action-bar separator rule (retracted on collision)
         self._titline = True      # <panel titline=no> suppresses the on-screen title line
+        self._tmargin = 0         # <panel/help TMARGIN=n> top margin (rows before content)
+        self._bmargin = 0         # <panel/help BMARGIN=n> bottom margin (rows reserved)
         self._panel_cursor = None # <panel cursor=field-name> places the cursor at that field
         self._grpbox_pending = None  # a <region GRPBOX> whose title text is being captured
         self._lists = []          # stack of open <ul>/<ol> ({"type", "n"})
@@ -804,10 +806,17 @@ class _DTLParser(HTMLParser):
                 d = self._panel_dim(a["depth"], self._DEPTH_MIN, self._DEPTH_MAX)
                 if d is not None:
                     self.screen.depth = d
+            # TMARGIN/BMARGIN reserve rows at the top/bottom of the panel: the whole
+            # panel (title + body) starts TMARGIN rows down, and content is kept out
+            # of the last BMARGIN rows. Both default to 0, so an unmarked panel is
+            # byte-for-byte unchanged. #125.
+            self._tmargin = self._opt_int(a.get("tmargin"), 0) or 0
+            self._bmargin = self._opt_int(a.get("bmargin"), 0) or 0
             # The panel itself is the root flow box: every element flows down
-            # from the top.
+            # from the top (or from the top margin).
             self._areas.append(
-                {"row": 0, "col": 1, "fldgap": 1, "explicit": True, "parent": None}
+                {"row": self._tmargin, "col": 1, "fldgap": 1, "explicit": True,
+                 "parent": None}
             )
             self._panel_title = []  # capture the title text that follows
         elif tag == "selfld":
@@ -1699,11 +1708,12 @@ class _DTLParser(HTMLParser):
         # <info indent=n> shifts its whole content that many columns to the right.
         col = (self._note_hang if self._note_hang is not None
                else ctx["col"]) + self._info_indent
-        if row >= self.screen.depth:
+        if row >= self.screen.depth - self._bmargin:
             # An auto-flowed element ran past the panel bottom (a tall panel plus
-            # our block spacing); clamp to the last row rather than abort the panel,
-            # as the column clamp below does for the horizontal overflow.
-            row = self.screen.depth - 1
+            # our block spacing, or into the BMARGIN reserve); clamp to the last
+            # usable row rather than abort the panel, as the column clamp below does
+            # for the horizontal overflow.
+            row = self.screen.depth - 1 - self._bmargin
         if col >= self.screen.width:
             # An auto-flowed column ran off the panel — our side-by-side
             # (dir=horiz) column math only approximates ISPDTLC's, so clamp to the
@@ -1836,12 +1846,12 @@ class _DTLParser(HTMLParser):
         if not self._titline:            # TITLINE=NO: metadata only, no title line
             return
         if next_tag == "ab":
-            rule = Text(1, 0, "-" * max(1, self.screen.width - 1))
+            rule = Text(1 + self._tmargin, 0, "-" * max(1, self.screen.width - 1))
             self.screen.add(rule)
             self._title_rule = rule
-            title_row, flow_row = 2, 4    # bar(0), rule(1), title(2), blank(3), body(4)
+            title_row, flow_row = 2 + self._tmargin, 4 + self._tmargin
         else:
-            title_row, flow_row = 0, 1
+            title_row, flow_row = self._tmargin, 1 + self._tmargin
         col = max(0, (self.screen.width - len(text)) // 2)
         item = Text(title_row, col, text, DisplayIntensity.NORMAL)
         self.screen.add(item)
