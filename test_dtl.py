@@ -1177,6 +1177,23 @@ def test_cmdtbl_parses_commands_and_actions():
     assert s.commands["BYE"]["action"] == "alias exit"
 
 
+def test_cmdtbl_applid_recorded_and_sort_is_a_no_op():
+    # #126: <cmdtbl APPLID=> is recorded (Screen.commands_applid); SORT has no
+    # host-display effect (the table renders nothing — it feeds command lookup).
+    s = load_dtl('<panel name="p">M<cmdarea>Option ===></cmdarea>'
+                 '<cmdtbl applid="ISR" sort="yes">'
+                 '<cmd name="BYE" altdescr="Leave"><cmdact action="alias exit"></cmd>'
+                 '</cmdtbl></panel>')
+    assert s.commands_applid == "ISR"
+    assert s.commands["BYE"] == {"action": "alias exit", "trunc": 0, "descr": "Leave"}
+    # SORT=yes vs no renders identically (no visual effect)
+    def render(sort):
+        return load_dtl(f'<panel name="p">M<cmdtbl applid="X" {sort}>'
+                        '<cmd name="A"><cmdact action="passthru"></cmd>'
+                        '</cmdtbl></panel>').render()
+    assert render('sort="yes"') == render('sort="no"')
+
+
 def test_lookup_command_with_truncation():
     s = _cmd_panel()
     assert s.lookup_command("PANELID") == "passthru"

@@ -901,6 +901,11 @@ class _DTLParser(HTMLParser):
             self._emit_keyi(a)
         elif tag == "cmdtbl":
             self._in_cmdtbl = True
+            # APPLID scopes the command table to an application (metadata). SORT is
+            # a compile-time ordering of the table with no host-display effect (the
+            # table renders nothing — it only feeds command recognition). #126.
+            if a.get("applid"):
+                self.screen.commands_applid = a.get("applid")
         elif tag == "cmd":
             if not self._in_cmdtbl:
                 raise DTLError("<cmd> outside of a <cmdtbl>")
