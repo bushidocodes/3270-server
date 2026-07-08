@@ -2519,6 +2519,10 @@ class _DTLParser(HTMLParser):
             # CAPS=OFF|ON (default OFF): an ON input column is uppercase-input —
             # ISPF folds it to uppercase; we fold the typed value on read-back.
             "caps": str(a.get("caps", "")).strip().lower() == "on",
+            # REQUIRED=YES + MSG=id: the cell must be non-blank on a modified row
+            # (ISPF's VER(var, NONBLANK, MSG=id)); validated on read-back.
+            "required": str(a.get("required", "")).strip().lower() == "yes",
+            "msg": (a.get("msg") or "").strip() or None,
             "autotab": a.get("autotab", "").lower() == "yes",
             "line": int(a.get("line", 1)),
             "align": a.get("align", "start").lower(),
@@ -2827,6 +2831,8 @@ class _DTLParser(HTMLParser):
                         row_index=row_index,
                         # CAPS=ON folds the typed value to uppercase on read-back.
                         caps=c.get("caps", False),
+                        # REQUIRED=YES/MSG: non-blank validation on a modified row.
+                        required=c.get("required", False), msg=c.get("msg"),
                     ))
                 # TEXT description beside the cell, justified within its area
                 # (TEXTFMT); unformatted when the text overflows the reserved area.

@@ -1307,8 +1307,16 @@ def _show_table_input(client_socket, model=None):
                 _show_overlay(client_socket, help_panel)
             continue
         # Read the whole table back per row (modified cells override the rendered
-        # defaults) and re-seed from it, so edits persist. Echo the non-blank rows.
+        # defaults) and re-seed from it, so edits persist.
         rows = screen.read_table_rows(fields)
+        # REQUIRED validation (<lstcol REQUIRED=YES MSG=id>): a modified row whose
+        # required cell is blank surfaces the column's MSG and redisplays, without
+        # committing — the ISPF VER(var, NONBLANK, MSG=id) behaviour.
+        errors = screen.table_required_errors(fields)
+        if errors:
+            row_i, _dv, m = errors[0]
+            msg = f"{m or 'INPUT REQUIRED'}: enter a Key on row {row_i + 1}"
+            continue
         filled = [f"{r.get('tkey', '').strip()}={r.get('tval', '').strip()}"
                   for r in rows
                   if r.get("tkey", "").strip() or r.get("tval", "").strip()]

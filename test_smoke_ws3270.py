@@ -238,6 +238,41 @@ def test_ws3270_table_input_caps_column_folds_to_uppercase():
     assert "Read 1 row(s): ABC=xyz" in out, out[-1500:]
 
 
+def test_ws3270_table_input_required_column_validates():
+    """A real emulator modifies a table row but leaves its REQUIRED Key cell blank:
+    the server surfaces the column MSG (KEYREQ) and redisplays without committing
+    (Screen.table_required_errors, #236). Filling the Key on the redisplay then
+    succeeds — proving REQUIRED=YES/MSG end-to-end."""
+    _require_emulator()
+    port = _serve_one_client()
+    out = _drive(port, [
+        "Wait(20,InputField)",
+        "String(IBMUSER)", "Tab()", "String(SYS1)", "Enter()",
+        "Wait(20,Output)",       # ISPF menu
+        "String(7)", "Enter()",  # option 7 → Dialog Test
+        "Wait(10,Output)",
+        "PF(5)",                 # → Table Input scratch panel
+        "Wait(10,InputField)",   # cursor on the Key cell
+        "Tab()",                 # skip Key (leave the required cell blank)
+        "String(justval)",       # type into Value → the row is modified
+        "Enter()",               # submit → required Key is blank
+        "Wait(10,Output)",
+        "Ascii()",               # KEYREQ message shown, nothing committed
+        "String(MYKEY)",         # cursor is back on Key; fill it in
+        "Enter()",               # submit again → valid
+        "Wait(10,Output)",
+        "Ascii()",               # the read-back echo
+        "PF(3)", "Wait(5,Output)",
+        "PF(3)", "Wait(5,Output)",
+        "Quit()",
+    ])
+
+    # Blank required Key surfaced the column MSG...
+    assert "KEYREQ" in out, out[-1800:]
+    # ...and once filled, the row read back (Value preserved across the redisplay).
+    assert "Read 1 row(s): MYKEY=justval" in out, out[-1800:]
+
+
 def test_ws3270_model_3_browse_uses_the_alternate_screen():
     """A model-3 emulator (32 rows) browsing a member sees more lines per page —
     proving ERASE/WRITE ALTERNATE and the larger geometry work on a real
