@@ -2045,6 +2045,47 @@ def test_multiline_paragraph_collapses_to_one_line():
     assert s.items == [Text(0, 1, "line one line two", DisplayIntensity.NORMAL)]
 
 
+def test_headings_render_high_intensity_indented_by_level():
+    # #52: <h1>-<h4> render a high-intensity heading line in the text flow;
+    # sub-headings indent by level (h1→0, h2→2, h3→4, h4→6) so the hierarchy shows.
+    s = load_dtl('<panel name="p">T<area>'
+                 '<h1>Overview<info>Body one'
+                 '<h2>Details<info>Body two'
+                 '<h4>Deep</area></panel>')
+    heads = [it for it in s.items if isinstance(it, Text) and it.role == "title"
+             and it.text in ("Overview", "Details", "Deep")]
+    by_text = {t.text: t for t in heads}
+    assert by_text["Overview"].intensity is DisplayIntensity.HIGH
+    assert by_text["Overview"].col == 1                    # h1: no indent
+    assert by_text["Details"].col == 3                     # h2: +2
+    assert by_text["Deep"].col == 7                        # h4: +6
+    assert all(h.intensity is DisplayIntensity.HIGH for h in heads)
+
+
+def test_heading_leading_blank_and_compact():
+    # A heading gets a leading blank line (like a paragraph); COMPACT suppresses it.
+    spaced = load_dtl('<panel name="p"><area><info>Intro<h2>Head</area></panel>')
+    head = next(t for t in spaced.items if isinstance(t, Text) and t.text == "Head")
+    intro = next(t for t in spaced.items if isinstance(t, Text) and t.text == "Intro")
+    assert head.row == intro.row + 2                       # blank line before the heading
+    compact = load_dtl('<panel name="p"><area><info>Intro<h2 compact>Head</area></panel>')
+    head = next(t for t in compact.items if isinstance(t, Text) and t.text == "Head")
+    intro = next(t for t in compact.items if isinstance(t, Text) and t.text == "Intro")
+    assert head.row == intro.row + 1                       # COMPACT: no leading blank
+
+
+def test_figure_caption_renders_below_the_figure():
+    # #52: <figcap> renders the caption line beneath the figure body.
+    s = load_dtl('<panel name="p">T<area><fig frame="rule">'
+                 '<p>Diagram<figcap>Figure 1. Widget</fig></area></panel>')
+    texts = [it.text for it in s.items if isinstance(it, Text)]
+    assert "Figure 1. Widget" in texts
+    # the caption sits below the figure body
+    cap = next(t for t in s.items if isinstance(t, Text) and t.text == "Figure 1. Widget")
+    body = next(t for t in s.items if isinstance(t, Text) and t.text == "Diagram")
+    assert cap.row > body.row
+
+
 def test_list_items_flow_with_bullets():
     s = load_dtl('<panel name="p"><ul><li>apple<li>pear<li>plum</ul></panel>')
     # Each <li> renders a bullet ("o" at level 1) + the item text, flowed.

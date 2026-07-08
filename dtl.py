@@ -313,7 +313,10 @@ _FLOW_TEXT_TAGS = ("p", "li", "dt", "dd", "pt", "pd", "lp", "lines", "xmp") + tu
 # Instruction tags render as protected text like <info>: <topinst> (top),
 # <pnlinst> (panel), and <botinst> (bottom) instructions.
 _INSTRUCTION_TAGS = ("topinst", "pnlinst", "botinst")
-_TEXT_TAGS = ("info",) + _INSTRUCTION_TAGS + _FLOW_TEXT_TAGS
+# Help-panel heading tags: <h1> (major) through <h4> (minor). They render as a
+# high-intensity heading line in the text flow, sub-headings indented by level.
+_HEADING_TAGS = ("h1", "h2", "h3", "h4")
+_TEXT_TAGS = ("info",) + _INSTRUCTION_TAGS + _FLOW_TEXT_TAGS + _HEADING_TAGS
 # ISPDTLC inserts a blank line BEFORE a flowed paragraph (<p>), a labelled
 # paragraph (<lp>), or a panel instruction; COMPACT/NOSKIP suppress it (#210). A
 # TOPINST instead gets a blank line AFTER it. See the P/LP/TOPINST tag references.
@@ -1542,6 +1545,8 @@ class _DTLParser(HTMLParser):
             self._add_lstcol(a, content)
         elif tag in ("note", "nt"):
             self._emit_note(tag, a, content)
+        elif tag in _HEADING_TAGS:
+            self._emit_heading(tag, a, content, runs=runs)
         elif tag in _TEXT_TAGS:
             self._emit_info(a, content, tag, runs=runs)
         elif tag == "dtafld":
@@ -2919,6 +2924,26 @@ class _DTLParser(HTMLParser):
                 and ctx["row"] + 1 < self.screen.depth   # don't push off the panel
                 and self._row_occupied(ctx["row"] - 1)):
             ctx["row"] += 1
+
+    def _emit_heading(self, tag, a, content, runs=None):
+        """Render a DTL help-panel heading (``<h1>``–``<h4>``) as a high-intensity
+        heading line in the text flow. A leading blank line precedes it (COMPACT
+        suppresses it, its only attribute); ``<h2>``/``<h3>``/``<h4>`` indent by
+        level so the heading hierarchy reads on a text terminal. Nested ``<hp>``
+        runs collapse to plain text (the whole line is already emphasised). #52."""
+        if runs is not None and not content:
+            content = "".join(t for t, *_ in runs)
+        text = " ".join(content.split())
+        if not text:
+            return
+        if not _bool_attr(a, "compact"):
+            self._skip_blank_before(a)
+        row, col, ctx = self._resolve_pos(a, "info")
+        if self._lists:
+            col += len(self._lists) * self._LIST_INDENT
+        col += (int(tag[1]) - 1) * 2      # h1→0, h2→2, h3→4, h4→6 columns of indent
+        self._emit_flow_lines(text, row, col, ctx, role="title",
+                              intensity=DisplayIntensity.HIGH)
 
     def _emit_info(self, a, content, tag="info", runs=None):
         # ``runs`` (from inline <hp>) is a list of (text, color, highlight); the
