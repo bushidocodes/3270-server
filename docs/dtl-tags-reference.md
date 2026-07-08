@@ -2,7 +2,7 @@
 
 An alphabetic summary of the z/OS ISPF **Dialog Tag Language (DTL)** tags, with this server's parser (`dtl.py`) support status for each. It mirrors IBM's [Dialog Tag Language (DTL) tags](https://www.ibm.com/docs/en/zos/3.2.0?topic=reference-dialog-tag-language-dtl-tags) *Table 1. Tag summary*, the authoritative source (underlined defaults there are shown as plain text here).
 
-**Support:** ✅ 28 supported · 🟡 54 partial · ❌ 14 unimplemented (of 96 tags).
+**Support:** ✅ 29 supported · 🟡 53 partial · ❌ 14 unimplemented (of 96 tags).
 
 Status is judged on **attribute coverage**, not just whether the tag renders: ✅ = every documented attribute is honoured (only tags with no attributes, or whose few attributes are all implemented, qualify); 🟡 = the tag renders but one or more attributes are ignored (an attribute parsed as a no-op counts as unimplemented); ❌ = the tag is not parsed. 🟡 and ❌ cells link to a tracking issue.
 
@@ -46,7 +46,7 @@ Legend: **Name** — the tag's full name. **End tag** — whether a closing tag 
 | **DTHD** | Definition Term Header | No | — | definition-term-header | HP, PS, RP | DL | ❌ #120 |
 | **DTHDIV** | Definition Term Header Divider | No | — | N/A | — | DL | ❌ #120 |
 | **DTSEG** | Definition Term Segment | No | — | N/A | — | DT | ❌ #120 |
-| **FIG** | Figure | Yes | FRAME=RULE \| NONE<br>WIDTH=PAGE \| COL<br>NOSKIP | figure-content | DL, FIGCAP, HP, NOTE, NOTEL, NT, OL, P, PARML, PS, RP, SL, UL, XMP | ATTENTION, CAUTION, DD, INFO, LI, LP, NT, PD, WARNING | 🟡 Partial — framed flow box (FRAME=RULE/NONE) + FIGCAP + leading blank-line skip, which NOSKIP/COMPACT suppress (#210); WIDTH ignored — #52 |
+| **FIG** | Figure | Yes | FRAME=RULE \| NONE<br>WIDTH=PAGE \| COL<br>NOSKIP | figure-content | DL, FIGCAP, HP, NOTE, NOTEL, NT, OL, P, PARML, PS, RP, SL, UL, XMP | ATTENTION, CAUTION, DD, INFO, LI, LP, NT, PD, WARNING | ✅ framed flow box (FRAME=RULE/NONE), WIDTH=PAGE/COL (COL frames the enclosing column), FIGCAP caption, leading blank-line skip (NOSKIP/COMPACT suppress) — #52 |
 | **FIGCAP** | Figure Caption | No | — | figure-caption-text | HP, PS, RP | FIG | ✅ renders the caption line beneath the figure body — #52 |
 | **GA** | Graphic Area | No | NAME=graphic-area-name<br>EXTEND=OFF \| ON \| FORCE<br>DEPTH=n \| *<br>WIDTH=n<br>DIV=NONE \| BLANK \| SOLID \| DASH \| TEXT FORMAT=START \| CENTER \| END TEXT=divider-text<br>LVLINE=variable-name | N/A | — | AREA, PANEL, REGION | ❌ #117 |
 | **GENERATE** | Generate | Yes | SUBSTITUTE=NO \| YES | N/A | ATTR, COMMENT, SOURCE | AREA, HELP, PANEL, REGION | ✅ non-rendering build directive: accepted and dropped (its generated body is not a host-display element here) — #119 |

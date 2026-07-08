@@ -1166,7 +1166,14 @@ class _DTLParser(HTMLParser):
             col = parent["col"] if parent else 1
             row = parent["row"] if parent else 0
             frame = str(a.get("frame", "rule")).strip().lower() != "none"
-            width = max(1, self.screen.width - col - 1)
+            # WIDTH=PAGE (default) frames to the page width; WIDTH=COL frames only
+            # the enclosing column's width (a figure inside a width-constrained
+            # <region>), so the rule doesn't overrun the column.
+            pw = parent.get("width") if parent else None
+            if str(a.get("width", "page")).strip().lower() == "col" and pw:
+                width = max(1, pw)
+            else:
+                width = max(1, self.screen.width - col - 1)
             if frame:                                  # top rule
                 self.screen.add(Text(row, col, "-" * width))
                 row += 1

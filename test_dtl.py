@@ -2074,6 +2074,19 @@ def test_heading_leading_blank_and_compact():
     assert head.row == intro.row + 1                       # COMPACT: no leading blank
 
 
+def test_figure_width_col_frames_only_the_column():
+    # #52: FIG WIDTH=COL frames the figure to the enclosing column's width (not the
+    # whole page), so the rule doesn't overrun a width-constrained <region>.
+    def frame_len(width_attr):
+        s = load_dtl(f'<panel name="p" width="60">T<region width="20">'
+                     f'<fig frame="rule" {width_attr}><p>X</fig></region></panel>')
+        rules = [t for t in s.items if isinstance(t, Text) and set(t.text) == {"-"}]
+        return len(rules[0].text)
+    assert frame_len('width="col"') == 20            # framed to the column width
+    assert frame_len('width="page"') > 20            # PAGE spans the page
+    assert frame_len('') == frame_len('width="page"')  # PAGE is the default
+
+
 def test_figure_caption_renders_below_the_figure():
     # #52: <figcap> renders the caption line beneath the figure body.
     s = load_dtl('<panel name="p">T<area><fig frame="rule">'
