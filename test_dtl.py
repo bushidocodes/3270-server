@@ -687,6 +687,40 @@ def test_selfld_fchoice_sets_the_first_choice_number():
             if isinstance(it, Text) and getattr(it, "role", None) == "num"] == ["1", "2"]
 
 
+def test_choice_behavioural_attributes_are_accepted_no_ops():
+    # #128: NOMATCH (the )PROC value when CHECKVAR doesn't match), TRUNC (command
+    # matching truncation) and AUTOSEL (auto-select) are runtime/)PROC behaviours
+    # with no host-display effect — accepted and rendered identically to their
+    # absence.
+    with_attrs = load_dtl(
+        '<panel name="p"><selfld type=single>Pick'
+        '<choice checkvar=X match=1 nomatch=0 trunc=3 autosel=yes>One</choice>'
+        '<choice>Two</choice></selfld></panel>')
+    without = load_dtl(
+        '<panel name="p"><selfld type=single>Pick'
+        '<choice checkvar=X match=1>One</choice>'
+        '<choice>Two</choice></selfld></panel>')
+    assert with_attrs.render() == without.render()
+
+
+def test_selfld_pad_and_outline_apply_to_the_selection_field():
+    # #128: PAD/PADC fill the selection entry and OUTLINE draws box lines around
+    # it — applied to the single-select input field and each MULTI mark field.
+    from screen import Outline
+    s = load_dtl('<panel><selfld type=single pad=nulls outline=box>Pick'
+                 '<choice>One<choice>Two</selfld></panel>')
+    inp = next(it for it in s.items if isinstance(it, Field))
+    assert inp.pad == "\x00" and inp.outline == Outline.BOX
+    m = load_dtl('<panel><selfld type=multi pad=nulls outline=box>Pick'
+                 '<choice name=A>One<choice name=B>Two</selfld></panel>')
+    marks = [it for it in m.items if isinstance(it, Field)]
+    assert marks and all(f.pad == "\x00" and f.outline == Outline.BOX for f in marks)
+    # No PAD/OUTLINE → plain defaults (byte-identical).
+    d = load_dtl('<panel><selfld type=single>Pick<choice>One<choice>Two</selfld></panel>')
+    di = next(it for it in d.items if isinstance(it, Field))
+    assert di.pad is None and di.outline is None
+
+
 def test_selfld_type_multi_renders_a_mark_field_per_choice():
     # TYPE=MULTI is a multiple-selection field: each choice gets its own 1-char
     # input field to mark (in place of a number), so several can be selected.
@@ -1428,6 +1462,30 @@ class _Sock2:
 
 # ── action-bar / command attributes (#126) ──────────────────────────────────
 
+def test_action_bar_records_pdcvar_and_pdc_accelerators():
+    # #126: ABC PDCVAR (the )PROC variable receiving the choice) and PDC ACC1-3
+    # (GUI accelerator keys) are recorded on the action-bar model. Neither has a
+    # host-display effect, so the rendered bar is unchanged.
+    s = load_dtl(
+        '<panel><ab>'
+        '<abc pdcvar=ZPDSEL>File'
+        '<pdc acc1="Ctrl+X" acc2="Alt+F4">Exit<action run=exit></pdc>'
+        '</abc></ab></panel>'
+    )
+    choice = s.action_bar[0]
+    assert choice["pdcvar"] == "ZPDSEL"
+    assert choice["pdc"][0]["acc"] == ["Ctrl+X", "Alt+F4"]
+    # A plain choice keeps its compact shape (no pdcvar / acc keys).
+    p = load_dtl('<panel><ab><abc>File<pdc>Exit<action run=exit></pdc>'
+                 '</abc></ab></panel>')
+    assert "pdcvar" not in p.action_bar[0]
+    assert "acc" not in p.action_bar[0]["pdc"][0]
+    # Bytes are identical with or without the metadata attributes.
+    assert s.render() == load_dtl(
+        '<panel><ab><abc>File<pdc>Exit<action run=exit></pdc>'
+        '</abc></ab></panel>').render()
+
+
 def test_action_bar_mnemgen_auto_underlines_first_letter():
     # #126: <ab MNEMGEN=YES> auto-assigns the first letter of a choice as its
     # mnemonic (underlined) when the choice has no explicit <M>. It is opt-in:
@@ -1579,6 +1637,41 @@ def test_keyl_records_name_and_applid():
     assert s.keylist == {"PF3": "EXIT"}
     assert s.keylist_name == "MYKEYS"
     assert s.keylist_applid == "ISR"
+
+
+def test_keyl_records_help_and_action():
+    # #126: <keyl HELP=..> names the keylist's help panel; ACTION=UPDATE|DELETE is
+    # a keylist-table maintenance directive (codegen). Both recorded as metadata.
+    s = load_dtl(
+        '<panel><keyl name=MYKEYS help=KEYHELP action=UPDATE>'
+        '<keyi key=PF3 cmd=EXIT>Exit</keyi>'
+        '</keyl></panel>'
+    )
+    assert s.keylist_help == "KEYHELP"
+    assert s.keylist_action == "UPDATE"
+    # Absent → None (byte-identical; metadata only).
+    d = load_dtl('<panel><keyl><keyi key=PF3 cmd=EXIT>x</keyi></keyl></panel>')
+    assert d.keylist_help is None and d.keylist_action is None
+
+
+def test_keyi_case_mixed_preserves_command_case_and_parm_appended():
+    # #126: CASE=UPPER (default) folds the command to upper; CASE=MIXED preserves
+    # the authored case. PARM is appended so the resolved command is "CMD PARM".
+    s = load_dtl(
+        '<panel><keyl>'
+        '<keyi key=PF3 cmd=Exit case=mixed>Exit</keyi>'
+        '<keyi key=PF4 cmd=find parm="ALL">Find</keyi>'
+        '</keyl></panel>'
+    )
+    assert s.keylist["PF3"] == "Exit"        # mixed case preserved
+    assert s.keylist["PF4"] == "FIND ALL"    # upper-folded verb + parm appended
+
+
+def test_cmdtbl_records_applid_from_cmd_panel_helper():
+    # #126: the _cmd_panel helper's <cmdtbl applid="ISR"> is recorded on the Screen
+    # (Screen.commands_applid); SORT has no host-display effect and is not stored.
+    s = _cmd_panel()
+    assert s.commands_applid == "ISR"
 
 
 def test_keyi_fka_text_recorded_and_suppressed_by_fka_no():
@@ -2297,6 +2390,22 @@ def test_paragraph_indent_shifts_the_whole_paragraph_right():
     ]
 
 
+def test_paragraph_space_no_suppresses_leading_blank():
+    # #123: <p SPACE=NO> drops the blank line that normally precedes a paragraph
+    # (like COMPACT) — the second paragraph sits directly under the first. The
+    # default (SPACE=YES) keeps the blank (see test_paragraph_indent above).
+    s = load_dtl('<panel name="p"><p>first<p space=no>second</p></panel>')
+    N = DisplayIntensity.NORMAL
+    assert s.items == [
+        Text(0, 1, "first", N),
+        Text(1, 1, "second", N),
+    ]
+    # SPACE=YES is the default blank-before, byte-identical to omitting SPACE.
+    kept = load_dtl('<panel name="p"><p>first<p space=yes>second</p></panel>')
+    dflt = load_dtl('<panel name="p"><p>first<p>second</p></panel>')
+    assert kept.render() == dflt.render()
+
+
 def test_definition_list_pairs_term_and_description_on_one_line():
     # <dl> default break=none: each <dt> term and its <dd> description share a
     # line, the description in a column tsize (default 10) to the right.
@@ -2871,13 +2980,32 @@ def test_da_attr_applies_rendering_attributes():
 
 def test_da_attr_records_non_rendering_attributes():
     # #124: attributes with no TN3270 display effect are still recognised (not
-    # ignored) — CAPS/SKIP/GE/PAS/CKBOX/ATTN parse without error or leaking.
+    # ignored) — GE/PAS/CKBOX/ATTN parse without error or leaking.
     s = load_dtl(
         "<panel name=p width=40><area><da name=a depth=2>"
-        "<attr attrchar='#' type=datain caps=on skip=on ge=off pas=yes ckbox=off attn=off>"
+        "<attr attrchar='#' type=datain ge=off pas=yes ckbox=off attn=off>"
         "#____"
         "</da></area></panel>")
     assert any(isinstance(it, Field) for it in s.items)   # field still rendered
+
+
+def test_da_attr_caps_and_skip_apply_to_input_field():
+    # #124: CAPS=ON folds the input field to upper (Field.caps); SKIP=ON is an
+    # autoskip/auto-advance field, carried as the client autotab behaviour.
+    s = load_dtl(
+        "<panel name=p width=40><area><da name=a depth=2>"
+        "<attr attrchar='#' type=datain caps=on skip=on>#____"
+        "</da></area></panel>")
+    fld = next(it for it in s.items if isinstance(it, Field))
+    assert fld.caps is True
+    assert fld.autotab is True
+    # Absent CAPS/SKIP → the plain defaults (byte-identical field identity).
+    d = load_dtl(
+        "<panel name=p width=40><area><da name=a depth=2>"
+        "<attr attrchar='#' type=datain>#____"
+        "</da></area></panel>")
+    dfld = next(it for it in d.items if isinstance(it, Field))
+    assert dfld.caps is False and dfld.autotab is False
 
 
 def test_da_depth_reserves_height_and_div_closes_it():
@@ -4484,6 +4612,26 @@ def test_divider_type_text_lays_out_its_text_positioned_by_format():
     assert end.items[0] == Text(0, 1 + (78 - 7), "Options", role="rule")
 
 
+def test_divider_text_keeps_inline_hp_runs():
+    # #125: inline <hp> inside a TYPE=TEXT divider no longer truncates the caption
+    # (previously it stopped at the tag) — the full text renders, the emphasised
+    # phrase keeping its highlight run (mono renders identically to the plain text).
+    s = load_dtl('<panel><area>'
+                 '<divider type="text">Part <hp hilite="reverse">Two</hp> here</divider>'
+                 '</area></panel>')
+    it = s.items[0]
+    assert it.text == "Part Two here"
+    assert it.runs == [
+        ("Part", None, None),
+        (" Two", None, Highlight.REVERSE),
+        (" here", None, None),
+    ]
+    # No inline emphasis → a plain Text (byte-identical to before).
+    plain = load_dtl('<panel><area><divider type="text">Part Two here</divider></area></panel>')
+    assert plain.items[0] == Text(0, 1, "Part Two here", role="rule")
+    assert getattr(plain.items[0], "runs", None) is None
+
+
 def test_region_grpbox_frames_content_in_a_box_border():
     # #125: <region GRPBOX=YES> draws a GE box border around its content, with the
     # content inset past the left border and one row below the top border.
@@ -4927,6 +5075,63 @@ def test_name_check_requires_a_valid_symbol():
     assert s.first_validation_error({addr: "TOOLONGXX"})[0] == "M"  # > 8 chars
 
 
+def test_checki_datetime_types_enforce_the_format():
+    # #62: the date/time check types validate the value's shape against the ISPF
+    # system format (calendar validity is not modelled).
+    cases = {
+        "idate":   ("23/06/15", "2023/06/15"),
+        "stddate": ("2023/06/15", "23/06/15"),
+        "jdate":   ("23.166", "2023.166"),
+        "jstd":    ("2023.166", "23.166"),
+        "itime":   ("13:45", "1:45"),
+        "stdtime": ("13:45:30", "13:45"),
+    }
+    for ctype, (good, bad) in cases.items():
+        s, addr = _check_panel(f"<checki type={ctype}>")
+        assert s.first_validation_error({addr: good}) is None, ctype
+        assert s.first_validation_error({addr: bad})[0] == "M", ctype
+
+
+def test_checki_bit_type_requires_binary_digits():
+    # #62: BIT accepts only 0/1 characters.
+    s, addr = _check_panel("<checki type=bit>")
+    assert s.first_validation_error({addr: "01101"}) is None
+    assert s.first_validation_error({addr: "0121"})[0] == "M"
+    assert s.first_validation_error({addr: ""}) is None            # empty skipped
+
+
+def test_checki_ipaddr4_type_validates_dotted_quad():
+    # #62: IPADDR4 requires four 0-255 octets separated by dots.
+    s, addr = _check_panel("<checki type=ipaddr4>")
+    assert s.first_validation_error({addr: "192.168.0.1"}) is None
+    assert s.first_validation_error({addr: "10.0.0.255"}) is None
+    assert s.first_validation_error({addr: "256.1.1.1"})[0] == "M"  # octet > 255
+    assert s.first_validation_error({addr: "1.2.3"})[0] == "M"      # too few octets
+
+
+def test_checki_dsname_types_validate_data_set_names():
+    # #62: DSNAME validates a qualified MVS data set name (≤44, 1-8-char
+    # qualifiers). DSNAMEF allows an optional (MEMBER); DSNAMEFM requires one.
+    s, addr = _check_panel("<checki type=dsname>")
+    assert s.first_validation_error({addr: "SYS1.PARMLIB"}) is None
+    assert s.first_validation_error({addr: "USER.@A#.LIST"}) is None
+    assert s.first_validation_error({addr: "1BAD.NAME"})[0] == "M"   # qualifier starts digit
+    assert s.first_validation_error({addr: "SYS1.PARMLIB(IEASYS)"})[0] == "M"  # member not allowed
+
+    sf, af = _check_panel("<checki type=dsnamef>")
+    assert sf.first_validation_error({af: "SYS1.PARMLIB(IEASYS00)"}) is None
+    assert sf.first_validation_error({af: "SYS1.PARMLIB"}) is None   # member optional
+
+    sm, am = _check_panel("<checki type=dsnamefm>")
+    assert sm.first_validation_error({am: "SYS1.PARMLIB(IEASYS00)"}) is None
+    assert sm.first_validation_error({am: "SYS1.PARMLIB"})[0] == "M"  # member required
+
+    # FILEID validates a data set name with an optional member.
+    si, ai = _check_panel("<checki type=fileid>")
+    assert si.first_validation_error({ai: "MY.DATA(MEM1)"}) is None
+    assert si.first_validation_error({ai: "not a dsname"})[0] == "M"
+
+
 def test_checkl_outside_varclass_raises():
     with pytest.raises(DTLError):
         load_dtl('<panel><checkl><checki type="range">0 1</checki></checkl></panel>')
@@ -5194,9 +5399,10 @@ def test_render_drops_items_past_the_panel_depth():
 
 
 def test_checki_unsupported_type_is_still_lenient():
-    # A type we don't enforce yet (e.g. DSNAME) still loads without failing the
-    # panel and adds no validation — leniency preserved for the unimplemented set.
-    s, addr = _check_panel('<checki type="dsname"></checki>')
+    # A type we don't enforce (INCLUDE/LISTV/ENUM/FILEID — runtime or complex, and
+    # the DBCS types, deferred #135) still loads without failing the panel and adds
+    # no validation — leniency preserved for the not-modelled set.
+    s, addr = _check_panel('<checki type="include" parm1=IMBLK></checki>')
     assert s.validations.get("F", {}).get("checks", []) == []
     assert s.first_validation_error({addr: "anything!"}) is None   # no check enforced
 
@@ -5354,6 +5560,51 @@ def test_command_value_none_without_cmdarea():
     s = load_dtl('<panel><info>hi</info></panel>')
     assert s.command_field is None
     assert s.command_value({0: "x"}) is None
+
+
+def test_cmdarea_pmttext_no_suppresses_prompt():
+    # PMTTEXT=NO drops the command-prompt text, emitting just the field — the
+    # same bytes as a <cmdarea> coded with no prompt content at all.
+    with_prompt = load_dtl(
+        '<panel><cmdarea entwidth="6" pmttext="no">Option ===></cmdarea></panel>'
+    )
+    bare = load_dtl('<panel><cmdarea entwidth="6"></cmdarea></panel>')
+    assert with_prompt.render() == bare.render()
+    # And the prompt text is honoured by default (PMTTEXT=YES), so the field is
+    # pushed right of the "Option ===>" caption rather than at the left margin.
+    kept = load_dtl(
+        '<panel><cmdarea entwidth="6">Option ===></cmdarea></panel>'
+    )
+    assert kept.command_field.col > bare.command_field.col
+
+
+def test_cmdarea_cmdlen_max_extends_to_panel_edge():
+    s = load_dtl(
+        '<panel><cmdarea entwidth="6" cmdlen="max">Option ===></cmdarea></panel>'
+    )
+    f = s.command_field
+    # The entry now runs to the panel's right edge, not the coded 6 columns.
+    assert f.length == s.width - f.col - 1
+    assert f.length > 6
+    # DEFAULT (the ISPF-sized field) is unchanged — byte-identical to no attr.
+    d = load_dtl('<panel><cmdarea entwidth="6">Option ===></cmdarea></panel>')
+    assert d.command_field.length == 6
+
+
+def test_cmdarea_cmdloc_and_caps_recorded():
+    s = load_dtl(
+        '<panel><cmdarea entwidth="6" cmdloc="asis" caps="off">'
+        'Option ===></cmdarea></panel>'
+    )
+    assert s.command_field.cmdloc == "asis"
+    assert s.command_field.caps is False
+    # Defaults: DEFAULT position, caps-on (ISPF folds the command line to upper).
+    d = load_dtl('<panel><cmdarea entwidth="6">Option ===></cmdarea></panel>')
+    assert d.command_field.cmdloc == "default"
+    assert d.command_field.caps is True
+    # Recording these does not perturb the render (metadata only).
+    assert d.render() == load_dtl(
+        '<panel><cmdarea entwidth="6">Option ===></cmdarea></panel>').render()
 
 
 def test_keyi_outside_keyl_raises():

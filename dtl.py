@@ -394,6 +394,8 @@ class _DTLParser(HTMLParser):
         self._keylist = None      # active <keyl> bindings dict, or None
         self._keylist_name = None  # <keyl name=...> (the list's name), or None
         self._keylist_applid = None  # <keyl applid=...> (its application id), or None
+        self._keylist_help = None  # <keyl help=...> (keylist help panel), or None
+        self._keylist_action = None  # <keyl action=UPDATE|DELETE> (codegen), or None
         self._keyi = None         # open <keyi> awaiting its FKA-text content, or None
         self._varclasses = {}     # <varclass> name (upper) → {"numeric", "checks", "msg"}
         self._vardcls = {}        # <vardcl> name (upper) → {"varclass": name}
@@ -603,7 +605,8 @@ class _DTLParser(HTMLParser):
         # (reference phrase — a hypertext link to another help panel) is the same
         # kind of inline emphasis; with no explicit emphasis it renders underlined,
         # the CUA point-and-shoot link style.
-        if tag in ("hp", "rp") and self._tag in _TEXT_TAGS:
+        if tag in ("hp", "rp") and (self._tag in _TEXT_TAGS
+                                    or self._tag == "divider"):
             self._begin_hp(a)
             if tag == "rp" and self._hp == (None, None, None):
                 self._hp = (None, Highlight.UNDERSCORE, None)
@@ -868,6 +871,11 @@ class _DTLParser(HTMLParser):
                 "pmtloc": str(a.get("pmtloc", "above")).strip().lower(),
                 "pmtwidth": self._opt_int(a.get("pmtwidth")),
                 "selwidth": self._opt_int(a.get("selwidth")),
+                # PAD/PADC fill the selection entry; OUTLINE draws box lines around
+                # it (applied to the field the user types into — the single-select
+                # input field or each MULTI mark field). None → the plain defaults.
+                "pad": self._pad_char(a),
+                "outline": self._outline(a),
                 "prompt_chars": [],
                 "prompt_done": False,
             }
@@ -897,6 +905,10 @@ class _DTLParser(HTMLParser):
             self._keylist = {}
             self._keylist_name = a.get("name")
             self._keylist_applid = a.get("applid")
+            # HELP names the keylist's help panel; ACTION=UPDATE|DELETE is a
+            # keylist-table maintenance directive (codegen only). Both metadata.
+            self._keylist_help = a.get("help")
+            self._keylist_action = a.get("action")
         elif tag == "keyi":
             self._emit_keyi(a)
         elif tag == "cmdtbl":
@@ -950,7 +962,11 @@ class _DTLParser(HTMLParser):
             if self._ab is None:
                 raise DTLError("<abc> outside of an <ab>")
             self._end_abc()                     # implicit end of a previous <abc>
-            self._cur_abc = {"chars": [], "pdc": [], "help": self._field_help(a)}
+            # PDCVAR names the )PROC variable that receives the selected pull-down
+            # choice number — a dialog-variable concern with no host-display effect;
+            # recorded on the choice model.
+            self._cur_abc = {"chars": [], "pdc": [], "help": self._field_help(a),
+                             "pdcvar": a.get("pdcvar")}
         elif tag == "pdc":
             if self._cur_abc is None:
                 raise DTLError("<pdc> outside of an <abc>")
@@ -965,9 +981,14 @@ class _DTLParser(HTMLParser):
             match = str(a.get("match", "")).strip().upper()
             checked = bool(checkvar) and \
                 self._subs.get(str(checkvar).strip().upper(), "").strip().upper() == match
+            # ACC1-3 are GUI keyboard accelerators (e.g. Ctrl+key) shown beside the
+            # item in a GUI client; a text 3270 terminal has no accelerator display,
+            # so they are recorded (GUI-only) but not rendered.
+            acc = [a.get(k) for k in ("acc1", "acc2", "acc3") if a.get(k)]
             self._cur_pdc = {"chars": [], "action": "",
                              "help": self._field_help(a),
-                             "unavail": unavail, "checked": checked}
+                             "unavail": unavail, "checked": checked,
+                             "acc": acc}
         elif tag == "action":
             # A pull-down choice's command: <pdc>label<action run=cmd>. RUN= names
             # the command the choice runs. SETVAR/TOGVAR model the variable an action
@@ -985,6 +1006,12 @@ class _DTLParser(HTMLParser):
                 if a.get("togvar"):
                     self._cur_pdc["togvar"] = (
                         a["togvar"], a.get("value1", "0"), a.get("value2", "1"))
+                # APPLCMD/NEWAPPL/MODE/LANG and the other ACTION forms are ISPF
+                # SELECT/command-dispatch semantics (how/where the command runs) —
+                # no host-display effect. Recorded so the action model is lossless.
+                for k in ("applcmd", "newappl", "mode", "lang"):
+                    if a.get(k):
+                        self._cur_pdc[k] = a[k]
         elif tag == "pdsep":
             # A separator line within an action-bar pull-down: close the choice
             # above it (DTL omits end tags) and record a divider row between the
@@ -1416,7 +1443,10 @@ class _DTLParser(HTMLParser):
             self.screen.keylist = self._keylist or {}
             self.screen.keylist_name = self._keylist_name
             self.screen.keylist_applid = self._keylist_applid
+            self.screen.keylist_help = self._keylist_help
+            self.screen.keylist_action = self._keylist_action
             self._keylist = self._keylist_name = self._keylist_applid = None
+            self._keylist_help = self._keylist_action = None
             return
         if tag == "cmdtbl":
             self._finalize_cmd_trunc()
@@ -1620,7 +1650,7 @@ class _DTLParser(HTMLParser):
         elif tag in ("dldiv", "pldiv"):
             self._emit_listdiv(a, content)
         elif tag == "divider":
-            self._emit_divider(a, content)
+            self._emit_divider(a, content, runs)
         elif tag == "textseg":
             if self._textline is not None:
                 seg = " ".join(content.split())
@@ -2504,7 +2534,38 @@ class _DTLParser(HTMLParser):
         else:                                            # solid / dash → dashed rule
             self.screen.add(Text(row, start, "-" * span, role="rule"))
 
-    def _emit_divider(self, a, content):
+    @staticmethod
+    def _collapse_runs(runs, width):
+        """Whitespace-collapse mixed-content ``runs`` (4-tuples from ``<hp>``) into
+        ``(text, color, highlight)`` 3-tuples for :meth:`Text.rich`, matching the
+        ``" ".join(text.split())`` normalisation the plain path uses, and truncating
+        the total to ``width`` characters. Runs of blanks (within or across pieces)
+        become a single space; leading/trailing blanks are dropped."""
+        out = []
+        used = 0
+        pending_space = False
+        started = False
+        for text, color, hilite, _ in runs:
+            parts = text.split()
+            has_lead = text[:1].isspace()
+            has_trail = text[-1:].isspace()
+            piece = ""
+            if started and (pending_space or has_lead) and parts:
+                piece += " "
+            piece += " ".join(parts)
+            pending_space = has_trail if parts else (pending_space or has_lead)
+            if parts:
+                started = True
+            if not piece:
+                continue
+            piece = piece[: max(0, width - used)]
+            if not piece:
+                break
+            used += len(piece)
+            out.append((piece, color, hilite))
+        return out or [("", None, None)]
+
+    def _emit_divider(self, a, content, runs=None):
         """Emit an <area>/<region> <divider>, honouring TYPE and its divider-text.
 
         The position was fixed when the tag opened (``a["_row"]/_col/_width``); the
@@ -2516,8 +2577,13 @@ class _DTLParser(HTMLParser):
           terminal draws it from the graphic set, so it reads as an unbroken rule.
         * TEXT — the divider's own text, positioned within the span by FORMAT
           (START/CENTER/END). Empty text falls back to nothing (just the spacer row).
+          Inline ``<hp>`` in the text is kept as a coloured/emphasised run (mono
+          renders identically to the plain text).
 
-        GAP=YES leaves a one-character gap at each end of the rule/text.
+        GAP=YES leaves a one-character gap at each end of the rule/text. NOENDATTR
+        suppresses the trailing field-attribute byte a *field* would carry; a
+        divider is protected display text (no such attribute), so it has no effect
+        here and is accepted as a no-op.
         """
         row, col, span = a["_row"], a["_col"], a["_width"]
         typ = str(a.get("type", "dash")).strip().lower()
@@ -2525,7 +2591,10 @@ class _DTLParser(HTMLParser):
         if _bool_attr(a, "gap"):                         # 1-char gap at each end
             start, span = col + 1, max(1, span - 2)
         if typ == "text":
-            text = " ".join(content.split())[:span]
+            # Inline <hp> in the divider text builds runs; the plain concatenation
+            # is what positions the text (FORMAT) and what a mono terminal shows.
+            text = (" ".join("".join(r[0] for r in runs).split()) if runs
+                    else " ".join(content.split()))[:span]
             if not text:
                 return
             fmt = str(a.get("format", "start")).strip().lower()
@@ -2535,7 +2604,14 @@ class _DTLParser(HTMLParser):
                 off = (span - len(text)) // 2
             else:
                 off = 0
-            self.screen.add(Text(row, start + max(0, off), text, role="rule"))
+            at = start + max(0, off)
+            if runs and any(r[1] or r[2] for r in runs):
+                # Keep the <hp> colour/highlight runs across the (whitespace-
+                # collapsed) text; rebuild the runs against the collapsed string.
+                self.screen.add(Text.rich(row, at, self._collapse_runs(runs, span),
+                                          role="rule"))
+            else:
+                self.screen.add(Text(row, at, text, role="rule"))
         elif typ == "solid":
             # A GE solid line — an unbroken rule, distinct from DASH's hyphens.
             self.screen.add(GraphicText.rule(row, start, span, role="rule"))
@@ -3037,15 +3113,22 @@ class _DTLParser(HTMLParser):
         leading blank line is needed (skip it when the row above is already blank)."""
         return any(getattr(it, "row", None) == row for it in self.screen.items)
 
-    def _skip_blank_before(self, a):
+    def _skip_blank_before(self, a, space_suppresses=False):
         """ISPDTLC block spacing: insert a leading blank line before a flowed block
         element (paragraph, panel instruction, command area, selection field,
         definition list). Added only when the box already holds content (so the
         first block gets none) and the row above is not already blank (so an
         existing gap isn't doubled). An explicit ``row``, COMPACT, or NOSKIP
-        suppresses it. Advances the flow row cursor."""
+        suppresses it. Advances the flow row cursor.
+
+        ``space_suppresses`` maps a ``<p SPACE=NO>`` to the same suppression: on a
+        paragraph SPACE=NO|YES governs the preceding blank (YES, the default, keeps
+        it). Not passed for list tags, where SPACE instead sets the item indent."""
+        space_no = space_suppresses and \
+            str(a.get("space", "")).strip().lower() == "no"
         ctx = self._areas[-1] if self._areas else None
         if (ctx is not None and "row" not in a and not _bool_attr(a, "compact")
+                and not space_no
                 and not _bool_attr(a, "noskip")
                 and ctx.get("had_content") and ctx["row"] >= 1
                 and ctx["row"] + 1 < self.screen.depth   # don't push off the panel
@@ -3171,7 +3254,9 @@ class _DTLParser(HTMLParser):
         # instruction (see _skip_blank_before for the exact rule; COMPACT
         # suppresses it).
         if tag in _BLANK_BEFORE_TAGS:
-            self._skip_blank_before(a)
+            # On a <p>, SPACE=NO suppresses the preceding blank (like COMPACT);
+            # SPACE=YES (default) keeps it. Only <p> carries SPACE here.
+            self._skip_blank_before(a, space_suppresses=(tag == "p"))
         row, col, ctx = self._resolve_pos(a, "info")
         if self._lists:
             # A paragraph inside a list aligns with the list's item text.
@@ -3307,11 +3392,13 @@ class _DTLParser(HTMLParser):
             "numeric": _flag("numeric"),                 # NUMERIC=ON → numeric field
             "pad": self._pad_char(a),                    # PAD/PADC empty-cell fill
             "just": str(a.get("just", "asis")).strip().lower(),   # ASIS|LEFT|RIGHT
-            "skip": _flag("skip"),                        # SKIP=ON → autoskip field
-            # Recorded (no TN3270 display effect on this server): CAPS (input
-            # uppercase), GE (graphic escape / DBCS), PAS/CSRGRP (point-and-shoot
-            # → #115), CKBOX/CUADYN (GUI checkbox / dynamic CUA), ATTN (attention).
-            "caps": _flag("caps", "on", "in", "out"),
+            "skip": _flag("skip"),          # SKIP=ON → autoskip (client auto-advance)
+            "caps": _flag("caps", "on", "in", "out"),     # CAPS → upper-fold input
+            # By design, no distinct display effect on this single-byte text server:
+            # GE (graphic escape) and FORMAT=DBCS/MIX are DBCS (deferred, #135);
+            # PAS/CSRGRP are point-and-shoot (tracked #115); CKBOX (GUI checkbox) and
+            # CUADYN (GUI dynamic CUA type) are GUI-only; ATTN (attention field) has
+            # no separate render. All are parsed and recorded.
             "ge": _flag("ge"),
             "pas": _flag("pas"),
             "csrgrp": a.get("csrgrp"),
@@ -3394,6 +3481,12 @@ class _DTLParser(HTMLParser):
                 hidden=hidden, numeric=spec["numeric"], pad=spec["pad"],
                 color=spec["color"], highlight=spec["hilite"],
                 outline=spec["outline"],
+                # CAPS=ON|IN|OUT folds typed input to upper (recorded on the field
+                # like a <lstcol CAPS=ON> cell); SKIP=ON is an autoskip/auto-advance
+                # field, carried as the client autotab behaviour (no distinct 3270
+                # attribute bit, same as <dtafld AUTOTAB>).
+                caps=spec["caps"],
+                autotab=spec["skip"],
             ))
         else:  # dataout / char / text → protected display field
             # JUST right/left-justifies the display text within its run width.
@@ -3730,9 +3823,16 @@ class _DTLParser(HTMLParser):
         """A <checki> validity-check item. The value list / range may be given as
         element text (``v1 v2 …`` / ``min max``) or — the form the guide uses — via
         attributes: ``type=values parm1=EQ|NE parm2='v1 v2'`` (EQ = must be one of;
-        NE = must not be). ``alpha`` / ``name`` are character-class checks. Other
-        authentic types (``picture`` …) stay lenient (recognised but unenforced),
-        so a panel using them still loads and renders."""
+        NE = must not be). ``alpha`` / ``name`` are character-class checks.
+
+        Enforced on submit: RANGE, VALUES, ALPHA/ALPHAB, NAME/NAMEF, NUM, HEX, LEN,
+        PICT, BIT, IPADDR4, the date/time formats (IDATE/STDDATE/JDATE/JSTD/ITIME/
+        STDTIME), and the data-set-name family (DSNAME/DSNAMEQ/DSNAMEPQ, the F/M
+        member variants, FILEID). Left lenient by design: DBCS/MIX (deferred, #135);
+        LISTV/LISTVX/ENUM (require a runtime dialog %varlist a static display server
+        does not hold); INCLUDE (a composite include-check); EBCDIC (every byte on a
+        single-byte terminal is EBCDIC-representable) — all recognised so the panel
+        loads, none rejecting input."""
         ctype = str(a.get("type", "")).strip().lower()
         words = content.split()
         parm2 = a.get("parm2")
@@ -3753,7 +3853,7 @@ class _DTLParser(HTMLParser):
             )
         elif ctype in ("alpha", "alphab"):
             self._checkl["checks"].append({"type": "alpha"})
-        elif ctype == "name":
+        elif ctype in ("name", "namef"):
             self._checkl["checks"].append({"type": "name"})
         elif ctype == "num":                          # all-numeric (optional sign)
             self._checkl["checks"].append({"type": "num"})
@@ -3771,6 +3871,25 @@ class _DTLParser(HTMLParser):
                 (words[0] if words else "")
             if mask:
                 self._checkl["checks"].append({"type": "pict", "mask": str(mask)})
+        elif ctype in self._DATETIME_PATTERNS:        # IDATE/STDDATE/JDATE/JSTD/…
+            # A date/time check: the value must match that system format exactly
+            # (shape check — the calendar validity is not modelled). Same patterns
+            # the date/time <varclass> classes use (#129).
+            self._checkl["checks"].append(
+                {"type": "pattern", "regex": self._DATETIME_PATTERNS[ctype]})
+        elif ctype == "bit":                          # BIT: binary digits only
+            self._checkl["checks"].append({"type": "bit"})
+        elif ctype in ("ipaddr4", "ipaddr"):          # IPADDR4: dotted-quad IPv4
+            self._checkl["checks"].append({"type": "ipaddr4"})
+        elif ctype in ("dsname", "dsnameq", "dsnamepq"):   # data set name (no member)
+            self._checkl["checks"].append({"type": "dsname"})
+        elif ctype in ("dsnamef",):                   # DSNAMEF: optional member
+            self._checkl["checks"].append({"type": "dsname", "member": True})
+        elif ctype in ("dsnamefm", "dsnamem"):        # DSNAMEFM/M: member required
+            self._checkl["checks"].append(
+                {"type": "dsname", "member": True, "member_required": True})
+        elif ctype == "fileid":                       # FILEID: a data set + optional member
+            self._checkl["checks"].append({"type": "dsname", "member": True})
 
     def _emit_xlati(self, a, content):
         """One ``<xlati value=internal>external`` translation item. The external
@@ -3851,7 +3970,23 @@ class _DTLParser(HTMLParser):
         # to the conventional ZCMD. A flowed command area gets a leading blank line
         # (the title/body separator), like a paragraph.
         self._skip_blank_before(a)
+        # PMTTEXT=NO suppresses the command-prompt text ("Option ===>"): the field
+        # is emitted bare (default YES keeps the prompt, so byte-identical when absent).
+        if not _bool_attr(a, "pmttext", default=True):
+            content = ""
         field = self._add_field(a, content, "cmdarea", a.get("datavar", "ZCMD"))
+        # CMDLEN=MAX extends the command entry to the panel's right edge (DEFAULT,
+        # the ISPF-sized field, is what _add_field already produced). CMDLOC=ASIS
+        # keeps the coded position (our placement is already as-coded) and is
+        # recorded on the field; DEFAULT is the ISPF-repositioned default.
+        if field is not None:
+            if str(a.get("cmdlen", "default")).strip().lower() == "max":
+                field.length = max(field.length, self.screen.width - field.col - 1)
+            field.cmdloc = str(a.get("cmdloc", "default")).strip().lower()
+            # CAPS: the command line folds typed input to upper by default (ISPF
+            # caps-on); the server already upper-folds the command for dispatch, so
+            # CAPS=ON is faithful. Record CAPS=OFF (case-preserving) for callers.
+            field.caps = _bool_attr(a, "caps", default=True)
         self.screen.command_field = field
         if self._scroll and field is not None:
             self._emit_scroll_field(field)
@@ -4007,6 +4142,7 @@ class _DTLParser(HTMLParser):
                 row=row, col=sf["numcol"], length=1,
                 name=(a.get("name") or f'{sf["name"]}{sf["count"]}') or None,
                 color=explicit, role="field",
+                pad=sf.get("pad"), outline=sf.get("outline"),
             )
             self.screen.add(mark)
         else:
@@ -4016,7 +4152,8 @@ class _DTLParser(HTMLParser):
                 # it. Its name is the SELFLD's NAME (per the CHOICE reference).
                 self.screen.add(Field(
                     row=row, col=sf["inputcol"], length=sf["entwidth"],
-                    name=sf["name"] or None, color=explicit, role="field"))
+                    name=sf["name"] or None, color=explicit, role="field",
+                    pad=sf.get("pad"), outline=sf.get("outline")))
             # SINGLE choices are numbered "N." (number + period); a MENU/explicit
             # field uses the bare number padded to numwidth.
             num_text = num + "." if sf.get("period") else num.ljust(sf["numwidth"])
@@ -4173,7 +4310,8 @@ class _DTLParser(HTMLParser):
             }
             # Optional behaviours are added only when present, so ordinary items keep
             # their four-key shape (and the action-bar model stays compact).
-            for key in ("unavail", "checked", "type", "parm", "setvar", "togvar"):
+            for key in ("unavail", "checked", "type", "parm", "setvar", "togvar",
+                        "acc", "applcmd", "newappl", "mode", "lang"):
                 val = self._cur_pdc.get(key)
                 if val:
                     item[key] = val
@@ -4191,10 +4329,13 @@ class _DTLParser(HTMLParser):
             if mnem is not None:               # re-base the offset onto the label
                 mnem -= len(raw) - len(raw.lstrip())
                 mnem = mnem if 0 <= mnem < len(label) else None
-            self._ab["choices"].append({
+            choice = {
                 "label": label, "pdc": self._cur_abc["pdc"], "mnemonic": mnem,
                 "help": self._cur_abc.get("help"),
-            })
+            }
+            if self._cur_abc.get("pdcvar"):
+                choice["pdcvar"] = self._cur_abc["pdcvar"]
+            self._ab["choices"].append(choice)
         self._cur_abc = None
 
     def _emit_action_bar(self, ab):
@@ -4256,9 +4397,16 @@ class _DTLParser(HTMLParser):
         if not key:
             raise DTLError("<keyi> missing required attribute 'key'")
         # ``cmd`` is the command the key invokes (ISPF allows ``action`` too);
-        # both key and command are case-insensitive, stored uppercase.
+        # the key is case-insensitive. CASE=UPPER (the default) folds the command
+        # to upper; CASE=MIXED preserves its authored case. PARM is a parameter
+        # string carried with the command — appended so the resolved command is
+        # ``CMD PARM`` (command dispatch splits the verb off, so an empty PARM is
+        # byte-identical to none).
         cmd = a.get("cmd", a.get("action", ""))
-        self._keylist[key.upper()] = cmd.upper()
+        if str(a.get("case", "upper")).strip().lower() != "mixed":
+            cmd = cmd.upper()
+        parm = str(a.get("parm", "")).strip()
+        self._keylist[key.upper()] = (cmd + " " + parm).strip() if parm else cmd
         # FKA=NO|YES|LONG|SHORT governs whether the key appears in the function-key
         # area; the element content is the FKA display text. Capture it (unless
         # FKA=NO suppresses it) so the FKA line can be labelled.

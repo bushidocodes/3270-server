@@ -227,6 +227,49 @@ def _emit_attr_runs(buf: bytearray, runs, base_color: Optional[Color],
 _NAME_FIRST = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@#$")
 _NAME_REST = _NAME_FIRST | set("0123456789")
 
+# One MVS data-set-name qualifier: 1-8 chars, first alphabetic or national
+# (@ # $), the rest alphanumeric or national or hyphen — the standard rule.
+_DSN_QUALIFIER = r"[A-Za-z@#$][A-Za-z0-9@#$-]{0,7}"
+# A fully-qualified data set name: dot-joined qualifiers (total length capped at
+# 44 by the caller). An optional trailing (MEMBER) is allowed for the F variants.
+_DSNAME_RE = re.compile(rf"{_DSN_QUALIFIER}(?:\.{_DSN_QUALIFIER})*", re.ASCII)
+_DSN_MEMBER_RE = re.compile(rf"{_DSN_QUALIFIER}", re.ASCII)
+
+
+def _dsname_ok(value: str, member: bool = False, member_required: bool = False) -> bool:
+    """Whether ``value`` is a valid MVS data set name (DTL ``<checki type=dsname>``
+    and its F/M variants). A dot-joined run of 1-8-char qualifiers, ≤44 chars.
+    ``member`` allows an optional ``(MEMBER)`` suffix; ``member_required`` demands
+    one. Calendar/catalog existence is not checked — only the name's syntax."""
+    v = value.strip()
+    if not v:
+        return False
+    mem = None
+    if v.endswith(")") and "(" in v:
+        v, _, rest = v.partition("(")
+        mem = rest[:-1]
+        if not member:
+            return False
+    elif member_required:
+        return False
+    if len(v) > 44 or not _DSNAME_RE.fullmatch(v):
+        return False
+    if mem is not None and (len(mem) > 8 or not _DSN_MEMBER_RE.fullmatch(mem)):
+        return False
+    return True
+
+
+def _ipaddr4_ok(value: str) -> bool:
+    """Whether ``value`` is a dotted-quad IPv4 address (DTL ``<checki
+    type=ipaddr4>``): four 0-255 octets separated by dots."""
+    parts = value.strip().split(".")
+    if len(parts) != 4:
+        return False
+    for p in parts:
+        if not (p.isdigit() and 0 <= int(p) <= 255):
+            return False
+    return True
+
 
 def _pict_match(value: str, mask: str) -> bool:
     """Whether ``value`` matches a DTL ``<checki type=pict>`` picture ``mask``:
@@ -301,6 +344,15 @@ def _check_failure(check: dict, value: str):
             else {"VALUE": value, "LEN": check["len"]}
     if check["type"] == "pict":                       # <checki type=pict parm2=mask>
         return None if _pict_match(value, check["mask"]) else {"VALUE": value}
+    if check["type"] == "bit":                        # <checki type=bit>: 0/1 only
+        v = value.strip()
+        return None if (v and all(c in "01" for c in v)) else {"VALUE": value}
+    if check["type"] == "ipaddr4":                    # <checki type=ipaddr4>
+        return None if _ipaddr4_ok(value) else {"VALUE": value}
+    if check["type"] == "dsname":                     # <checki type=dsname[...]>
+        ok = _dsname_ok(value, member=check.get("member", False),
+                        member_required=check.get("member_required", False))
+        return None if ok else {"VALUE": value}
     if check["type"] == "maxlen":                     # <varclass type='char N'>
         if len(value) > check["max"]:
             return {"VALUE": value, "MAX": check["max"]}
@@ -577,6 +629,11 @@ class Field:
     # not part of field identity.
     required: bool = _dc_field(default=False, compare=False)
     msg: Optional[str] = _dc_field(default=None, compare=False)
+    # DTL <cmdarea CMDLOC=DEFAULT|ASIS>: where the command line sits. "asis" keeps
+    # the coded position; "default" is the ISPF-repositioned default. Our placement
+    # is already as-coded, so this is carried as metadata for callers that care —
+    # not rendered, not part of field identity.
+    cmdloc: Optional[str] = _dc_field(default=None, compare=False)
 
     @property
     def data_addr(self) -> int:
@@ -646,6 +703,11 @@ class Screen:
     # rendered); None when the panel declares no inline keylist.
     keylist_name: Optional[str] = None
     keylist_applid: Optional[str] = None
+    # The keylist's HELP panel (DTL <keyl HELP=...>) and maintenance ACTION
+    # (UPDATE|DELETE — a keylist-table directive, codegen only). Metadata; not
+    # rendered. None when absent.
+    keylist_help: Optional[str] = None
+    keylist_action: Optional[str] = None
     # Function-key → its function-key-area label text (DTL <keyi>'s FKA-text, e.g.
     # {"PF3": "Exit"}); a key with FKA=NO or no text is absent. Metadata.
     keylist_fka: Dict[str, str] = _dc_field(default_factory=dict)
