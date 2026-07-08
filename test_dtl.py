@@ -1393,6 +1393,30 @@ class _Sock2:
 
 # ── action-bar / command attributes (#126) ──────────────────────────────────
 
+def test_action_bar_records_pdcvar_and_pdc_accelerators():
+    # #126: ABC PDCVAR (the )PROC variable receiving the choice) and PDC ACC1-3
+    # (GUI accelerator keys) are recorded on the action-bar model. Neither has a
+    # host-display effect, so the rendered bar is unchanged.
+    s = load_dtl(
+        '<panel><ab>'
+        '<abc pdcvar=ZPDSEL>File'
+        '<pdc acc1="Ctrl+X" acc2="Alt+F4">Exit<action run=exit></pdc>'
+        '</abc></ab></panel>'
+    )
+    choice = s.action_bar[0]
+    assert choice["pdcvar"] == "ZPDSEL"
+    assert choice["pdc"][0]["acc"] == ["Ctrl+X", "Alt+F4"]
+    # A plain choice keeps its compact shape (no pdcvar / acc keys).
+    p = load_dtl('<panel><ab><abc>File<pdc>Exit<action run=exit></pdc>'
+                 '</abc></ab></panel>')
+    assert "pdcvar" not in p.action_bar[0]
+    assert "acc" not in p.action_bar[0]["pdc"][0]
+    # Bytes are identical with or without the metadata attributes.
+    assert s.render() == load_dtl(
+        '<panel><ab><abc>File<pdc>Exit<action run=exit></pdc>'
+        '</abc></ab></panel>').render()
+
+
 def test_action_bar_absepstr_draws_separator_between_choices():
     # ABSEPSTR is the string drawn between the action-bar choices; the choices lay
     # out flush against it (no default gap), so " | " gives "File | Edit".
@@ -1522,6 +1546,46 @@ def test_keyl_records_name_and_applid():
     assert s.keylist == {"PF3": "EXIT"}
     assert s.keylist_name == "MYKEYS"
     assert s.keylist_applid == "ISR"
+
+
+def test_keyl_records_help_and_action():
+    # #126: <keyl HELP=..> names the keylist's help panel; ACTION=UPDATE|DELETE is
+    # a keylist-table maintenance directive (codegen). Both recorded as metadata.
+    s = load_dtl(
+        '<panel><keyl name=MYKEYS help=KEYHELP action=UPDATE>'
+        '<keyi key=PF3 cmd=EXIT>Exit</keyi>'
+        '</keyl></panel>'
+    )
+    assert s.keylist_help == "KEYHELP"
+    assert s.keylist_action == "UPDATE"
+    # Absent → None (byte-identical; metadata only).
+    d = load_dtl('<panel><keyl><keyi key=PF3 cmd=EXIT>x</keyi></keyl></panel>')
+    assert d.keylist_help is None and d.keylist_action is None
+
+
+def test_keyi_case_mixed_preserves_command_case_and_parm_appended():
+    # #126: CASE=UPPER (default) folds the command to upper; CASE=MIXED preserves
+    # the authored case. PARM is appended so the resolved command is "CMD PARM".
+    s = load_dtl(
+        '<panel><keyl>'
+        '<keyi key=PF3 cmd=Exit case=mixed>Exit</keyi>'
+        '<keyi key=PF4 cmd=find parm="ALL">Find</keyi>'
+        '</keyl></panel>'
+    )
+    assert s.keylist["PF3"] == "Exit"        # mixed case preserved
+    assert s.keylist["PF4"] == "FIND ALL"    # upper-folded verb + parm appended
+
+
+def test_cmdtbl_records_applid_and_sort():
+    # #126: <cmdtbl applid=.. sort=YES> records the table's application scope and
+    # sort flag (codegen). SORT default NO.
+    s = _cmd_panel()
+    assert s.command_table_applid == "ISR"
+    assert s.command_table_sort is False
+    srt = load_dtl(
+        '<panel><cmdtbl applid=ISR sort=yes>'
+        '<cmd name=X>x<cmdact action=passthru></cmd></cmdtbl></panel>')
+    assert srt.command_table_sort is True
 
 
 def test_keyi_fka_text_recorded_and_suppressed_by_fka_no():

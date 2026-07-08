@@ -651,6 +651,11 @@ class Screen:
     # rendered); None when the panel declares no inline keylist.
     keylist_name: Optional[str] = None
     keylist_applid: Optional[str] = None
+    # The keylist's HELP panel (DTL <keyl HELP=...>) and maintenance ACTION
+    # (UPDATE|DELETE — a keylist-table directive, codegen only). Metadata; not
+    # rendered. None when absent.
+    keylist_help: Optional[str] = None
+    keylist_action: Optional[str] = None
     # Function-key → its function-key-area label text (DTL <keyi>'s FKA-text, e.g.
     # {"PF3": "Exit"}); a key with FKA=NO or no text is absent. Metadata.
     keylist_fka: Dict[str, str] = _dc_field(default_factory=dict)
@@ -717,6 +722,11 @@ class Screen:
     # Command name (upper) → {"action": str, "trunc": int}, from a DTL <cmdtbl>.
     # Lets the command line recognise named commands (with truncation).
     commands: Dict[str, dict] = _dc_field(default_factory=dict)
+    # The command table's APPLID (application scope) and SORT flag (DTL <cmdtbl
+    # applid=.. sort=YES>). SORT alphabetises the generated table — codegen only,
+    # no host-display effect. Both metadata; None/False when absent.
+    command_table_applid: Optional[str] = None
+    command_table_sort: bool = False
     # Action-bar choices from a DTL <ab>: [{"label": str, "pdc": [...]}]. The
     # choice labels are also emitted as Text items; the pull-down structure is
     # kept here for future point-and-shoot interaction.

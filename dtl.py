@@ -394,6 +394,8 @@ class _DTLParser(HTMLParser):
         self._keylist = None      # active <keyl> bindings dict, or None
         self._keylist_name = None  # <keyl name=...> (the list's name), or None
         self._keylist_applid = None  # <keyl applid=...> (its application id), or None
+        self._keylist_help = None  # <keyl help=...> (keylist help panel), or None
+        self._keylist_action = None  # <keyl action=UPDATE|DELETE> (codegen), or None
         self._keyi = None         # open <keyi> awaiting its FKA-text content, or None
         self._varclasses = {}     # <varclass> name (upper) → {"numeric", "checks", "msg"}
         self._vardcls = {}        # <vardcl> name (upper) → {"varclass": name}
@@ -897,10 +899,18 @@ class _DTLParser(HTMLParser):
             self._keylist = {}
             self._keylist_name = a.get("name")
             self._keylist_applid = a.get("applid")
+            # HELP names the keylist's help panel; ACTION=UPDATE|DELETE is a
+            # keylist-table maintenance directive (codegen only). Both metadata.
+            self._keylist_help = a.get("help")
+            self._keylist_action = a.get("action")
         elif tag == "keyi":
             self._emit_keyi(a)
         elif tag == "cmdtbl":
             self._in_cmdtbl = True
+            # APPLID scopes the table to an application; SORT=YES alphabetises the
+            # generated table (codegen only). Both recorded as Screen metadata.
+            self.screen.command_table_applid = a.get("applid")
+            self.screen.command_table_sort = _bool_attr(a, "sort")
         elif tag == "cmd":
             if not self._in_cmdtbl:
                 raise DTLError("<cmd> outside of a <cmdtbl>")
@@ -932,14 +942,23 @@ class _DTLParser(HTMLParser):
             # blanks; we keep the wider gap when it is absent so bundled panels stay
             # byte-identical). ABSEPCHAR is the character of the separator *line*
             # ISPF draws on the row below the bar — both default to nothing shown.
+            # MNEMGEN=YES|NO governs ISPDTLC auto-generation of choice mnemonics
+            # (the )BODY highlighting it emits). This server honours only explicit
+            # <m> mnemonics — auto-generation is a codegen concern — so MNEMGEN is
+            # recorded but does not synthesise mnemonics. Default YES.
             self._ab = {"row": 0, "col": 1, "gap": 3, "choices": [],
                         "absepstr": a.get("absepstr"),
-                        "absepchar": a.get("absepchar")}
+                        "absepchar": a.get("absepchar"),
+                        "mnemgen": _bool_attr(a, "mnemgen", default=True)}
         elif tag == "abc":
             if self._ab is None:
                 raise DTLError("<abc> outside of an <ab>")
             self._end_abc()                     # implicit end of a previous <abc>
-            self._cur_abc = {"chars": [], "pdc": [], "help": self._field_help(a)}
+            # PDCVAR names the )PROC variable that receives the selected pull-down
+            # choice number — a dialog-variable concern with no host-display effect;
+            # recorded on the choice model.
+            self._cur_abc = {"chars": [], "pdc": [], "help": self._field_help(a),
+                             "pdcvar": a.get("pdcvar")}
         elif tag == "pdc":
             if self._cur_abc is None:
                 raise DTLError("<pdc> outside of an <abc>")
@@ -954,9 +973,14 @@ class _DTLParser(HTMLParser):
             match = str(a.get("match", "")).strip().upper()
             checked = bool(checkvar) and \
                 self._subs.get(str(checkvar).strip().upper(), "").strip().upper() == match
+            # ACC1-3 are GUI keyboard accelerators (e.g. Ctrl+key) shown beside the
+            # item in a GUI client; a text 3270 terminal has no accelerator display,
+            # so they are recorded (GUI-only) but not rendered.
+            acc = [a.get(k) for k in ("acc1", "acc2", "acc3") if a.get(k)]
             self._cur_pdc = {"chars": [], "action": "",
                              "help": self._field_help(a),
-                             "unavail": unavail, "checked": checked}
+                             "unavail": unavail, "checked": checked,
+                             "acc": acc}
         elif tag == "action":
             # A pull-down choice's command: <pdc>label<action run=cmd>. RUN= names
             # the command the choice runs. SETVAR/TOGVAR model the variable an action
@@ -974,6 +998,12 @@ class _DTLParser(HTMLParser):
                 if a.get("togvar"):
                     self._cur_pdc["togvar"] = (
                         a["togvar"], a.get("value1", "0"), a.get("value2", "1"))
+                # APPLCMD/NEWAPPL/MODE/LANG and the other ACTION forms are ISPF
+                # SELECT/command-dispatch semantics (how/where the command runs) —
+                # no host-display effect. Recorded so the action model is lossless.
+                for k in ("applcmd", "newappl", "mode", "lang"):
+                    if a.get(k):
+                        self._cur_pdc[k] = a[k]
         elif tag == "pdsep":
             # A separator line within an action-bar pull-down: close the choice
             # above it (DTL omits end tags) and record a divider row between the
@@ -1398,7 +1428,10 @@ class _DTLParser(HTMLParser):
             self.screen.keylist = self._keylist or {}
             self.screen.keylist_name = self._keylist_name
             self.screen.keylist_applid = self._keylist_applid
+            self.screen.keylist_help = self._keylist_help
+            self.screen.keylist_action = self._keylist_action
             self._keylist = self._keylist_name = self._keylist_applid = None
+            self._keylist_help = self._keylist_action = None
             return
         if tag == "cmdtbl":
             self._finalize_cmd_trunc()
@@ -4176,7 +4209,8 @@ class _DTLParser(HTMLParser):
             }
             # Optional behaviours are added only when present, so ordinary items keep
             # their four-key shape (and the action-bar model stays compact).
-            for key in ("unavail", "checked", "type", "parm", "setvar", "togvar"):
+            for key in ("unavail", "checked", "type", "parm", "setvar", "togvar",
+                        "acc", "applcmd", "newappl", "mode", "lang"):
                 val = self._cur_pdc.get(key)
                 if val:
                     item[key] = val
@@ -4194,10 +4228,13 @@ class _DTLParser(HTMLParser):
             if mnem is not None:               # re-base the offset onto the label
                 mnem -= len(raw) - len(raw.lstrip())
                 mnem = mnem if 0 <= mnem < len(label) else None
-            self._ab["choices"].append({
+            choice = {
                 "label": label, "pdc": self._cur_abc["pdc"], "mnemonic": mnem,
                 "help": self._cur_abc.get("help"),
-            })
+            }
+            if self._cur_abc.get("pdcvar"):
+                choice["pdcvar"] = self._cur_abc["pdcvar"]
+            self._ab["choices"].append(choice)
         self._cur_abc = None
 
     def _emit_action_bar(self, ab):
@@ -4255,9 +4292,16 @@ class _DTLParser(HTMLParser):
         if not key:
             raise DTLError("<keyi> missing required attribute 'key'")
         # ``cmd`` is the command the key invokes (ISPF allows ``action`` too);
-        # both key and command are case-insensitive, stored uppercase.
+        # the key is case-insensitive. CASE=UPPER (the default) folds the command
+        # to upper; CASE=MIXED preserves its authored case. PARM is a parameter
+        # string carried with the command — appended so the resolved command is
+        # ``CMD PARM`` (command dispatch splits the verb off, so an empty PARM is
+        # byte-identical to none).
         cmd = a.get("cmd", a.get("action", ""))
-        self._keylist[key.upper()] = cmd.upper()
+        if str(a.get("case", "upper")).strip().lower() != "mixed":
+            cmd = cmd.upper()
+        parm = str(a.get("parm", "")).strip()
+        self._keylist[key.upper()] = (cmd + " " + parm).strip() if parm else cmd
         # FKA=NO|YES|LONG|SHORT governs whether the key appears in the function-key
         # area; the element content is the FKA display text. Capture it (unless
         # FKA=NO suppresses it) so the FKA line can be labelled.
