@@ -2811,6 +2811,25 @@ def test_da_attr_records_non_rendering_attributes():
     assert any(isinstance(it, Field) for it in s.items)   # field still rendered
 
 
+def test_da_depth_reserves_height_and_div_closes_it():
+    # #125: <da DEPTH=n> reserves a fixed height (the flow resumes DEPTH rows below
+    # its top); DIV=SOLID/DASH draws a closing rule. DEPTH=* / absent → body height.
+    s = load_dtl('<panel name="p" width="40">T<area>'
+                 '<da depth="5" div="solid"><attr attrchar="$" type="char">Body $x</da>'
+                 '<info>After</info></area></panel>')
+    after = next(t for t in s.items if isinstance(t, Text) and t.text == "After")
+    rules = [t for t in s.items if isinstance(t, Text) and set(t.text) == {"-"}]
+    assert len(rules) == 1
+    body_row = next(t.row for t in s.items if isinstance(t, Text) and "Body" in t.text)
+    assert rules[0].row == body_row + 5          # divider below the reserved height
+    assert after.row == rules[0].row + 1
+    # default: no reserved height, no divider (byte-identical shape)
+    d = load_dtl('<panel name="p" width="40">T<area>'
+                 '<da><attr attrchar="$" type="char">Body $x</da>'
+                 '<info>After</info></area></panel>')
+    assert not [t for t in d.items if isinstance(t, Text) and set(t.text) == {"-"}]
+
+
 def test_dtafld_pad_fills_entry_and_dtacol_default():
     # #122: PAD/PADC set the fill character for an empty <dtafld> entry, with the
     # same rules as <lstcol>. A <dtacol> PAD is the column default; a field's own

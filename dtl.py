@@ -1073,6 +1073,16 @@ class _DTLParser(HTMLParser):
                 "col": ctx["col"] if ctx else 1,
                 "attrs": {}, "body": [],
                 "ctx": ctx,
+                # DEPTH reserves a fixed height (the flow resumes DEPTH rows below
+                # the area's top); WIDTH constrains the DIV span; DIV draws a closing
+                # divider (SOLID/DASH rule, BLANK spacer, TEXT caption, FORMAT-placed).
+                # DEPTH=* / absent → the body's own height. #125.
+                "depth": (self._opt_int(a["depth"])
+                          if "depth" in a and str(a["depth"]).strip() != "*" else None),
+                "width": self._opt_int(a.get("width")),
+                "div": str(a.get("div", "none")).strip().lower(),
+                "divtext": " ".join(str(a.get("text", "")).split()),
+                "divformat": str(a.get("format", "start")).strip().lower(),
             }
         elif tag == "attr":
             self._emit_attr(a)
@@ -3271,8 +3281,29 @@ class _DTLParser(HTMLParser):
                      default=0)
         for i, ln in enumerate(lines):
             self._emit_da_line(ln[indent:], da["row"] + i, da["col"], da["attrs"])
+        row = da["row"] + len(lines)
+        # DEPTH reserves a fixed height: pad the area out so the flow resumes DEPTH
+        # rows below its top even if the body is shorter.
+        if da.get("depth"):
+            row = max(row, da["row"] + da["depth"])
+        # DIV draws a closing divider spanning the area (or its WIDTH).
+        if da.get("div") not in (None, "none", ""):
+            div, col = da["div"], da["col"]
+            span = da.get("width") or max(1, self.screen.width - col - 1)
+            if div == "text":
+                t = (da.get("divtext") or "")[:span]
+                fmt = da.get("divformat", "start")
+                off = (max(0, (span - len(t)) // 2) if fmt == "center"
+                       else max(0, span - len(t)) if fmt == "end" else 0)
+                if t:
+                    self.screen.add(Text(row, col + off, t, DisplayIntensity.NORMAL,
+                                         role="rule"))
+            elif div != "blank":
+                self.screen.add(Text(row, col, "-" * span, DisplayIntensity.NORMAL,
+                                     role="rule"))
+            row += 1
         if da.get("ctx") is not None:      # advance the enclosing flow past it
-            da["ctx"]["row"] = da["row"] + len(lines)
+            da["ctx"]["row"] = row
 
     def _emit_da_line(self, line, row, base, attrs):
         """Lay out one data-area line: attribute characters delimit fields; the
