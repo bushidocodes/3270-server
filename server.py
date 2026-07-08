@@ -1071,6 +1071,7 @@ def _library_members():
         "utility": "Utility Selection Panel",
         "command": "TSO Command Shell",
         "dlgtest": "Dialog Test - Variables",
+        "tabtest": "Dialog Test - Table Input",
         "memlist": "Library - Member List",
         "tsohelp": "Logon help",
         "sizehelp": "Logon Size field help",
@@ -1248,6 +1249,71 @@ def _show_member_list(client_socket, model=None):
                 if path:
                     _show_browse(client_socket, member, path, model=model)
         # otherwise just redisplay the current page
+
+
+def _show_dialog_test(client_socket, userid=None, model=None):
+    """ISPF Dialog Test (option 7). Displays the session's dialog variables
+    (read-only, dlgtest.dtl); PF5 opens the Table Input scratch panel, which
+    exercises the ``<lstfld>`` table-input read-back (#249). Enter redisplays;
+    PF3/PF15 returns to the Primary Option Menu. PF1 shows help."""
+    from dtl import load_panel
+
+    while True:
+        screen = load_panel("dlgtest", rows=_dialog_vars(userid, model))
+        action = _await_action(client_socket, screen)
+        if action is _LEAVE:
+            return
+        aid_str, _fields, _cursor = action
+        if aid_str == "PF5":
+            _show_table_input(client_socket)
+        # Enter (or any other non-leave key) just redisplays the variables.
+
+
+def _show_table_input(client_socket, model=None):
+    """Dialog Test scratch table (tabtest.dtl): an input ``<lstfld>`` the user
+    types into. On Enter the modified cells are read back *per model row* via
+    :meth:`screen.Screen.read_table_rows` — despite every row's cell in a column
+    sharing the column DATAVAR — and the non-blank rows are echoed via &TABMSG,
+    so the round-trip is visible on the terminal. This is the served consumer
+    that exercises the table-input read-back path end-to-end (#249); PF3 returns.
+
+    The rows are re-seeded from the read-back on each Enter, so what the user
+    typed persists across redisplays (the table holds its state, like TBDISPL)."""
+    from dtl import load_panel
+
+    from screen import Field
+
+    rows = [{"tkey": "", "tval": ""} for _ in range(4)]
+    msg = ""
+    while True:
+        screen = load_panel("tabtest", rows=rows, TABMSG=msg)
+        # Land the cursor on the first table input cell (the panel has no other
+        # input), so the user types straight into the table.
+        first = next((f for f in screen.items
+                      if isinstance(f, Field) and f.row_index is not None), None)
+        if first is not None:
+            screen.cursor_at = (first.row, first.col + 1)
+        _send_screen(client_socket, screen)
+        result = read_client_input(client_socket)
+        if result is None:
+            return
+        aid, fields, cursor = result
+        aid_str = aid_to_string(aid)
+        if screen.command_for(aid_str) in _LEAVE_COMMANDS:
+            return
+        if aid_str == "PF1":
+            help_panel = screen.help_for(cursor) or screen.help
+            if help_panel:
+                _show_overlay(client_socket, help_panel)
+            continue
+        # Read the whole table back per row (modified cells override the rendered
+        # defaults) and re-seed from it, so edits persist. Echo the non-blank rows.
+        rows = screen.read_table_rows(fields)
+        filled = [f"{r.get('tkey', '').strip()}={r.get('tval', '').strip()}"
+                  for r in rows
+                  if r.get("tkey", "").strip() or r.get("tval", "").strip()]
+        msg = (f"Read {len(filled)} row(s): " + ", ".join(filled)) if filled \
+            else "No rows entered"
 
 
 def _show_submenu(client_socket, panel_name: str, initial=None, userid=None,
@@ -1961,9 +2027,8 @@ _SELECTION_HANDLERS = {
     "edit":       lambda cs, model=None, **kw: _show_view(
                       cs, entry_panel="editentry", verb="EDIT", model=model),
     "cmdshell":   lambda cs, **kw: _show_command_shell(cs),
-    "dlgtest":    lambda cs, userid=None, model=None, **kw: _show_overlay(
-                      cs, "dlgtest", rows=_dialog_vars(userid, model),
-                      enter_returns=False),
+    "dlgtest":    lambda cs, userid=None, model=None, **kw: _show_dialog_test(
+                      cs, userid=userid, model=model),
     # A utility sub-menu leaf: the Library list (utility.dtl's )PROC routes 1 here).
     "memberlist": lambda cs, model=None, **kw: _show_member_list(cs, model=model),
     "utility":    _submenu("utility"),

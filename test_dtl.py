@@ -1671,6 +1671,64 @@ def test_dialog_test_panel_renders_variable_rows():
     assert s.command_for("PF3") == "EXIT"
 
 
+# ── <lstfld> table-input read-back (#249) ────────────────────────────────────
+
+def test_input_lstfld_tags_each_cell_with_its_model_row():
+    # An input <lstfld> column renders one Field per model row; each carries its
+    # model-row index (row_index) so the rows can be told apart on read-back,
+    # even though every row's cell in a column shares the column DATAVAR.
+    src = (
+        '<panel name="t">T'
+        '<lstfld><lstcol datavar="k" usage="in" colwidth="6">Key'
+        '<lstcol datavar="v" usage="in" colwidth="10">Val</lstfld></panel>'
+    )
+    rows = [{"k": "a", "v": "1"}, {"k": "b", "v": "2"}, {"k": "c", "v": "3"}]
+    s = load_dtl(src, rows=rows)
+    cells = [f for f in s.items if isinstance(f, Field) and f.row_index is not None]
+    # two input columns × three rows
+    assert len(cells) == 6
+    assert sorted({f.row_index for f in cells}) == [0, 1, 2]
+    # every row index carries both column DATAVARs
+    by_row = {}
+    for f in cells:
+        by_row.setdefault(f.row_index, set()).add(f.name)
+    assert by_row == {0: {"k", "v"}, 1: {"k", "v"}, 2: {"k", "v"}}
+
+
+def test_read_table_rows_keeps_rows_distinct_despite_shared_datavar():
+    # Screen.parse would collapse the table (last-address-wins per DATAVAR);
+    # read_table_rows uses the per-cell row_index to return one dict per row.
+    src = (
+        '<panel name="t">T'
+        '<lstfld><lstcol datavar="k" usage="in" colwidth="6">Key'
+        '<lstcol datavar="v" usage="in" colwidth="10">Val</lstfld></panel>'
+    )
+    rows = [{"k": "a", "v": "1"}, {"k": "b", "v": "2"}]
+    s = load_dtl(src, rows=rows)
+    cells = [f for f in s.items if isinstance(f, Field) and f.row_index is not None]
+    # client modifies row 1's "k" and row 0's "v"; the rest are unmodified
+    modified = {}
+    for f in cells:
+        if f.name == "k" and f.row_index == 1:
+            modified[f.data_addr] = "Z"
+        if f.name == "v" and f.row_index == 0:
+            modified[f.data_addr] = "9"
+    out = s.read_table_rows(modified)
+    # one dict per displayed model row; modified cells override, others keep the
+    # originally rendered value (the field default)
+    assert out == [{"k": "a", "v": "9"}, {"k": "Z", "v": "2"}]
+    # a plain Screen.parse can't do this — the DATAVARs collapse to one value each
+    _aid, named = s.parse(0x7D, modified)
+    assert set(named) <= {"k", "v"}  # only one value survives per column
+
+
+def test_read_table_rows_empty_for_display_only_table():
+    # A read-only (usage=out) table has no input cells, so there is nothing to
+    # read back: read_table_rows returns [].
+    s = load_panel("dlgtest", rows=[{"vname": "ZUSER", "vvalue": "IBMUSER"}])
+    assert s.read_table_rows({}) == []
+
+
 # ── message members (<msgmbr>/<msg>) ─────────────────────────────────────────
 
 def test_msg_member_parses_and_formats_with_substitution():
