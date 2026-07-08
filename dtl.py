@@ -320,7 +320,7 @@ _TEXT_TAGS = ("info",) + _INSTRUCTION_TAGS + _FLOW_TEXT_TAGS
 # (The other block elements — <lines>/<xmp>, <ul>/<ol>/<sl>/<notel>, <note>/<nt>,
 # <dl>/<parml>, <fig> — take the same leading skip at their own emit sites.)
 _BLANK_BEFORE_TAGS = ("p", "lp", "pnlinst")
-_CONTENT_TAGS = _TEXT_TAGS + ("dtafld", "cmdarea", "choice", "figcap",
+_CONTENT_TAGS = _TEXT_TAGS + ("dtafld", "cmdarea", "choice", "chdiv", "figcap",
                               "dthd", "ddhd", "dldiv", "pldiv", "textseg",
                               "dtseg", "ptseg")
 _FIELD_TAGS = ("dtafld", "cmdarea")
@@ -1557,6 +1557,8 @@ class _DTLParser(HTMLParser):
             self._emit_cmdarea(a, content)
         elif tag == "choice":
             self._emit_choice(a, content)
+        elif tag == "chdiv":
+            self._emit_chdiv(a, content)
         elif tag == "msg":
             mid = a["msgid"].upper()
             self.messages[mid] = content.strip()
@@ -3807,6 +3809,36 @@ class _DTLParser(HTMLParser):
             checkvar = a.get("checkvar")
             if checkvar and self._subs.get(checkvar.strip().upper(), "").strip().upper() == match:
                 self.screen.cursor_at = (row, mark.col if mark is not None else sf["namecol"])
+
+    def _emit_chdiv(self, a, content):
+        """Render a ``<chdiv>`` (choice divider) within a ``<selfld>``: a line that
+        separates groups of choices. ``TYPE=SOLID``/``DASH`` draw a dashed rule
+        across the choice area; ``TYPE=TEXT`` (or any divider text) writes the
+        caption, justified by ``FORMAT``; ``TYPE=NONE`` (the default, no text) is a
+        blank separator row. Advances the choice flow past the divider."""
+        sf = self._selfld
+        if sf is None:
+            raise DTLError("<chdiv> outside of a <selfld>")
+        # A divider before any choice still shows the field prompt first.
+        self._emit_selfld_prompt(sf)
+        row = sf["row"]
+        start = sf.get("inputcol")
+        if start is None:
+            start = sf["numcol"]
+        width = sf.get("selwidth") or max(1, self.screen.width - start - 1)
+        typ = str(a.get("type", "none")).strip().lower()
+        text = " ".join(content.split())
+        N = DisplayIntensity.NORMAL
+        if typ in ("solid", "dash"):
+            self.screen.add(Text(row, start, ("-" * width)[:width], N, role="rule"))
+        elif text:                       # TYPE=TEXT / bare text: the caption, justified
+            t = text[:width]
+            fmt = str(a.get("format", "start")).strip().lower()
+            off = (max(0, (width - len(t)) // 2) if fmt == "center"
+                   else max(0, width - len(t)) if fmt == "end" else 0)
+            self.screen.add(Text(row, start + off, t, N, role="rule"))
+        # TYPE=NONE with no text → a blank separator row (draw nothing).
+        sf["row"] = row + 1
 
     def _emit_chofld(self, a, description, row, desccol, desclen, color):
         """Lay out a <chofld> (choice data field): an input (or output) field just
