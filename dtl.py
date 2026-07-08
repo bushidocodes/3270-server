@@ -1176,6 +1176,12 @@ class _DTLParser(HTMLParser):
                 # regardless of the box's actual content (so a full-width divider
                 # inside a left column doesn't shove the right column off-screen).
                 "width": self._opt_int(a.get("width")) if "width" in a else None,
+                # DIV draws a divider as the box's last line when it closes: SOLID/
+                # DASH a dashed rule, BLANK a spacer, TEXT the divider text (FORMAT
+                # positioned). NONE (default) draws nothing. #125.
+                "div": str(a.get("div", "none")).strip().lower(),
+                "divtext": " ".join(str(a.get("text", "")).split()),
+                "divformat": str(a.get("format", "start")).strip().lower(),
                 # A box that transparently continues the parent's flow inherits its
                 # content state, so the first paragraph below a panel title still
                 # gets the CUA title/body separator. An explicitly-positioned box
@@ -1468,6 +1474,10 @@ class _DTLParser(HTMLParser):
             self._info_indent = 0    # an <info> can't outlive its enclosing box
             if self._areas:
                 ctx = self._areas.pop()
+                # DIV draws a divider as the box's last line (SOLID/DASH a rule,
+                # BLANK a spacer, TEXT the divider text), advancing the box cursor.
+                if ctx.get("div") not in (None, "none", ""):
+                    self._emit_area_div(ctx)
                 if ctx.get("grpbox"):
                     # A title-only group box may still be capturing; bank it first,
                     # then frame the content and drop the flow below the bottom edge.
@@ -2407,6 +2417,28 @@ class _DTLParser(HTMLParser):
         self.screen.add(Text(row, desc_col, text, _intensity(a), role="heading"))
         if ctx is not None and not (dl and dl.get("compact")):
             ctx["row"] = row + 2                     # heading row + one blank line
+
+    def _emit_area_div(self, ctx):
+        """Draw an ``<area>``/``<region> DIV=…>`` divider as the box's closing line
+        at the current flow row, then advance the box cursor past it. SOLID/DASH →
+        a dashed rule spanning the box; BLANK → an empty spacer; TEXT → the divider
+        text (FORMAT positions it within the span). #125."""
+        div = ctx["div"]
+        row, col = ctx["row"], ctx["col"]
+        span = ctx.get("width") or max(1, self.screen.width - col - 1)
+        if div == "text":
+            t = (ctx.get("divtext") or "")[:span]
+            fmt = ctx.get("divformat", "start")
+            off = (max(0, (span - len(t)) // 2) if fmt == "center"
+                   else max(0, span - len(t)) if fmt == "end" else 0)
+            if t:
+                self.screen.add(Text(row, col + off, t, DisplayIntensity.NORMAL,
+                                     role="rule"))
+        elif div != "blank":                          # solid / dash → a dashed rule
+            self.screen.add(Text(row, col, "-" * span, DisplayIntensity.NORMAL,
+                                 role="rule"))
+        ctx["row"] = row + 1
+        ctx["maxbottom"] = max(ctx.get("maxbottom", row), ctx["row"])
 
     def _emit_listdiv(self, a, content):
         """Emit a definition/parameter-list divider (<dldiv>/<pldiv>): a horizontal

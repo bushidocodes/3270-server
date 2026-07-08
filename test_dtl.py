@@ -4489,6 +4489,26 @@ def test_panel_tmargin_and_bmargin_reserve_top_and_bottom_rows():
     assert max(t.row for t in tall.items if isinstance(t, Text)) <= 10 - 1 - 3
 
 
+def test_area_div_draws_a_closing_divider():
+    # #125: <area>/<region> DIV=SOLID/DASH draws a dashed rule as the box's last
+    # line; TEXT writes the divider text (FORMAT positions it); NONE (default)
+    # draws nothing (byte-identical).
+    s = load_dtl('<panel name="p" width="30">T<area div="solid"><info>Body</info></area>'
+                 '<info>After</info></panel>')
+    rules = [t for t in s.items if isinstance(t, Text) and set(t.text) == {"-"}]
+    body = next(t for t in s.items if isinstance(t, Text) and t.text == "Body")
+    after = next(t for t in s.items if isinstance(t, Text) and t.text == "After")
+    assert len(rules) == 1
+    assert body.row < rules[0].row < after.row       # divider closes the area
+    # TEXT divider
+    txt = load_dtl('<panel name="p" width="30">T<area div="text" text="-- end --">'
+                   '<info>X</info></area></panel>')
+    assert any(isinstance(t, Text) and t.text == "-- end --" for t in txt.items)
+    # default (no DIV) → no rule
+    plain = load_dtl('<panel name="p" width="30">T<area><info>Body</info></area></panel>')
+    assert not [t for t in plain.items if isinstance(t, Text) and set(t.text) == {"-"}]
+
+
 def test_regions_lay_out_side_by_side_columns():
     s = load_dtl(
         '<panel>'
