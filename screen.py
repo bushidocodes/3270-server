@@ -519,6 +519,11 @@ class Field:
     # the modified cells are read back (see Screen.read_table_rows). None on a plain
     # (non-table) field. Metadata — not rendered, not part of field identity.
     row_index: Optional[int] = _dc_field(default=None, compare=False)
+    # DTL <lstcol CAPS=ON>: the column is uppercase-input. ISPF generates CAPS(ON)
+    # in the panel )ATTR and folds the field to uppercase; this display server folds
+    # the typed value to uppercase on read-back (Screen.read_table_rows). Metadata —
+    # not rendered, not part of field identity.
+    caps: bool = _dc_field(default=False, compare=False)
 
     @property
     def data_addr(self) -> int:
@@ -1006,6 +1011,10 @@ class Screen:
         for f in cells:
             text = fields_by_addr.get(f.data_addr)
             value = text if text is not None else f.default
+            # <lstcol CAPS=ON>: ISPF folds the field to uppercase; do the same on
+            # read-back so the dialog sees the uppercased value it would on z/OS.
+            if f.caps:
+                value = value.upper()
             if f.name is not None:
                 rows[f.row_index][f.name] = value
         return rows
