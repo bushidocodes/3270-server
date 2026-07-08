@@ -1428,6 +1428,28 @@ class _Sock2:
 
 # ── action-bar / command attributes (#126) ──────────────────────────────────
 
+def test_action_bar_mnemgen_auto_underlines_first_letter():
+    # #126: <ab MNEMGEN=YES> auto-assigns the first letter of a choice as its
+    # mnemonic (underlined) when the choice has no explicit <M>. It is opt-in:
+    # absent / MNEMGEN=NO leaves bare labels byte-identical, and an explicit <M>
+    # always wins over the auto-generated one.
+    from screen import Highlight
+    def runs(markup):
+        s = load_dtl('<panel name="p">T<ab ' + markup +
+                     '><abc>File<pdc>Open<action run="x"></pdc></abc></ab></panel>')
+        return [t.runs for t in s.items if getattr(t, "runs", None)]
+    assert runs('mnemgen="yes"') == [[("F", None, Highlight.UNDERSCORE),
+                                      ("ile", None, None)]]
+    assert runs('') == []                             # absent → no auto-mnemonic
+    assert runs('mnemgen="no"') == []                 # NO → no auto-mnemonic
+    # an explicit <M> wins (underlines the marked letter, not the first)
+    s = load_dtl('<panel name="p">T<ab mnemgen="yes">'
+                 '<abc>F<M>ile<pdc>Open<action run="x"></pdc></abc></ab></panel>')
+    r = next(t.runs for t in s.items if getattr(t, "runs", None))
+    assert r == [("F", None, None), ("i", None, Highlight.UNDERSCORE),
+                 ("le", None, None)]
+
+
 def test_action_bar_absepstr_draws_separator_between_choices():
     # ABSEPSTR is the string drawn between the action-bar choices; the choices lay
     # out flush against it (no default gap), so " | " gives "File | Edit".
@@ -1569,6 +1591,18 @@ def test_keyi_fka_text_recorded_and_suppressed_by_fka_no():
         '</keyl></panel>'
     )
     assert s.keylist_fka == {"PF1": "Help", "PF3": "Exit"}   # PF12 (FKA=NO) omitted
+
+
+def test_keyi_case_folds_the_fka_label():
+    # #126: <keyi CASE=UPPER|LOWER> folds the function-key-area label; ASIS/absent
+    # keeps the authored case.
+    def fka(case):
+        s = load_dtl(f'<panel><keyl><keyi key=PF3 cmd=EXIT case="{case}">Exit Now</keyi>'
+                     '</keyl></panel>')
+        return s.keylist_fka["PF3"]
+    assert fka("upper") == "EXIT NOW"
+    assert fka("lower") == "exit now"
+    assert fka("") == "Exit Now"                     # absent → authored case kept
 
 
 def test_rp_reference_phrase_is_inline_underlined_link():

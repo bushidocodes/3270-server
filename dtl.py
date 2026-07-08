@@ -939,7 +939,13 @@ class _DTLParser(HTMLParser):
             # ISPF draws on the row below the bar — both default to nothing shown.
             self._ab = {"row": 0, "col": 1, "gap": 3, "choices": [],
                         "absepstr": a.get("absepstr"),
-                        "absepchar": a.get("absepchar")}
+                        "absepchar": a.get("absepchar"),
+                        # MNEMGEN=YES auto-assigns the first letter of a choice as
+                        # its mnemonic when it carries no explicit <M>. Treated as
+                        # opt-in (absent → off) so existing bare-label action bars
+                        # stay byte-identical; MNEMGEN=NO is also off. #126.
+                        "mnemgen": str(a.get("mnemgen", "")).strip().lower()
+                        == "yes"}
         elif tag == "abc":
             if self._ab is None:
                 raise DTLError("<abc> outside of an <ab>")
@@ -4187,6 +4193,10 @@ class _DTLParser(HTMLParser):
             label = choice["label"]
             choice["row"], choice["col"] = ab["row"], col
             m = choice.get("mnemonic")
+            # MNEMGEN=YES: a choice with no explicit <M> mnemonic gets its first
+            # letter underlined as the auto-generated shortcut.
+            if m is None and ab.get("mnemgen") and label:
+                m = 0
             if m is not None and 0 <= m < len(label):
                 # Underline the mnemonic letter (the shortcut), as ISPF does. Mono
                 # renders the concatenation identically to a plain Text.
@@ -4238,6 +4248,8 @@ class _DTLParser(HTMLParser):
         # FKA=NO suppresses it) so the FKA line can be labelled.
         self._keyi = {"key": key.upper(),
                       "show": str(a.get("fka", "yes")).strip().lower() != "no",
+                      # CASE folds the FKA label (UPPER/LOWER; ASIS/MIXED keep it).
+                      "case": str(a.get("case", "")).strip().lower(),
                       "chars": []}
 
     def _finalize_keyi(self):
@@ -4248,6 +4260,10 @@ class _DTLParser(HTMLParser):
         if ki is None:
             return
         text = "".join(ki["chars"]).strip()
+        if ki.get("case") == "upper":
+            text = text.upper()
+        elif ki.get("case") == "lower":
+            text = text.lower()
         if ki["show"] and text:
             self.screen.keylist_fka[ki["key"]] = text
 
