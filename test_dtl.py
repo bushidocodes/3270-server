@@ -3752,6 +3752,22 @@ def test_dl_list_divider_types():
     assert none[a_row + 1].strip() == ""                         # blank spacer row
 
 
+def test_dl_list_divider_gutter_insets_the_rule():
+    # #120: GUTTER=n insets the divider rule n characters at each end (GAP=YES is
+    # the n=1 shorthand); absent, the rule spans the list full-width.
+    from screen import Text
+    def rule(markup):
+        s = load_dtl('<panel name=p width=40><area><info><dl tsize=6>'
+                     + markup + '</dl></info></area></panel>')
+        return next(t for t in s.items if isinstance(t, Text) and set(t.text) == {"-"})
+    full = rule('<dt>A<dd>x<dldiv type=solid><dt>B<dd>y')
+    inset = rule('<dt>A<dd>x<dldiv type=solid gutter=4><dt>B<dd>y')
+    gap = rule('<dt>A<dd>x<dldiv type=solid gap=yes><dt>B<dd>y')
+    assert inset.col == full.col + 4                    # start inset by the gutter
+    assert len(inset.text) == len(full.text) - 8       # both ends inset by 4
+    assert gap.col == full.col + 1                      # GAP=YES → gutter 1
+
+
 def test_dl_headers_compact_suppresses_blank():
     # COMPACT on the <dl> drops the blank line between the heading and the items.
     src = ("<panel name=p width=40><area><info>"

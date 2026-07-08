@@ -2382,8 +2382,13 @@ class _DTLParser(HTMLParser):
         if ctx is not None and ctx.get("width"):
             span = ctx["width"]
         start = col
-        if _bool_attr(a, "gap"):                         # 1-char gap at each end
-            start, span = col + 1, max(1, span - 2)
+        # GUTTER=n insets the rule n characters at each end; GAP=YES is the n=1
+        # shorthand. Absent (neither) leaves the rule full-width (unchanged).
+        gutter = self._opt_int(a.get("gutter"))
+        if gutter is None:
+            gutter = 1 if _bool_attr(a, "gap") else 0
+        if gutter > 0:
+            start, span = col + gutter, max(1, span - 2 * gutter)
         if typ == "text":
             text = " ".join(content.split())[:span]
             fmt = str(a.get("format", "start")).strip().lower()
