@@ -513,6 +513,11 @@ class Field:
     # Field-level help panel (DTL <dtafld help=...>): shown when the cursor is on
     # this field and HELP is pressed. Metadata — not rendered, not part of identity.
     help: Optional[str] = _dc_field(default=None, compare=False)
+    # DTL AUTOTAB=YES: the cursor should auto-advance to the next field when this
+    # one fills. The 3270 data stream has no field-attribute bit for it (it is a
+    # client-side autotab behaviour), so it is carried as metadata only — not
+    # rendered, not part of field identity.
+    autotab: bool = _dc_field(default=False, compare=False)
     # Table (<lstfld>) input-cell identity: the model-row index this cell belongs
     # to. Every input cell in a given column shares the column's DATAVAR (``name``),
     # so the row index is what distinguishes one displayed row from the next when
