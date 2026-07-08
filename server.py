@@ -1036,7 +1036,7 @@ def _await_action(client_socket, screen):
             # Context-sensitive HELP: the field the cursor is on, else the panel.
             help_panel = screen.help_for(cursor) or screen.help
             if help_panel:
-                _show_overlay(client_socket, help_panel)
+                _show_help(client_socket, help_panel)
                 continue  # redisplay this panel after help
         return aid_str, fields, cursor
 
@@ -1117,6 +1117,27 @@ def _screen_size(model):
     if model is None:
         return 24, 80
     return model.alt_rows, model.alt_cols
+
+
+def _scroll_amount(value: str, page: int, total: int = None,
+                   cursor_offset: int = None) -> int:
+    """Rows to move for one scroll (PF7/PF8) press, from an ISPF ``SCROLL`` amount.
+
+    Mirrors ISPF's ``SCROLL ===>`` field values: ``PAGE`` a full visible page,
+    ``HALF`` half a page, ``MAX`` the whole set (``total`` if known, else a large
+    number the caller clamps), ``CSR`` the distance from the window top to the
+    cursor line (``cursor_offset``), or a literal number ``n``. An empty or
+    unrecognised value defaults to ``PAGE`` — as ISPF does."""
+    v = (value or "").strip().upper()
+    if v.isdigit():
+        return max(1, int(v))
+    if v in ("HALF", "H"):
+        return max(1, page // 2)
+    if v in ("MAX", "M"):
+        return total if total is not None else 10 ** 9
+    if v in ("CSR", "CURSOR"):
+        return cursor_offset if cursor_offset else page
+    return page  # PAGE / P / blank / unknown
 
 
 def _show_browse(client_socket, member: str, path: str, verb: str = "BROWSE",
@@ -1217,8 +1238,12 @@ def _show_member_list(client_socket, model=None):
         window = members[top:top + page]
         foot = (f"Member {top + 1}-{top + len(window)} of {len(members)}"
                 "     PF7=Up  PF8=Down  PF3=Exit")[:cols - 1]
+        # row_offset/row_total make the panel's own "ROW x TO y OF z" scroll status
+        # and its "BOTTOM OF DATA" marker reflect the real window over the full set
+        # (so page 1 of a multi-page list is not falsely marked BOTTOM OF DATA).
         screen = load_panel("memlist", rows=window,
-                            screen_rows=rows, screen_cols=cols)
+                            screen_rows=rows, screen_cols=cols,
+                            row_offset=top, row_total=len(members))
         screen.alternate = alternate
         screen.add(Text(rows - 2, 0, foot, DisplayIntensity.HIGH))
         screen.add(Text(rows - 1, 0, "-" * (cols - 1), DisplayIntensity.HIGH))
@@ -1234,14 +1259,17 @@ def _show_member_list(client_socket, model=None):
         if action is _LEAVE:
             return
         aid_str, _fields, cursor = action
+        # PF8/PF20 page down, PF7/PF19 up, by the SCROLL amount (member lists have
+        # no SCROLL field, so PAGE — the default). The offset is clamped to the set.
+        amount = _scroll_amount("PAGE", page, total=len(members))
         if aid_str in ("PF8", "PF20"):
-            top += page
+            top += amount
         elif aid_str in ("PF7", "PF19"):
-            top -= page
+            top -= amount
         elif aid_str == "PF1":   # HELP: the member cell's <lstcol help=>, else panel
             help_panel = screen.help_for(cursor) or screen.help
             if help_panel:
-                _show_overlay(client_socket, help_panel)
+                _show_help(client_socket, help_panel)
         elif _is_cursor_select(aid_str) and cursor is not None:
             member = member_by_row.get(cursor // cols)   # width-aware row decode
             if member:
@@ -1379,6 +1407,69 @@ def _show_submenu(client_socket, panel_name: str, initial=None, userid=None,
             msg = f"INVALID OPTION: {opt}"
 
 
+def _show_help(client_socket, panel_name: str):
+    """Display a help/tutorial panel, paging it with PF7/PF8 (and PF10/PF11, the
+    ISPF PrvPage/NxtPage) when its content overflows the 24-row screen (#281).
+
+    A help panel that fits is shown by :func:`_show_overlay` exactly as before. A
+    taller one is rendered to a large virtual screen (so the flow is not clipped),
+    then a window of its content lines is drawn below the fixed title, with a
+    "More: - +" scroll indicator on the last row. Enter or PF3 dismisses it."""
+    import dataclasses
+    from dtl import load_panel
+    from screen import Screen, Text
+
+    HELP_ROWS, HELP_COLS = 24, 80
+    VIRT = 500  # a virtual depth tall enough that no bundled help panel clips
+
+    # Measure the panel's content on a tall screen. Row 0 is the title; the
+    # bottom-anchored <botinst> sits near the virtual foot — exclude both, leaving
+    # the flowed body as the scrollable content.
+    tall = load_panel(panel_name, screen_rows=VIRT, screen_cols=HELP_COLS)
+    body = [it for it in tall.items
+            if getattr(it, "row", None) is not None and 0 < it.row < VIRT - 4]
+    page_h = HELP_ROWS - 2            # rows 1..HELP_ROWS-2 hold content
+    if not body:
+        return _show_overlay(client_socket, panel_name)
+    content_top = min(it.row for it in body)
+    content_height = max(it.row for it in body) - content_top + 1
+    if content_height <= page_h:      # fits on a 24-row screen → unchanged path
+        return _show_overlay(client_socket, panel_name)
+
+    title = [it for it in tall.items if getattr(it, "row", None) == 0]
+    max_offset = content_height - page_h
+    offset = 0
+    while True:
+        offset = max(0, min(offset, max_offset))
+        screen = Screen(width=HELP_COLS, depth=HELP_ROWS)
+        screen.title = tall.title
+        screen.help = tall.help
+        screen.keylist = tall.keylist   # so PF3/PF15 EXIT is recognised
+        for it in title:
+            screen.add(it)
+        for it in body:
+            r = it.row - content_top - offset
+            if 0 <= r < page_h:
+                screen.add(dataclasses.replace(it, row=1 + r))
+        more_up, more_down = offset > 0, offset + page_h < content_height
+        marker = "More:" + (" -" if more_up else "") + (" +" if more_down else "")
+        indicator = (f"{marker}    PF7=Up  PF8=Down  PF3=Return")[:HELP_COLS - 1]
+        screen.add(Text(HELP_ROWS - 1, 0, indicator, DisplayIntensity.HIGH))
+        _send_screen(client_socket, screen)
+        result = read_client_input(client_socket)
+        if result is None:
+            return
+        aid, _fields, _cursor = result
+        aid_str = aid_to_string(aid)
+        if screen.command_for(aid_str) in _LEAVE_COMMANDS or aid_str == "Enter":
+            return                       # PF3/PF15 or Enter dismiss the help
+        if aid_str in ("PF8", "PF20", "PF11"):     # page down / NxtPage
+            offset += page_h
+        elif aid_str in ("PF7", "PF19", "PF10"):   # page up / PrvPage
+            offset -= page_h
+        # any other key just redisplays the current page
+
+
 def _show_overlay(client_socket, panel_name: str, rows=None, enter_returns=True):
     """Display an overlay panel (help or sub-panel) and wait for the user to
     leave it. The underlying panel is re-sent by the caller's loop on return —
@@ -1413,7 +1504,7 @@ def _show_overlay(client_socket, panel_name: str, rows=None, enter_returns=True)
             # is on, else this panel's own help. (Overlays ignored PF1 before.)
             help_panel = screen.help_for(cursor) or screen.help
             if help_panel:
-                _show_overlay(client_socket, help_panel)
+                _show_help(client_socket, help_panel)
             continue
         if screen.action_bar and aid_str in ("PF10", "PF11"):
             # F10/F11 move the cursor left/right along the action-bar choices
@@ -1527,7 +1618,7 @@ def _show_pulldown(client_socket, screen, choice):
         on_item = crow in action_by_row and col <= ccol <= col + inner + 1
         if aid_str == "PF1":  # HELP for the item under the cursor
             if on_item and crow in help_by_row:
-                _show_overlay(client_socket, help_by_row[crow])
+                _show_help(client_socket, help_by_row[crow])
             continue  # redisplay the pull-down either way
         if _is_cursor_select(aid_str) and on_item:
             return action_by_row[crow]
@@ -1544,7 +1635,7 @@ def _run_pdc_action(client_socket, screen, action) -> bool:
     if act in ("exit", "end", "return", "cancel"):
         return True
     if act == "help" and screen.help:
-        _show_overlay(client_socket, screen.help)
+        _show_help(client_socket, screen.help)
         return False
     return False  # passthru / unknown / no selection: just redisplay
 
@@ -2227,7 +2318,7 @@ def handle_client(client_socket, addr):
                 # the panel's general help.
                 help_panel = error_help or screen.help_for(cursor) or screen.help
                 if help_panel:
-                    _show_overlay(client_socket, help_panel)
+                    _show_help(client_socket, help_panel)
                     continue
 
             # Validate fields against their <varclass> checks (e.g. SIZE range)
@@ -2298,7 +2389,7 @@ def handle_client(client_socket, addr):
             if cmd == "HELP":
                 help_panel = screen.help_for(cursor) or screen.help
                 if help_panel:
-                    _show_overlay(client_socket, help_panel)
+                    _show_help(client_socket, help_panel)
                     continue
 
             # A typed value is a menu selection, a command from the panel's

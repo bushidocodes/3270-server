@@ -440,6 +440,12 @@ class _DTLParser(HTMLParser):
         # alternate screen (e.g. a member list showing more rows on a model 3/4).
         self._override_rows = None
         self._override_cols = None
+        # Paged-window position of ``_rows`` within the full table (see load_dtl):
+        # the offset of the first supplied row and the full row count, driving the
+        # ROW x TO y OF z status and the BOTTOM OF DATA marker. Defaults describe an
+        # unpaged table (offset 0, total == len(rows)).
+        self._row_offset = 0
+        self._row_total = None
 
     # ── colour / highlight attributes ────────────────────────────────────────
 
@@ -2745,7 +2751,10 @@ class _DTLParser(HTMLParser):
         # but only if that region is free (a bundled panel's full-width title rule
         # occupies it and carries its own scroll footer).
         if self._rows:
-            status = f"ROW 1 TO {fld.get('shown', 0)} OF {len(self._rows)}"
+            offset = self._row_offset
+            total = self._row_total if self._row_total is not None else len(self._rows)
+            shown = fld.get("shown", 0)
+            status = f"ROW {offset + 1} TO {offset + shown} OF {total}"
             sx = max(0, self.screen.width - len(status) - 1)
             busy = any(getattr(it, "row", None) == 0 and hasattr(it, "text")
                        and it.col < sx + len(status) and it.col + len(it.text) > sx
@@ -2853,9 +2862,13 @@ class _DTLParser(HTMLParser):
                 self.screen.add(Text(row + entry_height, col0, line,
                                      DisplayIntensity.NORMAL, role="rule"))
             row += entry_height + div_rows
-        # When the end of the table is on screen (rows supplied, not clipped by a
-        # deeper page), ISPF draws a "BOTTOM OF DATA" line spanning the table.
-        if self._rows is not None and not clipped and cols \
+        # When the end of the *full* table is on screen (rows supplied, not clipped
+        # by the panel depth, and the last row of the full set is in this window),
+        # ISPF draws a "BOTTOM OF DATA" line spanning the table. A middle page of a
+        # paged table does not reach the bottom, so it gets no marker (#281).
+        total = self._row_total if self._row_total is not None else len(self._rows or [])
+        at_bottom = self._row_offset + shown >= total
+        if self._rows is not None and not clipped and at_bottom and cols \
                 and row < self.screen.depth - 1:
             col0 = cols[0]["x"]
             footer = " BOTTOM OF DATA "
@@ -3952,7 +3965,7 @@ class _DTLParser(HTMLParser):
 
 
 def load_dtl(source: str, rows=None, screen_rows=None, screen_cols=None,
-             **subs) -> Screen:
+             row_offset=0, row_total=None, **subs) -> Screen:
     """Parse DTL markup into a :class:`screen.Screen`.
 
     ``subs`` provides values for ``&NAME`` dialog-variable references in the
@@ -3961,6 +3974,14 @@ def load_dtl(source: str, rows=None, screen_rows=None, screen_cols=None,
     per model row (when omitted, a single empty model row is laid out).
     ``screen_rows``/``screen_cols`` override the panel's presentation size (so a
     list panel can lay out more rows on a larger alternate screen).
+
+    ``row_offset``/``row_total`` describe the paged window when ``rows`` is a
+    *slice* of a larger table (see the server's table pagers, #281):
+    ``row_offset`` is the index of the first supplied row within the full set,
+    and ``row_total`` the full row count. They drive the ``ROW x TO y OF z``
+    scroll status and the ``BOTTOM OF DATA`` marker (drawn only when the last row
+    of the full set is on screen). The defaults (``0`` / ``len(rows)``) describe
+    an unpaged table, so a single-page render is byte-for-byte unchanged.
     """
     source = _resolve_entities(source)
     source = _substitute(source, subs)
@@ -3969,19 +3990,23 @@ def load_dtl(source: str, rows=None, screen_rows=None, screen_cols=None,
     parser._subs = {k.upper(): v for k, v in (subs or {}).items()}
     parser._override_rows = screen_rows
     parser._override_cols = screen_cols
+    parser._row_offset = row_offset
+    parser._row_total = row_total
     parser.feed(source)
     parser.close()
     return parser.screen
 
 
 def load_panel(name: str, directory: str = None, rows=None,
-               screen_rows=None, screen_cols=None, **subs) -> Screen:
+               screen_rows=None, screen_cols=None, row_offset=0,
+               row_total=None, **subs) -> Screen:
     """Load and parse ``<directory>/<name>.dtl``.
 
     ``directory`` defaults to the ``panels`` folder next to this module, so the
     panels resolve regardless of the process's current working directory.
     ``rows`` populates a ``<lstfld>`` list/table (see :func:`load_dtl`);
-    ``screen_rows``/``screen_cols`` override the presentation size.
+    ``screen_rows``/``screen_cols`` override the presentation size;
+    ``row_offset``/``row_total`` describe the paged window (see :func:`load_dtl`).
     """
     import os
     if directory is None:
@@ -3989,7 +4014,8 @@ def load_panel(name: str, directory: str = None, rows=None,
     path = os.path.join(directory, f"{name}.dtl")
     with open(path, "r", encoding="utf-8") as fh:
         return load_dtl(fh.read(), rows=rows, screen_rows=screen_rows,
-                        screen_cols=screen_cols, **subs)
+                        screen_cols=screen_cols, row_offset=row_offset,
+                        row_total=row_total, **subs)
 
 
 class MessageCatalog:
