@@ -3555,6 +3555,29 @@ def test_dl_indent_shifts_the_whole_list():
         assert shifted[key] == plain[key] + 6            # every element shifts by 6
 
 
+def test_dl_divend_draws_an_end_rule_and_split_moves_long_desc():
+    # #123: DL/PARML DIVEND=YES draws a dashed rule across the list as it closes;
+    # a term too long for its TSIZE column splits its description onto the next line.
+    from screen import Text
+    s = load_dtl('<panel name="p" width="30">T<area>'
+                 '<dl tsize="6" divend="yes"><dt>A<dd>Apple<dt>B<dd>Berry</dl>'
+                 '<p>After</area></panel>')
+    rules = [t for t in s.items if isinstance(t, Text) and set(t.text) == {"-"}]
+    after = next(t for t in s.items if isinstance(t, Text) and t.text == "After")
+    assert len(rules) == 1                            # the end rule
+    assert rules[0].row < after.row                   # the list closed above "After"
+    # no DIVEND → no end rule
+    plain = load_dtl('<panel name="p" width="30">T<area>'
+                     '<dl tsize="6"><dt>A<dd>Apple</dl></area></panel>')
+    assert not [t for t in plain.items if isinstance(t, Text) and set(t.text) == {"-"}]
+    # a term wider than TSIZE puts its description on the following line (split)
+    split = load_dtl('<panel name="p" width="40">T<area>'
+                     '<dl tsize="4"><dt>LONGTERM<dd>the description</dl></area></panel>')
+    term = next(t for t in split.items if isinstance(t, Text) and t.text == "LONGTERM")
+    desc = next(t for t in split.items if isinstance(t, Text) and "description" in t.text)
+    assert desc.row > term.row                        # description split to next line
+
+
 def test_dl_list_divider_types():
     # #120: <dldiv> draws a horizontal divider across a definition list. TYPE=NONE
     # (default) is a blank spacer; SOLID/DASH a dashed rule; TEXT lays out the
