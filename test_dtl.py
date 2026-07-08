@@ -1558,6 +1558,18 @@ def test_keyi_fka_text_recorded_and_suppressed_by_fka_no():
     assert s.keylist_fka == {"PF1": "Help", "PF3": "Exit"}   # PF12 (FKA=NO) omitted
 
 
+def test_keyi_case_folds_the_fka_label():
+    # #126: <keyi CASE=UPPER|LOWER> folds the function-key-area label; ASIS/absent
+    # keeps the authored case.
+    def fka(case):
+        s = load_dtl(f'<panel><keyl><keyi key=PF3 cmd=EXIT case="{case}">Exit Now</keyi>'
+                     '</keyl></panel>')
+        return s.keylist_fka["PF3"]
+    assert fka("upper") == "EXIT NOW"
+    assert fka("lower") == "exit now"
+    assert fka("") == "Exit Now"                     # absent → authored case kept
+
+
 def test_rp_reference_phrase_is_inline_underlined_link():
     # <rp> (reference phrase — a link to another help panel) emphasises a phrase
     # in place, like <hp>: one Text.rich whose phrase run is underlined.

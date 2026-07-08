@@ -4208,6 +4208,8 @@ class _DTLParser(HTMLParser):
         # FKA=NO suppresses it) so the FKA line can be labelled.
         self._keyi = {"key": key.upper(),
                       "show": str(a.get("fka", "yes")).strip().lower() != "no",
+                      # CASE folds the FKA label (UPPER/LOWER; ASIS/MIXED keep it).
+                      "case": str(a.get("case", "")).strip().lower(),
                       "chars": []}
 
     def _finalize_keyi(self):
@@ -4218,6 +4220,10 @@ class _DTLParser(HTMLParser):
         if ki is None:
             return
         text = "".join(ki["chars"]).strip()
+        if ki.get("case") == "upper":
+            text = text.upper()
+        elif ki.get("case") == "lower":
+            text = text.lower()
         if ki["show"] and text:
             self.screen.keylist_fka[ki["key"]] = text
 
