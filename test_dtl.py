@@ -2973,6 +2973,52 @@ def test_lstvar_is_accepted_with_no_display_effect():
     assert load_dtl(with_var, rows=rows).render() == load_dtl(without, rows=rows).render()
 
 
+def test_grphdr_renders_high_intensity_group_heading():
+    # #53: <grphdr> renders a high-intensity heading line above a field group,
+    # with a leading blank line (COMPACT suppresses it).
+    s = load_dtl('<panel name="p">T<area><info>Intro'
+                 '<grphdr>Options'
+                 '<dtafld datavar="x" entwidth="4">Field</area></panel>')
+    hdr = next(t for t in s.items if isinstance(t, Text) and t.text == "Options")
+    intro = next(t for t in s.items if isinstance(t, Text) and t.text == "Intro")
+    assert hdr.intensity is DisplayIntensity.HIGH and hdr.role == "heading"
+    assert hdr.row == intro.row + 2                 # leading blank before the header
+    compact = load_dtl('<panel name="p"><area><info>Intro'
+                       '<grphdr compact>Options</area></panel>')
+    hc = next(t for t in compact.items if isinstance(t, Text) and t.text == "Options")
+    ic = next(t for t in compact.items if isinstance(t, Text) and t.text == "Intro")
+    assert hc.row == ic.row + 1                      # COMPACT: no leading blank
+
+
+def test_grphdr_format_justifies_within_width():
+    # FORMAT positions the heading within WIDTH: END right-justifies it.
+    s = load_dtl('<panel name="p" width="30">T<area>'
+                 '<grphdr format="end" width="10">End</area></panel>')
+    hdr = next(t for t in s.items if isinstance(t, Text) and t.text == "End")
+    assert hdr.col == 1 + (10 - len("End"))          # right-justified within width 10
+
+
+def test_grphdr_headline_draws_a_dashed_rule_around_the_text():
+    # HEADLINE=YES wraps the heading text in a dashed rule.
+    s = load_dtl('<panel name="p" width="30">T<area>'
+                 '<grphdr headline="yes" format="center">Group</area></panel>')
+    rule = next(t for t in s.items if isinstance(t, Text)
+                and "Group" in t.text and "-" in t.text)
+    assert rule.text.startswith("-") and rule.text.endswith("-")
+    assert " Group " in rule.text
+    assert rule.intensity is DisplayIntensity.HIGH
+
+
+def test_grphdr_div_draws_dividers_at_divloc():
+    # DIV=SOLID with DIVLOC=BOTH draws a dashed rule before and after the heading.
+    s = load_dtl('<panel name="p" width="20">T<area>'
+                 '<grphdr div="solid" divloc="both">Hdr</area></panel>')
+    rules = [t for t in s.items if isinstance(t, Text) and set(t.text) == {"-"}]
+    hdr = next(t for t in s.items if isinstance(t, Text) and t.text == "Hdr")
+    assert len(rules) == 2
+    assert rules[0].row < hdr.row < rules[1].row
+
+
 def test_list_field_bottom_of_data_only_when_not_clipped():
     # #220: "BOTTOM OF DATA" is drawn when the end of the table is on screen; when
     # the rows are clipped by the panel depth (more data on the next page) it is

@@ -324,8 +324,8 @@ _TEXT_TAGS = ("info",) + _INSTRUCTION_TAGS + _FLOW_TEXT_TAGS + _HEADING_TAGS
 # <dl>/<parml>, <fig> — take the same leading skip at their own emit sites.)
 _BLANK_BEFORE_TAGS = ("p", "lp", "pnlinst")
 _CONTENT_TAGS = _TEXT_TAGS + ("dtafld", "cmdarea", "choice", "chdiv", "figcap",
-                              "dthd", "ddhd", "dldiv", "pldiv", "textseg",
-                              "dtseg", "ptseg")
+                              "grphdr", "dthd", "ddhd", "dldiv", "pldiv",
+                              "textseg", "dtseg", "ptseg")
 _FIELD_TAGS = ("dtafld", "cmdarea")
 
 
@@ -1565,6 +1565,8 @@ class _DTLParser(HTMLParser):
             self._emit_note(tag, a, content)
         elif tag in _HEADING_TAGS:
             self._emit_heading(tag, a, content, runs=runs)
+        elif tag == "grphdr":
+            self._emit_grphdr(a, content, runs=runs)
         elif tag in _TEXT_TAGS:
             self._emit_info(a, content, tag, runs=runs)
         elif tag == "dtafld":
@@ -2962,6 +2964,60 @@ class _DTLParser(HTMLParser):
         col += (int(tag[1]) - 1) * 2      # h1→0, h2→2, h3→4, h4→6 columns of indent
         self._emit_flow_lines(text, row, col, ctx, role="title",
                               intensity=DisplayIntensity.HIGH)
+
+    def _emit_grphdr(self, a, content, runs=None):
+        """Render a ``<grphdr>`` (group header): a high-intensity heading line above
+        a group of data fields in an area/region. FORMAT justifies the heading
+        within WIDTH (START left, CENTER centred, END right, NONE = unformatted
+        left); HEADLINE=YES wraps it in a dashed rule; DIV (SOLID/DASH a rule,
+        BLANK a spacer) draws a divider BEFORE/AFTER/BOTH per DIVLOC; INDENT shifts
+        it right; COMPACT suppresses the leading blank line. #53."""
+        if runs is not None and not content:
+            content = "".join(t for t, *_ in runs)
+        text = " ".join(content.split())
+        headline = _bool_attr(a, "headline")
+        if not text and not headline:
+            return
+        if not _bool_attr(a, "compact"):
+            self._skip_blank_before(a)
+        row, col, ctx = self._resolve_pos(a, "grphdr")
+        col += self._opt_int(a.get("indent"), 0)
+        width = self._opt_int(a.get("width")) or max(1, self.screen.width - col - 1)
+        fmt = str(a.get("format", "start")).strip().lower()
+        div = str(a.get("div", "none")).strip().lower()
+        divloc = str(a.get("divloc", "after")).strip().lower()
+        H, N = DisplayIntensity.HIGH, DisplayIntensity.NORMAL
+
+        def _divider(r):
+            if div in ("none", ""):
+                return 0
+            if div != "blank":                       # solid / dash → a dashed rule
+                self.screen.add(Text(r, col, ("-" * width)[:width], N, role="rule"))
+            return 1                                  # blank → an empty spacer row
+
+        r = row
+        if divloc in ("before", "both"):
+            r += _divider(r)
+        if headline:                                 # dashed rule around the heading
+            inner = f" {text} " if text else "-"
+            pad = max(0, width - len(inner))
+            if fmt == "center":
+                line = ("-" * (pad // 2) + inner + "-" * (pad - pad // 2))[:width]
+            elif fmt == "end":
+                line = ("-" * pad + inner)[:width]
+            else:
+                line = (inner + "-" * pad)[:width]
+            self.screen.add(Text(r, col, line, H, role="heading"))
+        else:
+            t = text[:width]
+            off = (max(0, (width - len(t)) // 2) if fmt == "center"
+                   else max(0, width - len(t)) if fmt == "end" else 0)
+            self.screen.add(Text(r, col + off, t, H, role="heading"))
+        r += 1
+        if divloc in ("after", "both"):
+            r += _divider(r)
+        if ctx is not None:
+            ctx["row"] = r
 
     def _emit_info(self, a, content, tag="info", runs=None):
         # ``runs`` (from inline <hp>) is a list of (text, color, highlight); the
