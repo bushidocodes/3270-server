@@ -2559,6 +2559,15 @@ def test_list_column_intens_and_hilite_style_cells():
     assert cell.intensity is N and cell.highlight is None
 
 
+def test_list_field_div_draws_a_divider_after_each_model_row():
+    # #67: <lstfld DIV=DASH> draws a divider line after each model row set.
+    s = load_dtl('<panel name="p">T<area><lstfld div="dash">'
+                 '<lstcol datavar="a" colwidth="6" usage="out">A</lstfld></area></panel>',
+                 rows=[{"a": "1"}, {"a": "2"}])
+    rules = [t for t in s.items if isinstance(t, Text) and set(t.text) == {"-"}]
+    assert len(rules) == 2                            # one divider per model row
+
+
 def test_list_field_scrollvar_adds_command_line_scroll_field():
     # #239: <lstfld scrollvar=> puts a "Scroll ===>" amount field at the right of
     # the command line and shortens the command field so they don't overlap.
