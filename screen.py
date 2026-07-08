@@ -786,6 +786,25 @@ class Screen:
     # e.g. to land it on an action-bar choice for F10/F11 keyboard navigation.
     # None leaves cursor placement to the items' own IC (or the default).
     cursor_at: Optional[Tuple[int, int]] = None
+    # Panel classification / codepage metadata (DTL <panel>/<help>/<pandef>):
+    # MENU marks a selection menu, ACTBAR forces an action-bar area, CCSID names
+    # the coded-character-set, EXPAND=xy the two field-expansion characters. None
+    # of these change the rendered field stream on this single-byte text server —
+    # they are recorded so a dialog/compiler can act on them (#117, #125).
+    menu: bool = False
+    actbar: bool = False
+    ccsid: Optional[str] = None
+    expand: Optional[str] = None
+    # Dynamic areas (DTL <da>): each records the area's NAME, SCROLL mode and
+    # SCROLLVAR. The body renders as static fields here; SCROLL/SHADOW/USERMOD/
+    # DATAMOD/LVLINE are dynamic-area / GDDM concerns a static text render does not
+    # perform, so they are recorded rather than acted on. [{"name","scroll",...}].
+    dynamic_areas: List[dict] = _dc_field(default_factory=list)
+    # Point-and-shoot phrase metadata (DTL <ps>): CSRGRP (the cursor group the
+    # phrase joins) and DEPTH (how many rows the phrase spans). The phrase's row →
+    # (var, value) mapping lives in `ps_rows`; these extra attributes have no
+    # host-display effect on a text terminal, so they are recorded here. #115.
+    ps_meta: List[dict] = _dc_field(default_factory=list)
 
     def add(self, item) -> "Screen":
         self.items.append(item)
