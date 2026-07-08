@@ -577,6 +577,11 @@ class Field:
     # not part of field identity.
     required: bool = _dc_field(default=False, compare=False)
     msg: Optional[str] = _dc_field(default=None, compare=False)
+    # DTL <cmdarea CMDLOC=DEFAULT|ASIS>: where the command line sits. "asis" keeps
+    # the coded position; "default" is the ISPF-repositioned default. Our placement
+    # is already as-coded, so this is carried as metadata for callers that care —
+    # not rendered, not part of field identity.
+    cmdloc: Optional[str] = _dc_field(default=None, compare=False)
 
     @property
     def data_addr(self) -> int:

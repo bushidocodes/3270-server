@@ -3824,7 +3824,23 @@ class _DTLParser(HTMLParser):
         # to the conventional ZCMD. A flowed command area gets a leading blank line
         # (the title/body separator), like a paragraph.
         self._skip_blank_before(a)
+        # PMTTEXT=NO suppresses the command-prompt text ("Option ===>"): the field
+        # is emitted bare (default YES keeps the prompt, so byte-identical when absent).
+        if not _bool_attr(a, "pmttext", default=True):
+            content = ""
         field = self._add_field(a, content, "cmdarea", a.get("datavar", "ZCMD"))
+        # CMDLEN=MAX extends the command entry to the panel's right edge (DEFAULT,
+        # the ISPF-sized field, is what _add_field already produced). CMDLOC=ASIS
+        # keeps the coded position (our placement is already as-coded) and is
+        # recorded on the field; DEFAULT is the ISPF-repositioned default.
+        if field is not None:
+            if str(a.get("cmdlen", "default")).strip().lower() == "max":
+                field.length = max(field.length, self.screen.width - field.col - 1)
+            field.cmdloc = str(a.get("cmdloc", "default")).strip().lower()
+            # CAPS: the command line folds typed input to upper by default (ISPF
+            # caps-on); the server already upper-folds the command for dispatch, so
+            # CAPS=ON is faithful. Record CAPS=OFF (case-preserving) for callers.
+            field.caps = _bool_attr(a, "caps", default=True)
         self.screen.command_field = field
         if self._scroll and field is not None:
             self._emit_scroll_field(field)

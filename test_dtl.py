@@ -5271,6 +5271,51 @@ def test_command_value_none_without_cmdarea():
     assert s.command_value({0: "x"}) is None
 
 
+def test_cmdarea_pmttext_no_suppresses_prompt():
+    # PMTTEXT=NO drops the command-prompt text, emitting just the field — the
+    # same bytes as a <cmdarea> coded with no prompt content at all.
+    with_prompt = load_dtl(
+        '<panel><cmdarea entwidth="6" pmttext="no">Option ===></cmdarea></panel>'
+    )
+    bare = load_dtl('<panel><cmdarea entwidth="6"></cmdarea></panel>')
+    assert with_prompt.render() == bare.render()
+    # And the prompt text is honoured by default (PMTTEXT=YES), so the field is
+    # pushed right of the "Option ===>" caption rather than at the left margin.
+    kept = load_dtl(
+        '<panel><cmdarea entwidth="6">Option ===></cmdarea></panel>'
+    )
+    assert kept.command_field.col > bare.command_field.col
+
+
+def test_cmdarea_cmdlen_max_extends_to_panel_edge():
+    s = load_dtl(
+        '<panel><cmdarea entwidth="6" cmdlen="max">Option ===></cmdarea></panel>'
+    )
+    f = s.command_field
+    # The entry now runs to the panel's right edge, not the coded 6 columns.
+    assert f.length == s.width - f.col - 1
+    assert f.length > 6
+    # DEFAULT (the ISPF-sized field) is unchanged — byte-identical to no attr.
+    d = load_dtl('<panel><cmdarea entwidth="6">Option ===></cmdarea></panel>')
+    assert d.command_field.length == 6
+
+
+def test_cmdarea_cmdloc_and_caps_recorded():
+    s = load_dtl(
+        '<panel><cmdarea entwidth="6" cmdloc="asis" caps="off">'
+        'Option ===></cmdarea></panel>'
+    )
+    assert s.command_field.cmdloc == "asis"
+    assert s.command_field.caps is False
+    # Defaults: DEFAULT position, caps-on (ISPF folds the command line to upper).
+    d = load_dtl('<panel><cmdarea entwidth="6">Option ===></cmdarea></panel>')
+    assert d.command_field.cmdloc == "default"
+    assert d.command_field.caps is True
+    # Recording these does not perturb the render (metadata only).
+    assert d.render() == load_dtl(
+        '<panel><cmdarea entwidth="6">Option ===></cmdarea></panel>').render()
+
+
 def test_keyi_outside_keyl_raises():
     with pytest.raises(DTLError):
         load_dtl('<panel><keyi key="PF3" cmd="EXIT"/></panel>')
