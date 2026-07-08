@@ -3753,9 +3753,16 @@ class _DTLParser(HTMLParser):
         """A <checki> validity-check item. The value list / range may be given as
         element text (``v1 v2 …`` / ``min max``) or — the form the guide uses — via
         attributes: ``type=values parm1=EQ|NE parm2='v1 v2'`` (EQ = must be one of;
-        NE = must not be). ``alpha`` / ``name`` are character-class checks. Other
-        authentic types (``picture`` …) stay lenient (recognised but unenforced),
-        so a panel using them still loads and renders."""
+        NE = must not be). ``alpha`` / ``name`` are character-class checks.
+
+        Enforced on submit: RANGE, VALUES, ALPHA/ALPHAB, NAME/NAMEF, NUM, HEX, LEN,
+        PICT, BIT, IPADDR4, the date/time formats (IDATE/STDDATE/JDATE/JSTD/ITIME/
+        STDTIME), and the data-set-name family (DSNAME/DSNAMEQ/DSNAMEPQ, the F/M
+        member variants, FILEID). Left lenient by design: DBCS/MIX (deferred, #135);
+        LISTV/LISTVX/ENUM (require a runtime dialog %varlist a static display server
+        does not hold); INCLUDE (a composite include-check); EBCDIC (every byte on a
+        single-byte terminal is EBCDIC-representable) — all recognised so the panel
+        loads, none rejecting input."""
         ctype = str(a.get("type", "")).strip().lower()
         words = content.split()
         parm2 = a.get("parm2")
@@ -3776,7 +3783,7 @@ class _DTLParser(HTMLParser):
             )
         elif ctype in ("alpha", "alphab"):
             self._checkl["checks"].append({"type": "alpha"})
-        elif ctype == "name":
+        elif ctype in ("name", "namef"):
             self._checkl["checks"].append({"type": "name"})
         elif ctype == "num":                          # all-numeric (optional sign)
             self._checkl["checks"].append({"type": "num"})
@@ -3794,6 +3801,25 @@ class _DTLParser(HTMLParser):
                 (words[0] if words else "")
             if mask:
                 self._checkl["checks"].append({"type": "pict", "mask": str(mask)})
+        elif ctype in self._DATETIME_PATTERNS:        # IDATE/STDDATE/JDATE/JSTD/…
+            # A date/time check: the value must match that system format exactly
+            # (shape check — the calendar validity is not modelled). Same patterns
+            # the date/time <varclass> classes use (#129).
+            self._checkl["checks"].append(
+                {"type": "pattern", "regex": self._DATETIME_PATTERNS[ctype]})
+        elif ctype == "bit":                          # BIT: binary digits only
+            self._checkl["checks"].append({"type": "bit"})
+        elif ctype in ("ipaddr4", "ipaddr"):          # IPADDR4: dotted-quad IPv4
+            self._checkl["checks"].append({"type": "ipaddr4"})
+        elif ctype in ("dsname", "dsnameq", "dsnamepq"):   # data set name (no member)
+            self._checkl["checks"].append({"type": "dsname"})
+        elif ctype in ("dsnamef",):                   # DSNAMEF: optional member
+            self._checkl["checks"].append({"type": "dsname", "member": True})
+        elif ctype in ("dsnamefm", "dsnamem"):        # DSNAMEFM/M: member required
+            self._checkl["checks"].append(
+                {"type": "dsname", "member": True, "member_required": True})
+        elif ctype == "fileid":                       # FILEID: a data set + optional member
+            self._checkl["checks"].append({"type": "dsname", "member": True})
 
     def _emit_xlati(self, a, content):
         """One ``<xlati value=internal>external`` translation item. The external

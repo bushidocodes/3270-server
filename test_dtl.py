@@ -4941,6 +4941,63 @@ def test_name_check_requires_a_valid_symbol():
     assert s.first_validation_error({addr: "TOOLONGXX"})[0] == "M"  # > 8 chars
 
 
+def test_checki_datetime_types_enforce_the_format():
+    # #62: the date/time check types validate the value's shape against the ISPF
+    # system format (calendar validity is not modelled).
+    cases = {
+        "idate":   ("23/06/15", "2023/06/15"),
+        "stddate": ("2023/06/15", "23/06/15"),
+        "jdate":   ("23.166", "2023.166"),
+        "jstd":    ("2023.166", "23.166"),
+        "itime":   ("13:45", "1:45"),
+        "stdtime": ("13:45:30", "13:45"),
+    }
+    for ctype, (good, bad) in cases.items():
+        s, addr = _check_panel(f"<checki type={ctype}>")
+        assert s.first_validation_error({addr: good}) is None, ctype
+        assert s.first_validation_error({addr: bad})[0] == "M", ctype
+
+
+def test_checki_bit_type_requires_binary_digits():
+    # #62: BIT accepts only 0/1 characters.
+    s, addr = _check_panel("<checki type=bit>")
+    assert s.first_validation_error({addr: "01101"}) is None
+    assert s.first_validation_error({addr: "0121"})[0] == "M"
+    assert s.first_validation_error({addr: ""}) is None            # empty skipped
+
+
+def test_checki_ipaddr4_type_validates_dotted_quad():
+    # #62: IPADDR4 requires four 0-255 octets separated by dots.
+    s, addr = _check_panel("<checki type=ipaddr4>")
+    assert s.first_validation_error({addr: "192.168.0.1"}) is None
+    assert s.first_validation_error({addr: "10.0.0.255"}) is None
+    assert s.first_validation_error({addr: "256.1.1.1"})[0] == "M"  # octet > 255
+    assert s.first_validation_error({addr: "1.2.3"})[0] == "M"      # too few octets
+
+
+def test_checki_dsname_types_validate_data_set_names():
+    # #62: DSNAME validates a qualified MVS data set name (≤44, 1-8-char
+    # qualifiers). DSNAMEF allows an optional (MEMBER); DSNAMEFM requires one.
+    s, addr = _check_panel("<checki type=dsname>")
+    assert s.first_validation_error({addr: "SYS1.PARMLIB"}) is None
+    assert s.first_validation_error({addr: "USER.@A#.LIST"}) is None
+    assert s.first_validation_error({addr: "1BAD.NAME"})[0] == "M"   # qualifier starts digit
+    assert s.first_validation_error({addr: "SYS1.PARMLIB(IEASYS)"})[0] == "M"  # member not allowed
+
+    sf, af = _check_panel("<checki type=dsnamef>")
+    assert sf.first_validation_error({af: "SYS1.PARMLIB(IEASYS00)"}) is None
+    assert sf.first_validation_error({af: "SYS1.PARMLIB"}) is None   # member optional
+
+    sm, am = _check_panel("<checki type=dsnamefm>")
+    assert sm.first_validation_error({am: "SYS1.PARMLIB(IEASYS00)"}) is None
+    assert sm.first_validation_error({am: "SYS1.PARMLIB"})[0] == "M"  # member required
+
+    # FILEID validates a data set name with an optional member.
+    si, ai = _check_panel("<checki type=fileid>")
+    assert si.first_validation_error({ai: "MY.DATA(MEM1)"}) is None
+    assert si.first_validation_error({ai: "not a dsname"})[0] == "M"
+
+
 def test_checkl_outside_varclass_raises():
     with pytest.raises(DTLError):
         load_dtl('<panel><checkl><checki type="range">0 1</checki></checkl></panel>')
@@ -5208,9 +5265,10 @@ def test_render_drops_items_past_the_panel_depth():
 
 
 def test_checki_unsupported_type_is_still_lenient():
-    # A type we don't enforce yet (e.g. DSNAME) still loads without failing the
-    # panel and adds no validation — leniency preserved for the unimplemented set.
-    s, addr = _check_panel('<checki type="dsname"></checki>')
+    # A type we don't enforce (INCLUDE/LISTV/ENUM/FILEID — runtime or complex, and
+    # the DBCS types, deferred #135) still loads without failing the panel and adds
+    # no validation — leniency preserved for the not-modelled set.
+    s, addr = _check_panel('<checki type="include" parm1=IMBLK></checki>')
     assert s.validations.get("F", {}).get("checks", []) == []
     assert s.first_validation_error({addr: "anything!"}) is None   # no check enforced
 
