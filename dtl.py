@@ -723,6 +723,8 @@ class _DTLParser(HTMLParser):
                 "indent": self._opt_int(a.get("indent"), 0),  # shift the list right
                 # FORMAT positions the DT term within its TSIZE column.
                 "format": str(a.get("format", "start")).strip().lower(),
+                # DIVEND=YES draws a dashed rule across the list when it closes.
+                "divend": _bool_attr(a, "divend"),
                 "pending": None,
             })
         elif tag == "textline":
@@ -1305,6 +1307,15 @@ class _DTLParser(HTMLParser):
             self._da = None
             return
         if tag in ("ul", "ol", "sl", "dl", "parml", "notel") and self._lists:
+            lst = self._lists[-1]
+            # <dl>/<parml DIVEND=YES>: a dashed rule spanning the list as it closes.
+            if lst.get("divend") and self._areas:
+                ctx = self._areas[-1]
+                col = ctx["col"] + lst.get("indent", 0)
+                span = max(1, self.screen.width - col - 1)
+                self.screen.add(Text(ctx["row"], col, "-" * span,
+                                     DisplayIntensity.NORMAL, role="rule"))
+                ctx["row"] += 1
             self._lists.pop()
         if tag in ("panel", "help"):
             if self._da is not None:      # a <da> with an omitted end tag
