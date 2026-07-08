@@ -4164,6 +4164,36 @@ def test_dtacol_supplies_default_entry_width():
     assert field.length == 25 and field.col == 14      # col 1 + pmtwidth 12 + 1
 
 
+def test_dtacol_defaults_outline_deswidth_for_child_fields():
+    # #122: a <dtacol> defaults OUTLINE / DESWIDTH for its <dtafld>s; each field's
+    # own value overrides the column default.
+    from screen import Outline, Text
+    s = load_dtl('<panel name="p" width="60"><area>'
+                 '<dtacol outline="box" deswidth="4" pmtwidth="6" entwidth="5">'
+                 '<dtafld datavar="a">A<dtafldd>LongDescription</dtafldd></dtafld>'
+                 '<dtafld datavar="b" outline="none">B</dtafld>'
+                 '</dtacol></area></panel>')
+    a = next(f for f in s.items if isinstance(f, Field) and f.name == "a")
+    b = next(f for f in s.items if isinstance(f, Field) and f.name == "b")
+    assert a.outline is Outline.BOX                     # inherited from the column
+    assert b.outline is Outline.NONE                    # field own overrides
+    # DESWIDTH=4 truncates the inherited description
+    assert any(isinstance(t, Text) and t.text == "Long" for t in s.items)
+
+
+def test_dtafld_autotab_recorded_as_metadata():
+    # #122: AUTOTAB=YES is recorded on the field (a client autotab behaviour with no
+    # 3270 data-stream bit); it does not change the rendered stream.
+    on = load_dtl('<panel name="p"><area>'
+                  '<dtafld datavar="a" entwidth="4" autotab="yes">A</dtafld></area></panel>')
+    off = load_dtl('<panel name="p"><area>'
+                   '<dtafld datavar="a" entwidth="4">A</dtafld></area></panel>')
+    fa = next(f for f in on.items if isinstance(f, Field))
+    fb = next(f for f in off.items if isinstance(f, Field))
+    assert fa.autotab is True and fb.autotab is False
+    assert on.render() == off.render()                  # metadata only, no stream change
+
+
 # ── <dtafld> USAGE / PMTLOC (#122) ───────────────────────────────────────────
 
 def test_dtafld_usage_out_is_a_protected_display_field():

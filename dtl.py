@@ -1077,6 +1077,15 @@ class _DTLParser(HTMLParser):
                 # PAD/PADC default the column's <dtafld> fill character; a field's
                 # own PAD/PADC overrides it (see _add_field).
                 "pad": self._pad_char(a) or (parent.get("pad") if parent else None),
+                # OUTLINE (box lines) and DESWIDTH (description width) also default
+                # the column's <dtafld>s, each field's own value overriding (#122).
+                "outline": self._outline(a) or (parent.get("outline") if parent else None),
+                "deswidth": (str(a["deswidth"]).strip() if "deswidth" in a
+                             else (parent.get("deswidth") if parent else None)),
+                # PMTFMT (CUA leader dots / ISPF / NONE / END) defaults the column's
+                # <dtafld> prompt formatting; a field's own PMTFMT overrides it.
+                "pmtfmt": (a["pmtfmt"] if "pmtfmt" in a
+                           else (parent.get("pmtfmt") if parent else None)),
             })
         elif tag == "divider":
             ctx = self._areas[-1] if self._areas else None
@@ -3301,7 +3310,7 @@ class _DTLParser(HTMLParser):
         # sit on their own line, so they take the colon but no leader fill.
         prompt_text = self._format_prompt(
             content, None if pmt_above else pmtwidth, usage_out,
-            a.get("pmtfmt")) if content else ""
+            a.get("pmtfmt", (ctx.get("pmtfmt") if ctx else None))) if content else ""
         if pmt_above and content:
             self.screen.add(Text(row, col, prompt_text, _intensity(a), role="prompt"))
             content = prompt_text = ""     # caption already placed
@@ -3344,7 +3353,9 @@ class _DTLParser(HTMLParser):
         # DESWIDTH when the author sizes it (DESWIDTH=* keeps the full text).
         if description and description.strip():
             desc = " ".join(description.split())
-            dw = str(a.get("deswidth", "")).strip()
+            # DESWIDTH sizes the description; a field's own value overrides the
+            # enclosing <dtacol>'s default (#122).
+            dw = str(a.get("deswidth", (ctx.get("deswidth") if ctx else "") or "")).strip()
             if dw.isdigit():
                 desc = desc[: int(dw)]
             desc_col = fldcol + length + 2      # attr + data + terminator attr
@@ -3388,11 +3399,16 @@ class _DTLParser(HTMLParser):
             color=self._color(a),
             role="field",
             highlight=self._hilite(a),
-            outline=self._outline(a),
+            # OUTLINE box lines; a field's own value wins over the <dtacol>'s default.
+            outline=self._outline(a) or (ctx.get("outline") if ctx else None),
             help=self._field_help(a),
             # PAD/PADC fill an empty entry; a field's own PAD wins over the
             # enclosing <dtacol>'s default (None → the conventional space fill).
             pad=self._pad_char(a) or (ctx.get("pad") if ctx else None),
+            # AUTOTAB=YES: the cursor auto-advances to the next field when this one
+            # fills. There is no TN3270 field-attribute bit for it (it is a client
+            # autotab behaviour), so it is recorded as metadata (see Field.autotab).
+            autotab=_bool_attr(a, "autotab"),
         )
         self.screen.add(field)
         self._attach_validation(name, a)
