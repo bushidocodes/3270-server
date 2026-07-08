@@ -5029,11 +5029,32 @@ def test_render_drops_items_past_the_panel_depth():
 
 
 def test_checki_unsupported_type_is_still_lenient():
-    # A type we don't enforce yet (e.g. picture) still loads without failing the
+    # A type we don't enforce yet (e.g. DSNAME) still loads without failing the
     # panel and adds no validation — leniency preserved for the unimplemented set.
-    s, addr = _check_panel('<checki type="picture">AAA</checki>')
+    s, addr = _check_panel('<checki type="dsname"></checki>')
     assert s.validations.get("F", {}).get("checks", []) == []
     assert s.first_validation_error({addr: "anything!"}) is None   # no check enforced
+
+
+def test_checki_num_hex_len_pict_validate_input():
+    # #62: NUM (all digits), HEX (hex digits), LEN (length op), PICT (mask) are
+    # enforced on submit, failing with the checkl MSG.
+    s, addr = _check_panel('<checki type="num"></checki>')
+    assert s.first_validation_error({addr: "1234"}) is None        # numeric passes
+    assert s.first_validation_error({addr: "12x4"}) is not None     # non-numeric fails
+
+    s, addr = _check_panel('<checki type="hex"></checki>')
+    assert s.first_validation_error({addr: "1AF0"}) is None
+    assert s.first_validation_error({addr: "1AG0"}) is not None     # G is not hex
+
+    s, addr = _check_panel('<checki type="len" parm1="EQ" parm2="4"></checki>')
+    assert s.first_validation_error({addr: "abcd"}) is None
+    assert s.first_validation_error({addr: "abc"}) is not None      # wrong length
+
+    s, addr = _check_panel('<checki type="pict" parm2="A99"></checki>')
+    assert s.first_validation_error({addr: "X12"}) is None          # alpha + 2 digits
+    assert s.first_validation_error({addr: "XY2"}) is not None      # 2nd char not a digit
+    assert s.first_validation_error({addr: "X123"}) is not None     # wrong length
 
 
 def test_required_field_rejects_empty_input():

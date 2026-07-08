@@ -3643,6 +3643,22 @@ class _DTLParser(HTMLParser):
             self._checkl["checks"].append({"type": "alpha"})
         elif ctype == "name":
             self._checkl["checks"].append({"type": "name"})
+        elif ctype == "num":                          # all-numeric (optional sign)
+            self._checkl["checks"].append({"type": "num"})
+        elif ctype == "hex":                          # hexadecimal digits
+            self._checkl["checks"].append({"type": "hex"})
+        elif ctype == "len":                          # length op: PARM1 op, PARM2 len
+            op = str(a.get("parm1", "EQ")).strip().upper()
+            raw = a.get("parm2") if a.get("parm2") is not None else \
+                (words[-1] if words else None)
+            ln = self._opt_int(raw)
+            if ln is not None:
+                self._checkl["checks"].append({"type": "len", "op": op, "len": ln})
+        elif ctype in ("pict", "picture"):            # picture-string mask (PARM2)
+            mask = a.get("parm2") if a.get("parm2") is not None else \
+                (words[0] if words else "")
+            if mask:
+                self._checkl["checks"].append({"type": "pict", "mask": str(mask)})
 
     def _emit_xlati(self, a, content):
         """One ``<xlati value=internal>external`` translation item. The external

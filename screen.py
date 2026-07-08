@@ -228,6 +228,31 @@ _NAME_FIRST = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@#$")
 _NAME_REST = _NAME_FIRST | set("0123456789")
 
 
+def _pict_match(value: str, mask: str) -> bool:
+    """Whether ``value`` matches a DTL ``<checki type=pict>`` picture ``mask``:
+    the value's length must equal the mask's, and each character must satisfy its
+    mask code — ``A`` alphabetic, ``9``/``#`` numeric, ``C``/``N`` alphanumeric,
+    ``X`` any character; any other mask character is a literal that must match
+    exactly (the common ISPF picture codes)."""
+    if len(value) != len(mask):
+        return False
+    for ch, m in zip(value, mask):
+        mu = m.upper()
+        if mu == "A":
+            ok = ch.isascii() and ch.isalpha()
+        elif mu in ("9", "#"):
+            ok = ch.isdigit()
+        elif mu in ("C", "N"):
+            ok = ch.isascii() and ch.isalnum()
+        elif mu == "X":
+            ok = True
+        else:
+            ok = ch == m
+        if not ok:
+            return False
+    return True
+
+
 def _check_failure(check: dict, value: str):
     """Return message substitutions if ``value`` fails ``check``, else ``None``.
 
@@ -260,6 +285,22 @@ def _check_failure(check: dict, value: str):
         ok = (1 <= len(value) <= 8 and value[0] in _NAME_FIRST
               and all(c in _NAME_REST for c in value))
         return None if ok else {"VALUE": value}
+    if check["type"] == "num":                        # <checki type=num>: all digits
+        v = value.strip().lstrip("+-")
+        return None if (v and v.isdigit()) else {"VALUE": value}
+    if check["type"] == "hex":                        # <checki type=hex>
+        v = value.strip()
+        return None if (v and all(c in "0123456789abcdefABCDEF" for c in v)) \
+            else {"VALUE": value}
+    if check["type"] == "len":                        # <checki type=len parm1=op parm2=n>
+        cmp = {"EQ": lambda a, b: a == b, "NE": lambda a, b: a != b,
+               "LT": lambda a, b: a < b, "GT": lambda a, b: a > b,
+               "LE": lambda a, b: a <= b, "GE": lambda a, b: a >= b}.get(
+                   check.get("op", "EQ"), lambda a, b: a == b)
+        return None if cmp(len(value), check["len"]) \
+            else {"VALUE": value, "LEN": check["len"]}
+    if check["type"] == "pict":                       # <checki type=pict parm2=mask>
+        return None if _pict_match(value, check["mask"]) else {"VALUE": value}
     if check["type"] == "maxlen":                     # <varclass type='char N'>
         if len(value) > check["max"]:
             return {"VALUE": value, "MAX": check["max"]}
