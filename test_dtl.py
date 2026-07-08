@@ -2270,6 +2270,23 @@ def test_xmp_renders_preformatted_like_lines():
     ]
 
 
+def test_lines_xmp_lp_noskip_suppresses_the_leading_blank():
+    # #210: <lines>/<xmp>/<lp> take a leading blank line before them (ISPDTLC block
+    # spacing); NOSKIP — their only attribute — suppresses it.
+    def rowof(src, needle):
+        s = load_dtl(src)
+        return next(t.row for t in s.items if isinstance(t, Text) and needle in t.text)
+    for tag in ("lines", "xmp"):
+        spaced = rowof(f'<panel name=p><area><info>Intro<{tag}>Body</{tag}></area></panel>',
+                       "Body")
+        noskip = rowof(f'<panel name=p><area><info>Intro<{tag} noskip>Body</{tag}></area></panel>',
+                       "Body")
+        assert noskip == spaced - 1                  # NOSKIP removes the blank line
+    # <lp> (list part / implied paragraph) renders as flowed text within a list.
+    s = load_dtl('<panel name=p><area><ul><li>one<lp>a note</ul></area></panel>')
+    assert any(isinstance(t, Text) and t.text == "a note" for t in s.items)
+
+
 def test_fig_frames_content_with_rules_and_caption():
     # #207: <fig> flows its content as a figure; FRAME=RULE (default) draws a
     # horizontal rule above and below, and <figcap> renders a caption beneath.
