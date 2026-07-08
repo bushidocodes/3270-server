@@ -490,7 +490,14 @@ class _DTLParser(HTMLParser):
         else:
             alarm = msgtype in ("warning", "action", "critical")
         return {"alarm": alarm, "msgtype": msgtype or None,
-                "smsg": a.get("smsg"), "help": a.get("help")}
+                "smsg": a.get("smsg"), "help": a.get("help"),
+                # FORMAT=ASIS keeps the message's authored line breaks; FLOW (the
+                # default) word-wraps to the member WIDTH (see MessageCatalog.lines).
+                "format": str(a.get("format", "")).strip().lower() or None,
+                # LOCATION (AREA/MODAL/MODELESS) is where the dialog shows the
+                # message — a message area or a pop-up window. Recorded so the
+                # server can place it; not a rendering effect here. #127.
+                "location": str(a.get("location", "")).strip().lower() or None}
 
     def _hp_hilite(self, a):
         """The Highlight for an <hp> phrase: its HILITE= or the DTL TYPE= (both
@@ -4239,16 +4246,27 @@ class MessageCatalog:
         the way ISPF routes HELP on a displayed message to its help panel."""
         return self.attrs.get(msgid.upper(), {}).get("help")
 
+    def location(self, msgid: str):
+        """Where the dialog shows this message (<msg LOCATION=AREA|MODAL|MODELESS>),
+        lower-cased, or None. Recorded so the server can place the message in a
+        message area or a pop-up window (#127)."""
+        return self.attrs.get(msgid.upper(), {}).get("location")
+
     def lines(self, msgid: str, **subs):
         """The (substituted) long message text word-wrapped to the member's
         WIDTH (<msgmbr width=>, else the ISPF default 76), as a list of display
         lines. Honours WIDTH the way DTL formats a long message that overflows
-        its field; a message within the width stays a single line."""
+        its field; a message within the width stays a single line. FORMAT=ASIS
+        (<msg format=asis>) instead keeps the message's authored line breaks."""
         text = self.messages.get(msgid.upper())
         if text is None:
             return [msgid]
         text = _substitute(text, subs)
         width = self.width or self.DEFAULT_WIDTH
+        # FORMAT=ASIS: preserve the authored line breaks (each source line is a
+        # display line), rather than reflowing the words to WIDTH.
+        if self.attrs.get(msgid.upper(), {}).get("format") == "asis":
+            return [ln.rstrip() for ln in text.splitlines()] or [""]
         words, out, cur = text.split(), [], ""
         for w in words:
             if not cur:
