@@ -2014,16 +2014,19 @@ class _DTLParser(HTMLParser):
         return f"{n}."
 
     def _emit_flow_lines(self, text, row, col, ctx, marker=None, marker_col=None,
-                         role=None, intensity=DisplayIntensity.NORMAL):
+                         role=None, intensity=DisplayIntensity.NORMAL, offset=0):
         """Word-wrap ``text`` and emit it as protected lines from ``row`` at
         ``col`` (hanging indent for continuations). Optionally place a ``marker``
-        (bullet/number) on the first line. Advances the flow cursor."""
-        lines = self._wrap(text, max(1, self.screen.width - (col + 1)))
+        (bullet/number) on the first line. ``offset`` indents the second and all
+        following lines that many extra columns (the DTL ``<p OFFSET=n>`` hanging
+        indent). Advances the flow cursor."""
+        lines = self._wrap(text, max(1, self.screen.width - (col + offset + 1)))
         if marker is not None:
             self.screen.add(Text(row, marker_col, marker, DisplayIntensity.NORMAL,
                                  role=role))
         for i, ln in enumerate(lines):
-            self.screen.add(Text(row + i, col, ln, intensity, role=role))
+            self.screen.add(Text(row + i, col + (offset if i else 0), ln,
+                                 intensity, role=role))
         if ctx is not None:
             ctx["row"] = row + len(lines)
 
@@ -3094,9 +3097,17 @@ class _DTLParser(HTMLParser):
         if self._lists:
             # A paragraph inside a list aligns with the list's item text.
             col += len(self._lists) * self._LIST_INDENT
+        p_offset = 0
         if tag == "p":
             # A <p> may carry INDENT=n to shift the whole paragraph right (#123).
             col += self._opt_int(a.get("indent"), 0)
+            # OFFSET=n is a hanging indent: the 2nd+ lines shift n columns right.
+            p_offset = self._opt_int(a.get("offset"), 0) or 0
+            # INTENSE=varname conditionally intensifies the paragraph: HIGH when the
+            # named dialog variable resolves to a non-blank value, else normal.
+            iv = a.get("intense")
+            if iv and str(self._subs.get(str(iv).strip().upper(), "")).strip():
+                emph = DisplayIntensity.HIGH
         if tag == "botinst" and ctx is not None:
             # A bottom instruction anchors near the foot of the panel (leaving the
             # last row free, as ISPF keeps for the key area), dropping below the
@@ -3132,7 +3143,8 @@ class _DTLParser(HTMLParser):
                 self._emit_flow_runs([(t, c, h) for t, c, h, _ in runs],
                                      row, col, ctx, role)
             return
-        self._emit_flow_lines(text, row, col, ctx, role=role, intensity=emph)
+        self._emit_flow_lines(text, row, col, ctx, role=role, intensity=emph,
+                              offset=p_offset)
         # A TOPINST is followed by a blank line (COMPACT suppresses it).
         if tag == "topinst" and ctx is not None and not _bool_attr(a, "compact"):
             ctx["row"] += 1

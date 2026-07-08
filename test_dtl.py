@@ -2130,6 +2130,30 @@ def test_figure_caption_renders_below_the_figure():
     assert cap.row > body.row
 
 
+def test_paragraph_intense_conditionally_intensifies():
+    # #123: <p INTENSE=varname> renders the paragraph high-intensity when the named
+    # dialog variable resolves to a non-blank value, else normal.
+    hi = load_dtl('<panel name="p" width="40"><area>'
+                  '<p intense="flag">Alert</p></area></panel>', flag="Y")
+    lo = load_dtl('<panel name="p" width="40"><area>'
+                  '<p intense="flag">Alert</p></area></panel>')  # flag unset
+    h = next(t for t in hi.items if isinstance(t, Text) and t.text == "Alert")
+    l = next(t for t in lo.items if isinstance(t, Text) and t.text == "Alert")
+    assert h.intensity is DisplayIntensity.HIGH
+    assert l.intensity is DisplayIntensity.NORMAL
+
+
+def test_paragraph_offset_hanging_indents_continuation_lines():
+    # #123: <p OFFSET=n> is a hanging indent — the first line stays at the margin,
+    # the second and following lines shift n columns right.
+    s = load_dtl('<panel name="p" width="30"><area>'
+                 '<p offset="4">This is a long paragraph that wraps onto several '
+                 'lines here</p></area></panel>')
+    lines = sorted((t.row, t.col) for t in s.items if isinstance(t, Text))
+    assert lines[0][1] == 1                          # first line at the base column
+    assert all(c == 1 + 4 for _, c in lines[1:])     # continuations offset by 4
+
+
 def test_list_items_flow_with_bullets():
     s = load_dtl('<panel name="p"><ul><li>apple<li>pear<li>plum</ul></panel>')
     # Each <li> renders a bullet ("o" at level 1) + the item text, flowed.
