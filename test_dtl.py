@@ -2818,13 +2818,32 @@ def test_da_attr_applies_rendering_attributes():
 
 def test_da_attr_records_non_rendering_attributes():
     # #124: attributes with no TN3270 display effect are still recognised (not
-    # ignored) — CAPS/SKIP/GE/PAS/CKBOX/ATTN parse without error or leaking.
+    # ignored) — GE/PAS/CKBOX/ATTN parse without error or leaking.
     s = load_dtl(
         "<panel name=p width=40><area><da name=a depth=2>"
-        "<attr attrchar='#' type=datain caps=on skip=on ge=off pas=yes ckbox=off attn=off>"
+        "<attr attrchar='#' type=datain ge=off pas=yes ckbox=off attn=off>"
         "#____"
         "</da></area></panel>")
     assert any(isinstance(it, Field) for it in s.items)   # field still rendered
+
+
+def test_da_attr_caps_and_skip_apply_to_input_field():
+    # #124: CAPS=ON folds the input field to upper (Field.caps); SKIP=ON is an
+    # autoskip/auto-advance field, carried as the client autotab behaviour.
+    s = load_dtl(
+        "<panel name=p width=40><area><da name=a depth=2>"
+        "<attr attrchar='#' type=datain caps=on skip=on>#____"
+        "</da></area></panel>")
+    fld = next(it for it in s.items if isinstance(it, Field))
+    assert fld.caps is True
+    assert fld.autotab is True
+    # Absent CAPS/SKIP → the plain defaults (byte-identical field identity).
+    d = load_dtl(
+        "<panel name=p width=40><area><da name=a depth=2>"
+        "<attr attrchar='#' type=datain>#____"
+        "</da></area></panel>")
+    dfld = next(it for it in d.items if isinstance(it, Field))
+    assert dfld.caps is False and dfld.autotab is False
 
 
 def test_da_depth_reserves_height_and_div_closes_it():

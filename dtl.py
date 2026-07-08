@@ -3289,11 +3289,13 @@ class _DTLParser(HTMLParser):
             "numeric": _flag("numeric"),                 # NUMERIC=ON → numeric field
             "pad": self._pad_char(a),                    # PAD/PADC empty-cell fill
             "just": str(a.get("just", "asis")).strip().lower(),   # ASIS|LEFT|RIGHT
-            "skip": _flag("skip"),                        # SKIP=ON → autoskip field
-            # Recorded (no TN3270 display effect on this server): CAPS (input
-            # uppercase), GE (graphic escape / DBCS), PAS/CSRGRP (point-and-shoot
-            # → #115), CKBOX/CUADYN (GUI checkbox / dynamic CUA), ATTN (attention).
-            "caps": _flag("caps", "on", "in", "out"),
+            "skip": _flag("skip"),          # SKIP=ON → autoskip (client auto-advance)
+            "caps": _flag("caps", "on", "in", "out"),     # CAPS → upper-fold input
+            # By design, no distinct display effect on this single-byte text server:
+            # GE (graphic escape) and FORMAT=DBCS/MIX are DBCS (deferred, #135);
+            # PAS/CSRGRP are point-and-shoot (tracked #115); CKBOX (GUI checkbox) and
+            # CUADYN (GUI dynamic CUA type) are GUI-only; ATTN (attention field) has
+            # no separate render. All are parsed and recorded.
             "ge": _flag("ge"),
             "pas": _flag("pas"),
             "csrgrp": a.get("csrgrp"),
@@ -3376,6 +3378,12 @@ class _DTLParser(HTMLParser):
                 hidden=hidden, numeric=spec["numeric"], pad=spec["pad"],
                 color=spec["color"], highlight=spec["hilite"],
                 outline=spec["outline"],
+                # CAPS=ON|IN|OUT folds typed input to upper (recorded on the field
+                # like a <lstcol CAPS=ON> cell); SKIP=ON is an autoskip/auto-advance
+                # field, carried as the client autotab behaviour (no distinct 3270
+                # attribute bit, same as <dtafld AUTOTAB>).
+                caps=spec["caps"],
+                autotab=spec["skip"],
             ))
         else:  # dataout / char / text → protected display field
             # JUST right/left-justifies the display text within its run width.
