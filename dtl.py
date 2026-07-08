@@ -631,6 +631,12 @@ class _DTLParser(HTMLParser):
             var = a.get("var")
             if var:
                 self._pending_ps = (var, str(a.get("value", "")))
+                # CSRGRP (cursor group) and DEPTH (rows the phrase spans) have no
+                # host-display effect on a text terminal; record them as metadata.
+                if "csrgrp" in a or "depth" in a:
+                    self.screen.ps_meta.append(
+                        {"var": var, "csrgrp": a.get("csrgrp"),
+                         "depth": self._opt_int(a.get("depth"))})
             return
         # <chofld> (choice data field): an input field within a <choice> row. The
         # text captured before it is the choice description; the text after it is the
@@ -797,6 +803,19 @@ class _DTLParser(HTMLParser):
                 self.screen.window_title = a.get("wintitle")
             if a.get("cursor"):
                 self.screen.cursor_field = a.get("cursor")
+            # Panel classification / codepage metadata (#125, #117). MENU (a
+            # selection menu), ACTBAR (force an action-bar area), CCSID (codepage)
+            # and EXPAND=xy (the two field-expansion characters) have no host-display
+            # effect on this single-byte text server — recorded so the dialog/
+            # compiler can act on them. IMAP (image map) is GUI-only (dropped).
+            if "menu" in a:
+                self.screen.menu = _bool_attr(a, "menu", default=True)
+            if "actbar" in a:
+                self.screen.actbar = _bool_attr(a, "actbar", default=True)
+            if a.get("ccsid"):
+                self.screen.ccsid = a.get("ccsid")
+            if a.get("expand"):
+                self.screen.expand = a.get("expand")
             if self._override_cols is not None:
                 self.screen.width = self._override_cols
             elif "width" in a:
@@ -870,12 +889,31 @@ class _DTLParser(HTMLParser):
                 "origin": origin,
                 "pmtloc": str(a.get("pmtloc", "above")).strip().lower(),
                 "pmtwidth": self._opt_int(a.get("pmtwidth")),
-                "selwidth": self._opt_int(a.get("selwidth")),
+                # SELWIDTH sizes the selection entry; absent → the enclosing
+                # <dtacol>'s SELWIDTH default (#122).
+                "selwidth": (self._opt_int(a["selwidth"]) if "selwidth" in a
+                             else (ctx.get("selwidth") if ctx else None)),
                 # PAD/PADC fill the selection entry; OUTLINE draws box lines around
                 # it (applied to the field the user types into — the single-select
                 # input field or each MULTI mark field). None → the plain defaults.
                 "pad": self._pad_char(a),
                 "outline": self._outline(a),
+                # Multi-column choice grid (#128): CHOICECOLS columns, each
+                # CHOICEDEPTH rows deep (choices fill down each column in turn —
+                # column-major; row-major when no depth is given). CWIDTHS='w1 w2..'
+                # sets each column's stride. SELFMT=START|END aligns the selection
+                # entry within the selection width. DEPTH/EXTEND size the field.
+                "choicecols": self._opt_int(a.get("choicecols"), 1) or 1,
+                "choicedepth": self._opt_int(a.get("choicedepth")),
+                "cwidths": [int(w) for w in str(a.get("cwidths", "")).split()
+                            if w.isdigit()],
+                "selfmt": str(a.get("selfmt", "start")).strip().lower(),
+                "seldepth": (self._opt_int(a["depth"])
+                             if "depth" in a and str(a["depth"]).strip() != "*"
+                             else None),
+                "extend": str(a.get("extend", "off")).strip().lower(),
+                "field_row0": None,     # the row the first choice lands on
+                "grid_maxrow": None,
                 "prompt_chars": [],
                 "prompt_done": False,
             }
@@ -887,6 +925,7 @@ class _DTLParser(HTMLParser):
             # choice is numbered "N." (number + period). Decided on the first
             # choice (its NUM tells us). Explicit NUM / columns keep the fixed grid.
             sf["single_eligible"] = (sf["auto_cols"] and not sf["multi"]
+                                     and sf["choicecols"] <= 1
                                      and str(a.get("type", "single")).strip().lower()
                                      == "single")
             # ENTWIDTH is 2 | n | 'e1 e2...en'; we take a single width (the list
@@ -1121,7 +1160,17 @@ class _DTLParser(HTMLParser):
                 "div": str(a.get("div", "none")).strip().lower(),
                 "divtext": " ".join(str(a.get("text", "")).split()),
                 "divformat": str(a.get("format", "start")).strip().lower(),
+                # EXTEND=ON|FORCE fills the remaining panel depth (like DEPTH=*).
+                "extend": str(a.get("extend", "off")).strip().lower(),
             }
+            # SCROLL/SCROLLVAR record the dynamic area's scroll intent (the body is
+            # rendered statically here; LVLINE/USERMOD/DATAMOD/SHADOW are dynamic-
+            # area / GDDM concerns with no static-render effect). #125.
+            self.screen.dynamic_areas.append({
+                "name": a.get("name"),
+                "scroll": str(a.get("scroll", "off")).strip().lower(),
+                "scrollvar": a.get("scrollvar"),
+            })
         elif tag == "attr":
             self._emit_attr(a)
         elif tag == "dtacol":
@@ -1133,7 +1182,10 @@ class _DTLParser(HTMLParser):
             self._areas.append({
                 "row": row, "row0": row, "maxbottom": row,
                 "col": parent["col"] if parent else 1,
-                "fldgap": parent["fldgap"] if parent else 1,
+                # FLDSPACE sets the gap between a child field's prompt and its entry
+                # (the flow's fldgap); absent → inherit the parent box's gap (#122).
+                "fldgap": (int(a["fldspace"]) if "fldspace" in a
+                           else (parent["fldgap"] if parent else 1)),
                 "dir": str(a.get("dir", "vert")).strip().lower(),
                 "start_idx": len(self.screen.items),
                 "explicit": False,
@@ -1142,6 +1194,20 @@ class _DTLParser(HTMLParser):
                              else (parent.get("pmtwidth") if parent else None)),
                 "entwidth": (self._opt_int(a["entwidth"]) if "entwidth" in a
                              else (parent.get("entwidth") if parent else None)),
+                # SELWIDTH defaults the selection-entry width of nested <selfld>s;
+                # PMTLOC (BEFORE/ABOVE), REQUIRED, VARCLASS and CAPS default the
+                # matching attribute of each child <dtafld>/<selfld>, the child's own
+                # value overriding. All inherit through nested columns (#122).
+                "selwidth": (self._opt_int(a["selwidth"]) if "selwidth" in a
+                             else (parent.get("selwidth") if parent else None)),
+                "pmtloc": (str(a["pmtloc"]).strip().lower() if "pmtloc" in a
+                           else (parent.get("pmtloc") if parent else None)),
+                "required": (str(a["required"]).strip().lower() if "required" in a
+                             else (parent.get("required") if parent else None)),
+                "varclass": (str(a["varclass"]) if "varclass" in a
+                             else (parent.get("varclass") if parent else None)),
+                "caps": (str(a["caps"]).strip().lower() if "caps" in a
+                         else (parent.get("caps") if parent else None)),
                 # PAD/PADC default the column's <dtafld> fill character; a field's
                 # own PAD/PADC overrides it (see _add_field).
                 "pad": self._pad_char(a) or (parent.get("pad") if parent else None),
@@ -1192,8 +1258,15 @@ class _DTLParser(HTMLParser):
             # INDENT shifts the box's content that many columns to the right of its
             # origin (a <region indent=n>), nesting cumulatively.
             base_col = parent["col"] if parent else 1
-            indent = base_col + (int(a["indent"]) if "indent" in a else 0)
-            row = parent["row"] if parent else 0
+            # MARGINW insets an <area>'s content horizontally (an AREA-only margin;
+            # measured from the borderless origin, so the CUA default collapses to 0
+            # — this text server draws no area border for the margin to sit inside).
+            marginw = int(a["marginw"]) if (tag == "area" and "marginw" in a) else 0
+            indent = base_col + (int(a["indent"]) if "indent" in a else 0) + marginw
+            # MARGIND reserves blank rows above (and, at close, below) an <area>'s
+            # content — again 0 by default with no border.
+            margind = int(a["margind"]) if (tag == "area" and "margind" in a) else 0
+            row = (parent["row"] if parent else 0) + margind
             # <region GRPBOX=YES> frames its content in a group box: a GE box border
             # (like the pull-down / other borders) with an optional title on the top
             # edge (#125). The border is drawn at the box's close (once its content
@@ -1227,6 +1300,12 @@ class _DTLParser(HTMLParser):
                 "depth": (self._opt_int(a["depth"])
                           if "depth" in a and str(a["depth"]).strip() != "*"
                           else None),
+                # EXTEND=ON|FORCE grows the box to fill the remaining panel depth
+                # (its bottom edge reaches the last usable row); OFF (default) uses
+                # the content's own height. #125.
+                "extend": str(a.get("extend", "off")).strip().lower(),
+                # MARGIND also reserves blank rows below the content (see close).
+                "margind": margind,
                 # A box that transparently continues the parent's flow inherits its
                 # content state, so the first paragraph below a panel title still
                 # gets the CUA title/body separator. An explicitly-positioned box
@@ -1239,6 +1318,15 @@ class _DTLParser(HTMLParser):
                 box["gb_row0"] = row                     # the top-border row
                 box["gb_col"] = indent                   # border's left column
                 box["gb_width"] = self._opt_int(a.get("grpwidth"))  # GRPWIDTH, or None
+                # GRPBXVAR/GRPBXMAT conditionally draw the box: the border shows only
+                # when the named dialog variable's value matches GRPBXMAT (default
+                # "1"), exactly like CHOICE's CHECKVAR/MATCH. When the value is known
+                # (a substitution is supplied) and does not match, the box is not
+                # framed — the content flows as a plain region. LOCATION=TITLE routes
+                # the group heading to the panel-title line instead of the box edge.
+                box["gb_var"] = a.get("grpbxvar")
+                box["gb_match"] = str(a.get("grpbxmat", "1"))
+                box["gb_location"] = str(a.get("location", "default")).strip().lower()
                 box["gb_title_chars"] = []
                 box["gb_title"] = ""
                 box["row"] = box["row0"] = box["maxbottom"] = row + 1  # content below top
@@ -1423,6 +1511,16 @@ class _DTLParser(HTMLParser):
             sf = self._selfld
             if sf:
                 self._emit_selfld_prompt(sf)   # a prompt-only selfld still shows it
+            if sf and sf.get("choicecols", 1) > 1 and sf.get("grid_maxrow") is not None:
+                # A multi-column grid tracked its deepest row; resume below it. #128.
+                sf["row"] = sf["grid_maxrow"] + 1
+            if sf and sf.get("field_row0") is not None:
+                # DEPTH reserves a fixed height for the field; EXTEND fills to the
+                # panel foot. Both measured from the field's first row. #128.
+                if sf.get("seldepth"):
+                    sf["row"] = max(sf["row"], sf["field_row0"] + sf["seldepth"])
+                if sf.get("extend") in ("on", "force"):
+                    sf["row"] = max(sf["row"], self.screen.depth - self._bmargin)
             if sf and sf.get("ctx") is not None:
                 ctx = sf["ctx"]
                 if ctx.get("dir") == "horiz":
@@ -1522,10 +1620,21 @@ class _DTLParser(HTMLParser):
             self._info_indent = 0    # an <info> can't outlive its enclosing box
             if self._areas:
                 ctx = self._areas.pop()
+                # MARGIND (an <area> depth margin) reserves blank rows below the
+                # content as well as above it.
+                if ctx.get("margind"):
+                    ctx["row"] += ctx["margind"]
                 # DEPTH=n reserves a fixed height: pad the box out to n rows so the
                 # parent flow resumes DEPTH rows below the box's start.
                 if ctx.get("depth"):
                     floor = ctx["row0"] + ctx["depth"]
+                    if ctx["row"] < floor:
+                        ctx["row"] = floor
+                    ctx["maxbottom"] = max(ctx.get("maxbottom", ctx["row"]), ctx["row"])
+                # EXTEND=ON|FORCE grows the box to the last usable panel row (kept
+                # out of the bottom margin), so the flow after it resumes at the foot.
+                if ctx.get("extend") in ("on", "force"):
+                    floor = self.screen.depth - self._bmargin
                     if ctx["row"] < floor:
                         ctx["row"] = floor
                     ctx["maxbottom"] = max(ctx.get("maxbottom", ctx["row"]), ctx["row"])
@@ -1992,7 +2101,9 @@ class _DTLParser(HTMLParser):
             return
         col = ctx["col"]
         width = self._opt_int(a.get("width")) or max(1, self.screen.width - col - 1)
-        if str(a.get("depth", "")).strip() == "*":     # remaining panel depth
+        extend = str(a.get("extend", "off")).strip().lower() in ("on", "force")
+        if str(a.get("depth", "")).strip() == "*" or (extend and "depth" not in a):
+            # DEPTH=* or EXTEND=ON|FORCE → fill the remaining panel depth. #117.
             depth = max(1, self.screen.depth - ctx["row"] - 2)
         else:
             depth = max(1, self._opt_int(a.get("depth"), 1) or 1)
@@ -2640,6 +2751,21 @@ class _DTLParser(HTMLParser):
         gb_col = ctx["gb_col"]
         top = ctx["gb_row0"]
         title = " ".join((ctx.get("gb_title") or "").split())
+        # GRPBXVAR/GRPBXMAT: when the controlling variable's value is known and does
+        # not match GRPBXMAT, don't frame the box — leave the content as a plain
+        # region (its rows already flowed in place).
+        var = ctx.get("gb_var")
+        if var:
+            val = self._subs.get(str(var).upper())
+            if val is not None and str(val) != ctx.get("gb_match", "1"):
+                ctx["row"] = ctx["maxbottom"] = self._box_extent(ctx["start_idx"])[0] \
+                    or ctx["row"]
+                return
+        # LOCATION=TITLE: show the group heading as the panel title, not on the edge.
+        if title and ctx.get("gb_location") == "title":
+            if self.screen.title is None:
+                self.screen.title = title
+            title = ""
         # Content extent: rows gb_row0+1 .. bottom-1, last text column = right.
         bottom, right = self._box_extent(ctx["start_idx"])
         if bottom is None:                     # empty group box — a 1-row-tall frame
@@ -2776,6 +2902,9 @@ class _DTLParser(HTMLParser):
             # PAD/PADC: the fill character for an empty input cell (None → the
             # conventional space fill, keeping padless columns byte-identical).
             "pad": self._pad_char(a),
+            # COLSPACE adds extra blank columns after this column (widening the
+            # gutter before the next column); 0 (default) keeps the CUA gutter.
+            "colspace": self._opt_int(a.get("colspace"), 0) or 0,
             "group": self._lstgrp,
         })
         # TEXT: a short description rendered beside each data cell. TEXTLOC picks
@@ -2902,6 +3031,7 @@ class _DTLParser(HTMLParser):
             gutter = 2 if c["usage"] == "out" or c["autotab"] else 3
             if c.get("noendattr") and last_on_line[c["line"]] != i:
                 gutter -= 1                        # trailing attribute byte suppressed
+            gutter += c.get("colspace", 0)         # COLSPACE widens the gutter
             # POSITION pins the column start (attribute byte at POSITION → data at
             # POSITION+1); otherwise it flows after the previous column.
             base = c["position"] + 1 if c.get("position") is not None else x
@@ -3432,6 +3562,9 @@ class _DTLParser(HTMLParser):
         # rows below its top even if the body is shorter.
         if da.get("depth"):
             row = max(row, da["row"] + da["depth"])
+        # EXTEND=ON|FORCE grows the area to the last usable panel row (#125).
+        if da.get("extend") in ("on", "force"):
+            row = max(row, self.screen.depth - self._bmargin)
         # DIV draws a closing divider spanning the area (or its WIDTH).
         if da.get("div") not in (None, "none", ""):
             div, col = da["div"], da["col"]
@@ -3513,7 +3646,9 @@ class _DTLParser(HTMLParser):
         # PMTLOC=ABOVE puts the prompt on the line above the field (the default,
         # BEFORE, is beside it). Emit the caption now and drop the field to the
         # next line at the base column.
-        pmt_above = str(a.get("pmtloc", "")).strip().lower() == "above"
+        pmtloc = str(a.get("pmtloc", (ctx.get("pmtloc") if ctx else "") or "")
+                     ).strip().lower()
+        pmt_above = pmtloc == "above"
         usage_out = str(a.get("usage", "")).strip().lower() == "out"
         # A field's own PMTWIDTH (n | * | **) overrides the enclosing <dtacol>'s.
         avail = max(1, self.screen.width - col - 2)
@@ -3625,9 +3760,13 @@ class _DTLParser(HTMLParser):
             # fills. There is no TN3270 field-attribute bit for it (it is a client
             # autotab behaviour), so it is recorded as metadata (see Field.autotab).
             autotab=_bool_attr(a, "autotab"),
+            # CAPS=ON folds typed input to upper; a field's own value wins over the
+            # enclosing <dtacol>'s CAPS default (#122).
+            caps=(_bool_attr(a, "caps") if "caps" in a
+                  else (ctx.get("caps") == "on" if ctx and ctx.get("caps") else False)),
         )
         self.screen.add(field)
-        self._attach_validation(name, a)
+        self._attach_validation(name, a, ctx)
         self._attach_scrfld(name, row, fldcol, length, ctx)
         return field
 
@@ -3706,16 +3845,29 @@ class _DTLParser(HTMLParser):
             return None
         return h
 
-    def _attach_validation(self, name, a):
+    def _attach_validation(self, name, a, ctx=None):
         """Attach a field's validation to the Screen: its variable-class <checkl>
-        checks and/or IBM's REQUIRED=YES (the field must be non-empty on submit)."""
+        checks and/or IBM's REQUIRED=YES (the field must be non-empty on submit).
+        A field with no explicit variable class / REQUIRED inherits the enclosing
+        <dtacol>'s VARCLASS / REQUIRED defaults (#122)."""
         if not name:
             return
-        decl = self._vardcls.get(name.upper())
-        vc = (self._varclasses.get(str(decl.get("varclass", "")).upper())
-              if decl else None)
+        # Variable class: the field's own VARCLASS attribute, else its <vardcl>
+        # declaration, else the enclosing <dtacol>'s default VARCLASS (#122).
+        vcname = a.get("varclass")
+        if not vcname:
+            decl = self._vardcls.get(name.upper())
+            vcname = decl.get("varclass") if decl else None
+        if not vcname and ctx:
+            vcname = ctx.get("varclass")
+        vc = self._varclasses.get(str(vcname or "").upper()) if vcname else None
         checks = vc["checks"] if (vc and vc.get("checks")) else []
-        required = _bool_attr(a, "required")
+        if "required" in a:
+            required = _bool_attr(a, "required")
+        elif ctx and ctx.get("required") is not None:
+            required = ctx.get("required") == "yes"
+        else:
+            required = False
         if not checks and not required:
             return
         entry = {"checkmsg": (vc.get("msg") if vc else None), "checks": checks}
@@ -4072,6 +4224,29 @@ class _DTLParser(HTMLParser):
             return True
         return False
 
+    def _choice_grid_pos(self, sf):
+        """The (row, x-offset) of the next choice in a CHOICECOLS-wide grid (#128).
+
+        Choices fill down each column in turn when CHOICEDEPTH is given (column-
+        major, as ISPF lays them out); with no depth they fill across the row
+        (row-major), which needs no total count. CWIDTHS sets each column's stride;
+        with none, the columns are spread evenly across the field's width."""
+        idx = sf["count"]
+        cols = sf["choicecols"]
+        depth = sf.get("choicedepth")
+        if depth:
+            cidx, ridx = divmod(idx, depth)      # column-major (fill down columns)
+        else:
+            ridx, cidx = divmod(idx, cols)       # row-major (fill across rows)
+        cidx = min(cidx, cols - 1)
+        widths = sf.get("cwidths") or []
+        if widths:
+            gx = sum(widths[:cidx])
+        else:
+            stride = max(1, (self.screen.width - sf["origin"] - 1) // cols)
+            gx = cidx * stride
+        return sf["field_row0"] + ridx, gx
+
     def _emit_choice(self, a, content):
         sf = self._selfld
         if sf is None:
@@ -4092,7 +4267,15 @@ class _DTLParser(HTMLParser):
         # row, and isn't selectable — the choices below it move up.
         if self._choice_hidden(a):
             return
-        row = sf["row"]
+        if sf.get("field_row0") is None:
+            sf["field_row0"] = sf["row"]          # first choice → the field's top row
+        # A multi-column choice grid places each choice at its (row, x-offset) in the
+        # CHOICECOLS-wide grid; a single-column field keeps the flowing row (gx=0, so
+        # the layout is byte-identical). #128.
+        if sf.get("choicecols", 1) > 1:
+            row, gx = self._choice_grid_pos(sf)
+        else:
+            row, gx = sf["row"], 0
         # Auto-number: standard DTL numbers the choices 1..n, so a <choice> that
         # omits its selection value takes the running position (single-select only —
         # a MULTI field marks choices with an input field instead of numbering them).
@@ -4139,7 +4322,7 @@ class _DTLParser(HTMLParser):
             # Multiple-selection: a 1-char input field the user marks, in place of
             # the number. Its modified value (any non-blank char) selects the choice.
             mark = Field(
-                row=row, col=sf["numcol"], length=1,
+                row=row, col=sf["numcol"] + gx, length=1,
                 name=(a.get("name") or f'{sf["name"]}{sf["count"]}') or None,
                 color=explicit, role="field",
                 pad=sf.get("pad"), outline=sf.get("outline"),
@@ -4151,13 +4334,20 @@ class _DTLParser(HTMLParser):
                 # before the first choice; the user types the chosen number into
                 # it. Its name is the SELFLD's NAME (per the CHOICE reference).
                 self.screen.add(Field(
-                    row=row, col=sf["inputcol"], length=sf["entwidth"],
+                    row=row, col=sf["inputcol"] + gx, length=sf["entwidth"],
                     name=sf["name"] or None, color=explicit, role="field",
                     pad=sf.get("pad"), outline=sf.get("outline")))
             # SINGLE choices are numbered "N." (number + period); a MENU/explicit
-            # field uses the bare number padded to numwidth.
-            num_text = num + "." if sf.get("period") else num.ljust(sf["numwidth"])
-            self.screen.add(Text(row, sf["numcol"], num_text,
+            # field uses the bare number padded to numwidth. SELFMT=END right-
+            # justifies the number within the selection column (START, the default,
+            # left-justifies it — byte-identical). #128.
+            if sf.get("period"):
+                num_text = num + "."
+            elif sf.get("selfmt") == "end":
+                num_text = num.rjust(sf["numwidth"])
+            else:
+                num_text = num.ljust(sf["numwidth"])
+            self.screen.add(Text(row, sf["numcol"] + gx, num_text,
                                  num_int, color=explicit, role=rnum))
         # A MULTI choice's NAME is the field identifier (used to read the mark
         # back), not display text — the row is just the mark + description. A
@@ -4165,7 +4355,8 @@ class _DTLParser(HTMLParser):
         name = a.get("name", "")
         show_name = bool(name) and not sf.get("multi")
         if show_name:
-            self.screen.add(Text(row, sf["namecol"], name, color=explicit, role=rname))
+            self.screen.add(Text(row, sf["namecol"] + gx, name, color=explicit,
+                                 role=rname))
         # Description column: a standard single-choice, or any choice with no
         # visible keyword (auto grid), hugs the number/mark; a keyworded grid uses
         # the far description column.
@@ -4175,6 +4366,7 @@ class _DTLParser(HTMLParser):
             desccol = sf["namecol"]
         else:
             desccol = sf["desccol"]
+        desccol += gx                            # grid column x-offset (0 single-col)
         # A flowed choice (text on the line after <choice>, as the <ps>/<chofld>
         # guide examples code it) captures a leading newline + indentation; drop it.
         # Deliberate leading spaces on the *same* line (which position the
@@ -4188,7 +4380,12 @@ class _DTLParser(HTMLParser):
         if chofld is not None:
             extra = self._emit_chofld(chofld, chofld_desc, row, desccol,
                                       len(desc_text), explicit)
-        sf["row"] = row + 1 + extra
+        if sf.get("choicecols", 1) > 1:
+            # In grid mode the next choice computes its own (row, column); just track
+            # the deepest row used so the flow resumes below the whole grid.
+            sf["grid_maxrow"] = max(sf.get("grid_maxrow") or row, row + extra)
+        else:
+            sf["row"] = row + 1 + extra
         sf["count"] += 1
         if unavail:
             return                          # not selectable → no routing/point-and-shoot
@@ -4216,7 +4413,8 @@ class _DTLParser(HTMLParser):
             # cursor on it so the user sees (and can re-select) the current choice.
             checkvar = a.get("checkvar")
             if checkvar and self._subs.get(checkvar.strip().upper(), "").strip().upper() == match:
-                self.screen.cursor_at = (row, mark.col if mark is not None else sf["namecol"])
+                self.screen.cursor_at = (row, mark.col if mark is not None
+                                         else sf["namecol"] + gx)
 
     def _emit_chdiv(self, a, content):
         """Render a ``<chdiv>`` (choice divider) within a ``<selfld>``: a line that
@@ -4258,7 +4456,10 @@ class _DTLParser(HTMLParser):
         the line below, indented to the description column (per Figure 96 in the DTL
         guide). Returns the number of extra rows the description consumed (0 or 1)."""
         length = int(a.get("entwidth", 8))
-        fldcol = desccol + desclen + 1              # a gap past the description text
+        # FLDSPACE sets the gap between the choice description and the entry field
+        # (default 1); ALIGN positions the field's own description under it (#115).
+        gap = self._opt_int(a.get("fldspace"), 1) or 1
+        fldcol = desccol + desclen + gap
         if fldcol + length + 1 >= self.screen.width:   # clamp to the panel edge
             length = max(1, self.screen.width - fldcol - 2)
         name = a.get("datavar")
@@ -4290,7 +4491,16 @@ class _DTLParser(HTMLParser):
             self._attach_validation(name, a)
         desc = " ".join((description or "").split())
         if desc:
-            self.screen.add(Text(row + 1, desccol, desc, color=color, role="desc"))
+            # The description sits below the entry, indented to the description
+            # column (Figure 96). ALIGN=CENTER|END positions it within the entry
+            # field's width (START, the default, keeps it at desccol — byte-identical).
+            align = str(a.get("align", "start")).strip().lower()
+            off = 0
+            if align in ("center", "end") and length > len(desc):
+                span = length - len(desc)
+                off = span // 2 if align == "center" else span
+            self.screen.add(Text(row + 1, desccol + off, desc, color=color,
+                                 role="desc"))
             return 1
         return 0
 

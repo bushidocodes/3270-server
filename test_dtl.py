@@ -621,6 +621,71 @@ def test_selfld_lays_out_choices_on_incrementing_rows():
     assert s.items[3] == Text(1, 1, "10", DisplayIntensity.HIGH)
 
 
+def test_selfld_choicecols_lays_out_a_column_major_grid():
+    # #128: CHOICECOLS/CHOICEDEPTH lay the choices out in a grid, filling down each
+    # column in turn (column-major); CWIDTHS sets each column's stride.
+    s = load_dtl(
+        '<panel name="m" menu width="60"><selfld type="menu" choicecols="2"'
+        ' choicedepth="2" cwidths="20 20">Pick'
+        '<choice>Alpha<choice>Beta<choice>Gamma<choice>Delta</selfld></panel>')
+    pos = {t.text: (t.row, t.col) for t in s.items
+           if isinstance(t, Text) and t.text in ("Alpha", "Beta", "Gamma", "Delta")}
+    assert pos["Alpha"][0] < pos["Beta"][0]              # col 0 fills downward
+    assert pos["Alpha"][1] == pos["Beta"][1]             # same column
+    assert pos["Gamma"][1] == pos["Alpha"][1] + 20       # col 1 offset by CWIDTHS
+    assert pos["Gamma"][0] == pos["Alpha"][0]            # col 1 restarts at the top
+    assert pos["Delta"][0] == pos["Beta"][0]
+
+
+def test_selfld_selfmt_end_right_justifies_the_number():
+    # #128: SELFMT=END right-justifies the selection number within the number
+    # column; START (default) left-justifies it (byte-identical).
+    end = load_dtl('<panel name="m" menu><selfld type="menu" selfmt="end">Pick'
+                   '<choice name="A">alpha</selfld></panel>')
+    start = load_dtl('<panel name="m" menu><selfld type="menu">Pick'
+                     '<choice name="A">alpha</selfld></panel>')
+    ne = next(t for t in end.items if isinstance(t, Text) and t.text.strip() == "1")
+    ns = next(t for t in start.items if isinstance(t, Text) and t.text.strip() == "1")
+    assert ne.text == " 1" and ns.text == "1 "
+
+
+def test_selfld_choicecols_row_major_without_depth():
+    # #128: with CHOICECOLS but no CHOICEDEPTH, choices fill across the row.
+    s = load_dtl(
+        '<panel name="m" menu width="60"><selfld type="menu" choicecols="2">Pick'
+        '<choice>Alpha<choice>Beta<choice>Gamma<choice>Delta</selfld></panel>')
+    pos = {t.text: (t.row, t.col) for t in s.items
+           if isinstance(t, Text) and t.text in ("Alpha", "Beta", "Gamma", "Delta")}
+    assert pos["Alpha"][0] == pos["Beta"][0]             # first row: Alpha, Beta
+    assert pos["Beta"][1] > pos["Alpha"][1]              # Beta in the next column
+    assert pos["Gamma"][0] == pos["Alpha"][0] + 1        # second row wraps down
+
+
+def test_selfld_grid_extend_fills_depth_and_flow_resumes_below():
+    # #128: DEPTH/EXTEND size the grid; the flow after the field resumes below it.
+    s = load_dtl(
+        '<panel name="m" menu width="60" depth="22"><selfld type="menu"'
+        ' choicecols="2" choicedepth="2" extend="on">Pick'
+        '<choice>A<choice>B<choice>C<choice>D</selfld>'
+        '<info>After</info></panel>')
+    after = next(t.row for t in s.items if isinstance(t, Text) and t.text == "After")
+    assert after == 21                                    # pushed to the panel foot
+
+
+def test_selfld_depth_reserves_height_single_column():
+    # #128: DEPTH reserves a fixed field height even for an ordinary single-column
+    # selection field; the flow after it resumes DEPTH rows below the first choice.
+    sized = load_dtl('<panel name="m" menu width="60" depth="22">'
+                     '<selfld type="menu" depth="8">Pick<choice>A<choice>B</selfld>'
+                     '<info>After</info></panel>')
+    plain = load_dtl('<panel name="m" menu width="60" depth="22">'
+                     '<selfld type="menu">Pick<choice>A<choice>B</selfld>'
+                     '<info>After</info></panel>')
+    sa = next(t.row for t in sized.items if isinstance(t, Text) and t.text == "After")
+    pa = next(t.row for t in plain.items if isinstance(t, Text) and t.text == "After")
+    assert sa > pa
+
+
 def test_selfld_single_choice_auto_layout_matches_reference():
     # #183: a column-less single-choice field whose choices omit NUM auto-lays out
     # per the CHOICE reference figure — a selection input field before the first
@@ -1037,6 +1102,30 @@ def test_chofld_adds_an_entry_field_within_the_choice():
     # The choice below flows past the extra description line.
     renewal = next(it for it in s.items if isinstance(it, Text) and it.text == "Renewal")
     assert renewal.row == desc.row + 2
+
+
+def test_chofld_fldspace_widens_gap_and_align_positions_description():
+    # #115: FLDSPACE widens the gap between the choice description and the entry
+    # field; ALIGN=END right-aligns the field's own description within the entry.
+    wide = load_dtl(
+        '<panel name=m menu><selfld type=menu>'
+        '<choice>New:<chofld datavar=ct entwidth=9 fldspace=5>desc</selfld></panel>')
+    narrow = load_dtl(
+        '<panel name=m menu><selfld type=menu>'
+        '<choice>New:<chofld datavar=ct entwidth=9 fldspace=1>desc</selfld></panel>')
+    fw = next(f for f in wide.items if isinstance(f, Field) and f.name == "ct")
+    fn = next(f for f in narrow.items if isinstance(f, Field) and f.name == "ct")
+    assert fw.col == fn.col + 4                       # 5-char gap vs 1-char gap
+    # ALIGN=END shifts the below-description right within the entry width
+    aligned = load_dtl(
+        '<panel name=m menu><selfld type=menu>'
+        '<choice>New:<chofld datavar=ct entwidth=9 align=end>ab</selfld></panel>')
+    plain = load_dtl(
+        '<panel name=m menu><selfld type=menu>'
+        '<choice>New:<chofld datavar=ct entwidth=9>ab</selfld></panel>')
+    da = next(t for t in aligned.items if isinstance(t, Text) and t.text == "ab")
+    dp = next(t for t in plain.items if isinstance(t, Text) and t.text == "ab")
+    assert da.col == dp.col + (9 - 2)                 # right-aligned within entwidth 9
 
 
 def test_chofld_autotab_recorded():
@@ -3027,6 +3116,39 @@ def test_da_depth_reserves_height_and_div_closes_it():
     assert not [t for t in d.items if isinstance(t, Text) and set(t.text) == {"-"}]
 
 
+def test_da_scroll_recorded_and_extend_fills_depth():
+    # #125: <da SCROLL=ON SCROLLVAR=v> records the dynamic area's scroll intent
+    # (the body renders statically); EXTEND=ON fills the remaining panel depth.
+    s = load_dtl('<panel name="p" width="40" depth="20">T<area>'
+                 '<da name="dyn" scroll="on" scrollvar="scr">'
+                 '<attr attrchar="$" type="char">Body $x</da>'
+                 '<info>After</info></area></panel>')
+    assert s.dynamic_areas == [{"name": "dyn", "scroll": "on", "scrollvar": "scr"}]
+    ext = load_dtl('<panel name="p" width="40" depth="20">T<area>'
+                   '<da extend="on"><attr attrchar="$" type="char">Body $x</da>'
+                   '<info>After</info></area></panel>')
+    small = load_dtl('<panel name="p" width="40" depth="20">T<area>'
+                     '<da><attr attrchar="$" type="char">Body $x</da>'
+                     '<info>After</info></area></panel>')
+    ea = next(t.row for t in ext.items if isinstance(t, Text) and t.text == "After")
+    sa = next(t.row for t in small.items if isinstance(t, Text) and t.text == "After")
+    assert ea > sa                                    # EXTEND reserved the full depth
+
+
+def test_ps_csrgrp_and_depth_recorded_as_metadata():
+    # #115: <ps CSRGRP=n DEPTH=n> records the cursor group / row span as metadata
+    # (no host-display effect); the phrase text and row mapping are unchanged.
+    s = load_dtl('<panel name="p" width="40"><area>'
+                 '<info><ps var="v" value="1" csrgrp="2" depth="1">Pick</ps></info>'
+                 '</area></panel>')
+    assert s.ps_meta == [{"var": "v", "csrgrp": "2", "depth": 1}]
+    assert any(isinstance(t, Text) and "Pick" in t.text for t in s.items)
+    # no CSRGRP/DEPTH → nothing recorded (byte-identical behaviour)
+    plain = load_dtl('<panel name="p" width="40"><area>'
+                     '<info><ps var="v" value="1">Pick</ps></info></area></panel>')
+    assert plain.ps_meta == []
+
+
 def test_dtafld_pad_fills_entry_and_dtacol_default():
     # #122: PAD/PADC set the fill character for an empty <dtafld> entry, with the
     # same rules as <lstcol>. A <dtacol> PAD is the column default; a field's own
@@ -3213,6 +3335,21 @@ def test_lstfld_out_of_scope_attributes_are_accepted_and_ignored():
     b = load_dtl(decorated, rows=rows)
     # accepted (no exception) and no rendering difference: byte-for-byte identical
     assert b.render() == a.render()
+
+
+def test_lstcol_colspace_widens_the_gutter_before_the_next_column():
+    # #122: COLSPACE=n adds n blank columns after a <lstcol>, shifting every
+    # following column right by n; 0 (default) keeps the CUA gutter (byte-identical).
+    def bcol(dtl):
+        s = load_dtl(dtl, rows=[{"a": "1", "b": "2"}])
+        return next(f.col for f in s.items
+                    if isinstance(f, Field) and f.name == "b")
+    plain = ('<panel name="p" width="60">T<lstfld>'
+             '<lstcol datavar="a" colwidth="6">A</lstcol>'
+             '<lstcol datavar="b" colwidth="6">B</lstcol></lstfld></panel>')
+    spaced = plain.replace('datavar="a" colwidth="6"',
+                           'datavar="a" colwidth="6" colspace="4"')
+    assert bcol(spaced) == bcol(plain) + 4
 
 
 def test_choice_divider_solid_draws_a_rule_and_separates_choices():
@@ -4452,6 +4589,81 @@ def test_dtacol_defaults_outline_deswidth_for_child_fields():
     assert any(isinstance(t, Text) and t.text == "Long" for t in s.items)
 
 
+def test_dtacol_inherits_pmtloc_above_for_child_fields():
+    # #122: <dtacol pmtloc=above> drops each child field's prompt onto its own line;
+    # a field's own PMTLOC overrides the column default.
+    s = load_dtl('<panel name="p" width="60"><area>'
+                 '<dtacol pmtloc="above" entwidth="5">'
+                 '<dtafld datavar="a">Above</dtafld>'
+                 '<dtafld datavar="b" pmtloc="before">Before</dtafld>'
+                 '</dtacol></area></panel>')
+    a = next(f for f in s.items if isinstance(f, Field) and f.name == "a")
+    prompt_a = next(t for t in s.items if isinstance(t, Text) and t.text == "Above")
+    # ABOVE: the entry field is on the row below its caption
+    assert a.row == prompt_a.row + 1 and a.col == prompt_a.col
+    b = next(f for f in s.items if isinstance(f, Field) and f.name == "b")
+    prompt_b = next(t for t in s.items if isinstance(t, Text) and t.text == "Before")
+    assert b.row == prompt_b.row                       # BEFORE overrides → same row
+
+
+def test_dtacol_inherits_caps_for_child_fields():
+    # #122: <dtacol caps=on> folds each child field's input to upper; a field's own
+    # CAPS overrides.
+    s = load_dtl('<panel name="p"><area>'
+                 '<dtacol caps="on" entwidth="6">'
+                 '<dtafld datavar="a">A</dtafld>'
+                 '<dtafld datavar="b" caps="off">B</dtafld>'
+                 '</dtacol></area></panel>')
+    a = next(f for f in s.items if isinstance(f, Field) and f.name == "a")
+    b = next(f for f in s.items if isinstance(f, Field) and f.name == "b")
+    assert a.caps is True and b.caps is False
+
+
+def test_dtacol_inherits_required_and_varclass():
+    # #122: <dtacol required=yes varclass=C> defaults its child fields' REQUIRED and
+    # variable-class validation; the field need not redeclare either.
+    s = load_dtl(
+        '<panel name="p">'
+        '<varclass name="C"><checkl msg="M"><checki type=range parm1=0 parm2=9>'
+        '</checki></checkl></varclass>'
+        '<area><dtacol required="yes" varclass="C" entwidth="4">'
+        '<dtafld datavar="n">N</dtafld>'
+        '</dtacol></area></panel>')
+    assert "N" in s.validations
+    assert s.validations["N"]["checks"] == [{"type": "range", "min": 0, "max": 9}]
+    assert s.validations["N"]["required_msg"]           # inherited REQUIRED
+    addr = s.field_addr("n")
+    assert s.first_validation_error({addr: "5"}) is None
+    assert s.first_validation_error({addr: "99"})[0] == "M"
+
+
+def test_dtacol_fldspace_sets_prompt_to_entry_gap():
+    # #122: FLDSPACE widens the gap between an auto-flowed prompt and its entry.
+    s = load_dtl('<panel name="p" width="60"><area>'
+                 '<dtacol fldspace="4"><dtafld datavar="a" entwidth="5">Name</dtafld>'
+                 '</dtacol></area></panel>')
+    prompt = next(t for t in s.items if isinstance(t, Text) and t.text == "Name")
+    field = next(f for f in s.items if isinstance(f, Field))
+    # entry flows after the 4-char prompt + FLDSPACE gap of 4
+    assert field.col == prompt.col + len("Name") + 4
+
+
+def test_dtacol_selwidth_defaults_nested_selfld_column_width():
+    # #122: <dtacol selwidth=n> defaults the selection-column width of a nested
+    # <selfld> (here the span of a SOLID <chdiv> rule); the selfld's own SELWIDTH
+    # overrides.
+    def rule_len(dtl):
+        s = load_dtl(dtl)
+        return len(next(t.text for t in s.items
+                        if isinstance(t, Text) and set(t.text) == {"-"}))
+    inherited = ('<panel name="p" width="70"><area><dtacol selwidth="6">'
+                 '<selfld name="s"><choice>One</choice>'
+                 '<chdiv type="solid"></chdiv><choice>Two</choice></selfld>'
+                 '</dtacol></area></panel>')
+    own = inherited.replace('<selfld name="s">', '<selfld name="s" selwidth="3">')
+    assert rule_len(inherited) == 6 and rule_len(own) == 3
+
+
 def test_dtafld_autotab_recorded_as_metadata():
     # #122: AUTOTAB=YES is recorded on the field (a client autotab behaviour with no
     # 3270 data-stream bit); it does not change the rendered stream.
@@ -4676,6 +4888,41 @@ def test_region_without_grpbox_is_unchanged():
     assert s.items == [Text(0, 1, "x", DisplayIntensity.NORMAL)]
 
 
+def test_region_grpbxvar_suppresses_border_when_value_mismatches():
+    # #125: GRPBXVAR/GRPBXMAT draw the group box only when the variable matches
+    # GRPBXMAT; a known mismatch leaves the content as a plain (unframed) region.
+    shown = load_dtl('<panel><region grpbox="yes" grpbxvar="show" grpbxmat="1">'
+                     '<info>x</info></region></panel>', show="1")
+    hidden = load_dtl('<panel><region grpbox="yes" grpbxvar="show" grpbxmat="1">'
+                      '<info>x</info></region></panel>', show="0")
+    assert any(isinstance(i, GraphicText) for i in shown.items)   # framed
+    assert not any(isinstance(i, GraphicText) for i in hidden.items)  # plain region
+    assert any(isinstance(i, Text) and i.text == "x" for i in hidden.items)
+
+
+def test_region_grpbox_location_title_routes_heading_to_panel_title():
+    # #125: LOCATION=TITLE shows the group heading as the panel title, not on the
+    # box edge.
+    s = load_dtl('<panel name="p" width="40"><region grpbox="yes" location="title">'
+                 'Settings<info>v</info></region></panel>')
+    assert s.title == "Settings"
+    # the heading is not laid on the top border (no Text on the top edge row)
+    top_texts = [i for i in s.items if isinstance(i, Text) and "Settings" in i.text
+                 and getattr(i, "role", None) is None]
+    assert top_texts == []
+
+
+def test_ga_extend_fills_remaining_depth():
+    # #117: <ga EXTEND=ON> reserves the remaining panel depth (like DEPTH=*).
+    ext = load_dtl('<panel name="p" width="40" depth="20">T<area>'
+                   '<ga extend="on" div="solid"></ga></area><info>After</info></panel>')
+    small = load_dtl('<panel name="p" width="40" depth="20">T<area>'
+                     '<ga depth="2" div="solid"></ga></area><info>After</info></panel>')
+    ea = next(t.row for t in ext.items if isinstance(t, Text) and t.text == "After")
+    sa = next(t.row for t in small.items if isinstance(t, Text) and t.text == "After")
+    assert ea > sa                                    # EXTEND reserves far more depth
+
+
 def test_panel_records_window_and_keylist_metadata():
     # #125: KEYLIST/WINDOW/WINTITLE/CURSOR are recorded on the Screen as metadata
     # (they do not change the rendered field stream).
@@ -4704,6 +4951,31 @@ def test_panel_tmargin_and_bmargin_reserve_top_and_bottom_rows():
     tall = load_dtl('<panel name="p" width="40" depth="10" bmargin="3">T<area>'
                     + "".join(f"<info>L{i}" for i in range(20)) + "</area></panel>")
     assert max(t.row for t in tall.items if isinstance(t, Text)) <= 10 - 1 - 3
+
+
+def test_panel_menu_actbar_ccsid_expand_recorded_as_metadata():
+    # #125/#117: MENU/ACTBAR/CCSID/EXPAND have no host-display effect on this text
+    # server; they are recorded as Screen metadata and do not change the stream.
+    meta = load_dtl('<panel name="p" width="40" menu actbar ccsid="037" expand="<>">'
+                    'Title<area><info>Body</area></panel>')
+    assert meta.menu is True and meta.actbar is True
+    assert meta.ccsid == "037" and meta.expand == "<>"
+    plain = load_dtl('<panel name="p" width="40">Title<area><info>Body</area></panel>')
+    assert meta.render() == plain.render()          # metadata only, no stream change
+    assert plain.menu is False and plain.actbar is False and plain.ccsid is None
+
+
+def test_pandef_inherits_tmargin_bmargin_ccsid():
+    # #117: a <panel PANDEF=id> inherits TMARGIN/BMARGIN/CCSID from the default
+    # block (the generic setdefault merge), the panel's own value winning.
+    s = load_dtl('<pandef id="d" tmargin="2" bmargin="3" ccsid="500">'
+                 '<panel name="p" width="40" pandef="d">Title'
+                 '<area><info>Body</area></panel>')
+    assert next(t.row for t in s.items if isinstance(t, Text) and t.text == "Title") == 2
+    assert s.ccsid == "500"
+    own = load_dtl('<pandef id="d" tmargin="2"><panel name="p" width="40" pandef="d"'
+                   ' tmargin="5">Title<area><info>Body</area></panel>')
+    assert next(t.row for t in own.items if isinstance(t, Text) and t.text == "Title") == 5
 
 
 def test_area_div_draws_a_closing_divider():
@@ -4740,6 +5012,38 @@ def test_area_region_depth_reserves_a_fixed_height():
     a2 = next(t.row for t in plain.items if isinstance(t, Text) and t.text == "A")
     after2 = next(t.row for t in plain.items if isinstance(t, Text) and t.text == "After")
     assert after2 == a2 + 2                            # default: just past the content
+
+
+def test_area_region_extend_fills_remaining_depth():
+    # #125: EXTEND=ON grows the box to the last usable panel row, so the flow after
+    # it resumes at the foot; OFF (default) uses the content's own height.
+    ext = load_dtl('<panel name="p" width="40" depth="20">T<region extend="on">'
+                   '<info>A</region><info>After</info></panel>')
+    after = next(t.row for t in ext.items if isinstance(t, Text) and t.text == "After")
+    # the box fills to the panel foot; the flow after it resumes at the last usable
+    # row (depth-1, the render clamp keeps content on the panel)
+    assert after == 19
+    plain = load_dtl('<panel name="p" width="40" depth="20">T<region>'
+                     '<info>A</region><info>After</info></panel>')
+    assert next(t.row for t in plain.items
+                if isinstance(t, Text) and t.text == "After") < 19
+
+
+def test_area_marginw_and_margind_inset_content():
+    # #125: <area MARGINW=n MARGIND=n> insets the area's content n columns right and
+    # n rows down (with n reserved below too); both default to 0 (byte-identical).
+    s = load_dtl('<panel name="p" width="50">T'
+                 '<area marginw="3" margind="2"><info>Body</info></area>'
+                 '<info>After</info></panel>')
+    body = next(t for t in s.items if isinstance(t, Text) and t.text == "Body")
+    after = next(t for t in s.items if isinstance(t, Text) and t.text == "After")
+    plain = load_dtl('<panel name="p" width="50">T<area><info>Body</info></area>'
+                     '<info>After</info></panel>')
+    pbody = next(t for t in plain.items if isinstance(t, Text) and t.text == "Body")
+    assert body.col == pbody.col + 3                      # MARGINW shifts right
+    assert body.row == pbody.row + 2                      # MARGIND shifts down
+    # MARGIND also reserves rows below: After sits 2 rows lower than the top margin
+    assert after.row == body.row + 1 + 2
 
 
 def test_regions_lay_out_side_by_side_columns():
