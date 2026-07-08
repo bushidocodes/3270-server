@@ -1907,6 +1907,20 @@ def test_msg_lines_default_width_keeps_single_line():
     assert cat.lines("NOSUCH") == ["NOSUCH"]             # unknown id echoes
 
 
+def test_msg_format_asis_keeps_authored_line_breaks_and_records_location():
+    # #127: FORMAT=ASIS preserves the message's authored line breaks (vs FLOW,
+    # which word-wraps to WIDTH); LOCATION is recorded for the server to place it.
+    cat = load_messages(
+        '<msgmbr name="M" width="40">'
+        '<msg msgid="A" format="asis" location="modal">Line one\nLine two\nLine three</msg>'
+        '<msg msgid="F">a long flowing message that must wrap to the member width here</msg>'
+        '</msgmbr>')
+    assert cat.lines("A") == ["Line one", "Line two", "Line three"]   # ASIS: kept
+    assert cat.location("A") == "modal"
+    assert len(cat.lines("F")) > 1                       # FLOW (default) still wraps
+    assert cat.location("F") is None
+
+
 def test_shipped_tso_error_messages_sound_the_alarm():
     cat = load_message_member("tsomsgs")
     for mid in ("IKJ56425I", "IKJ56700I", "TSO001"):
