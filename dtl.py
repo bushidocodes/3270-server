@@ -3010,15 +3010,22 @@ class _DTLParser(HTMLParser):
         leading blank line is needed (skip it when the row above is already blank)."""
         return any(getattr(it, "row", None) == row for it in self.screen.items)
 
-    def _skip_blank_before(self, a):
+    def _skip_blank_before(self, a, space_suppresses=False):
         """ISPDTLC block spacing: insert a leading blank line before a flowed block
         element (paragraph, panel instruction, command area, selection field,
         definition list). Added only when the box already holds content (so the
         first block gets none) and the row above is not already blank (so an
         existing gap isn't doubled). An explicit ``row``, COMPACT, or NOSKIP
-        suppresses it. Advances the flow row cursor."""
+        suppresses it. Advances the flow row cursor.
+
+        ``space_suppresses`` maps a ``<p SPACE=NO>`` to the same suppression: on a
+        paragraph SPACE=NO|YES governs the preceding blank (YES, the default, keeps
+        it). Not passed for list tags, where SPACE instead sets the item indent."""
+        space_no = space_suppresses and \
+            str(a.get("space", "")).strip().lower() == "no"
         ctx = self._areas[-1] if self._areas else None
         if (ctx is not None and "row" not in a and not _bool_attr(a, "compact")
+                and not space_no
                 and not _bool_attr(a, "noskip")
                 and ctx.get("had_content") and ctx["row"] >= 1
                 and ctx["row"] + 1 < self.screen.depth   # don't push off the panel
@@ -3144,7 +3151,9 @@ class _DTLParser(HTMLParser):
         # instruction (see _skip_blank_before for the exact rule; COMPACT
         # suppresses it).
         if tag in _BLANK_BEFORE_TAGS:
-            self._skip_blank_before(a)
+            # On a <p>, SPACE=NO suppresses the preceding blank (like COMPACT);
+            # SPACE=YES (default) keeps it. Only <p> carries SPACE here.
+            self._skip_blank_before(a, space_suppresses=(tag == "p"))
         row, col, ctx = self._resolve_pos(a, "info")
         if self._lists:
             # A paragraph inside a list aligns with the list's item text.

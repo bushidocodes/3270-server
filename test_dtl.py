@@ -2228,6 +2228,22 @@ def test_paragraph_indent_shifts_the_whole_paragraph_right():
     ]
 
 
+def test_paragraph_space_no_suppresses_leading_blank():
+    # #123: <p SPACE=NO> drops the blank line that normally precedes a paragraph
+    # (like COMPACT) — the second paragraph sits directly under the first. The
+    # default (SPACE=YES) keeps the blank (see test_paragraph_indent above).
+    s = load_dtl('<panel name="p"><p>first<p space=no>second</p></panel>')
+    N = DisplayIntensity.NORMAL
+    assert s.items == [
+        Text(0, 1, "first", N),
+        Text(1, 1, "second", N),
+    ]
+    # SPACE=YES is the default blank-before, byte-identical to omitting SPACE.
+    kept = load_dtl('<panel name="p"><p>first<p space=yes>second</p></panel>')
+    dflt = load_dtl('<panel name="p"><p>first<p>second</p></panel>')
+    assert kept.render() == dflt.render()
+
+
 def test_definition_list_pairs_term_and_description_on_one_line():
     # <dl> default break=none: each <dt> term and its <dd> description share a
     # line, the description in a column tsize (default 10) to the right.
