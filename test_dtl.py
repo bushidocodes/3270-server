@@ -98,6 +98,15 @@ def test_directive_blocks_render_nothing_even_with_nested_markup():
                  "<panel name=p><area><p>Body</area></panel>") == ["Body"]
     assert texts("<compopt noprep nographic>"
                  "<panel name=p><area><p>Body</area></panel>") == ["Body"]
+    # <generate> (a build-time panel/message generation directive) is likewise
+    # non-rendering — its body, including nested markup, must not leak.
+    assert texts("<panel name=p><area><p>Visible"
+                 "<generate model=m><p>GENERATED</p></generate>"
+                 "<p>After</area></panel>") == ["Visible", "After"]
+    # Self-closing directives (<generate/>, <comment/>) open no content block, so
+    # the following markup must still render (not be swallowed).
+    assert texts("<panel name=p><area><generate/><p>Body</area></panel>") == ["Body"]
+    assert texts("<panel name=p><area><comment/><p>Body</area></panel>") == ["Body"]
     # <source> still renders nothing and its ZSEL text still routes.
     s = load_dtl("<panel name=p><area><source type=proc>"
                  "&ZSEL = TRANS(&ZCMD 1,'PGM(view)')<p>SRCLEAK"

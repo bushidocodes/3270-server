@@ -576,10 +576,13 @@ class _DTLParser(HTMLParser):
         # ends at that first child tag — bank it and stop capturing (#125).
         if self._grpbox_pending is not None:
             self._finalize_grpbox_title()
-        if tag in ("comment", "copyr", "compopt", "source"):
-            # Non-rendering blocks: <comment>/<copyr>/<compopt> are dropped;
-            # <source> ()INIT/)PROC logic renders nothing but its raw text is kept
-            # for the ZSEL selection routing (see _close_skip).
+        if tag in ("comment", "copyr", "compopt", "generate", "source"):
+            # Non-rendering blocks. <comment> (a comment), <copyr> (copyright),
+            # <compopt> (ISPDTLC compiler options) and <generate> (a build-time
+            # directive that generates panels/messages from a model) have no
+            # host-display effect in this display server, so their content is
+            # dropped. <source> ()INIT/)PROC logic also renders nothing, but its raw
+            # text is kept for the ZSEL selection routing (see _close_skip). #119.
             self._skip = [tag, [], a]
             return
         # An inline <hp> (highlighted phrase) inside a text element does NOT close
@@ -1587,7 +1590,12 @@ class _DTLParser(HTMLParser):
     def handle_startendtag(self, tag, attrs):
         # Self-closing form, e.g. <dtafld .../> or <divider/>
         self.handle_starttag(tag, attrs)
-        if tag in _CONTENT_TAGS:
+        if tag in ("comment", "copyr", "compopt", "generate", "source"):
+            # A self-closing non-rendering directive (<generate/>, <comment/>, …)
+            # opened a skip block with no content; close it so the following markup
+            # is not swallowed. #119.
+            self._close_skip()
+        elif tag in _CONTENT_TAGS:
             self.handle_endtag(tag)
         elif tag in ("ul", "ol", "sl", "dl", "parml", "notel"):  # empty list; pop it
             self.handle_endtag(tag)
