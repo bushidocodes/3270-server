@@ -19,6 +19,11 @@ from server import (
     read_partition_query, read_partition_query_list, parse_query_reply,
     set_reply_mode, request_reply_mode, RM_FIELD, RM_EXTENDED_FIELD, RM_CHARACTER,
     QR_REPLY_MODES, _iac_escape, erase_reset,
+    create_partition, activate_partition, destroy_partition, outbound_3270ds,
+    partitions_supported, inbound_partition, ODS_ERASE_WRITE, QR_ALPHA_PART,
+    load_programmed_symbols, select_char_set, programmed_symbols_supported,
+    LPS_FLAG_EXTENDED, LPS_FLAG_CLEAR, LPS_FLAG_SKIP, LPS_TYPE1, LPS_TYPE3,
+    XA_CHARSET, CS_BASE, QR_CHARSETS,
 )
 
 IAC, EOR, SE = 0xFF, 0xEF, 0xF0
@@ -166,6 +171,133 @@ def test_erase_reset_iac_escape_is_a_noop():
     # No body byte is 0xFF, so IAC-escaping the SF leaves it unchanged — but the
     # send path still frames it with IAC EOR the same way as the Query.
     assert _iac_escape(erase_reset(alternate=True)) == erase_reset(alternate=True)
+
+
+# ── explicit partition management (#307) ─────────────────────────────────────
+
+def _u16(n):
+    return bytes([(n >> 8) & 0xFF, n & 0xFF])
+
+
+def test_create_partition_bytes():
+    # F3 (WSF) + [len][len] 0C <pid> <flags> <resv> then nine 16-bit fields:
+    # PS rows/cols, viewport origin row/col, viewport height/width, window origin
+    # row/col, scroll rows. len (0x18 = 24) counts the two length bytes + 22 body.
+    sf = create_partition(pid=1, rows=24, cols=80)
+    assert sf[:6] == bytes([0xF3, 0x00, 0x18, 0x0C, 0x01, 0x00])   # WSF,len,id,pid,flags
+    assert sf[6] == 0x00                                            # reserved flags byte
+    body = sf[7:]
+    # rows, cols, vprow, vpcol, vph(=rows), vpw(=cols), winrow, wincol, scroll
+    assert body == (_u16(24) + _u16(80) + _u16(0) + _u16(0)
+                    + _u16(24) + _u16(80) + _u16(0) + _u16(0) + _u16(0))
+    assert (sf[1] << 8 | sf[2]) == len(sf) - 1                      # len counts itself
+
+
+def test_create_partition_explicit_viewport_and_window():
+    # A split-screen lower partition: an 18-row viewport at row 4, window at 0,0.
+    sf = create_partition(pid=2, rows=18, cols=80, viewport_row=4, viewport_col=0,
+                          viewport_height=18, viewport_width=80,
+                          window_row=0, window_col=0, scroll_rows=1)
+    body = sf[7:]
+    assert body == (_u16(18) + _u16(80) + _u16(4) + _u16(0)
+                    + _u16(18) + _u16(80) + _u16(0) + _u16(0) + _u16(1))
+
+
+def test_activate_and_destroy_partition_bytes():
+    # Both are a trivial two-byte body: F3 00 04 <id> <pid>. len 0x0004 counts itself.
+    assert activate_partition(0x03) == bytes([0xF3, 0x00, 0x04, 0x0E, 0x03])
+    assert destroy_partition(0x03) == bytes([0xF3, 0x00, 0x04, 0x0D, 0x03])
+
+
+def test_outbound_3270ds_wraps_a_record():
+    # F3 + [len][len] 40 <pid> <cmd> <record…>. The record is a WCC + orders (no
+    # command byte — outbound_3270ds supplies the SNA command in byte 4).
+    rec = bytes([0xC3, 0x11, 0x00, 0x00]) + b"AB"
+    sf = outbound_3270ds(0x00, rec, command=ODS_ERASE_WRITE)
+    assert sf[:5] == bytes([0xF3, 0x00, len(sf) - 1, 0x40, 0x00])
+    assert sf[5] == ODS_ERASE_WRITE
+    assert sf[6:] == rec
+
+
+def test_partition_sfs_iac_escape_when_a_body_byte_is_ff():
+    # A record/field byte of 0xFF must be doubled so Telnet carries it as data.
+    sf = outbound_3270ds(0x00, bytes([0x11, 0xFF, 0x40]))
+    assert _iac_escape(sf).count(b"\xff\xff") == 1
+    # A partition id of 0x7E and small sizes have no 0xFF, so escaping is a no-op.
+    cp = create_partition(pid=0x7E, rows=24, cols=80)
+    assert _iac_escape(cp) == cp
+
+
+def test_partitions_supported_gates_on_alpha_part_capability():
+    with_cap = replace(server.parse_terminal_type("IBM-3278-2-E"),
+                       query_caps=frozenset({QR_ALPHA_PART}))
+    without = server.parse_terminal_type("IBM-3278-2-E")
+    assert partitions_supported(with_cap) is True
+    assert partitions_supported(without) is False
+
+
+def test_inbound_partition_is_the_active_partition_context():
+    # A standard AID reply carries no inline partition id; the originating
+    # partition is the host's active partition (INPID) tracked on the model.
+    m = server.parse_terminal_type("IBM-3278-2-E")
+    assert inbound_partition(m) == 0                       # implicit partition
+    assert inbound_partition(replace(m, active_partition=2)) == 2
+
+
+# ── Load Programmed Symbols (#308) ───────────────────────────────────────────
+
+def test_load_programmed_symbols_basic_bytes():
+    # F3 + [len][len] 06 <flags> <lcid> <char> <rws> <symbols…>. Basic form: flags
+    # low 5 bits carry the TYPE, no extended-parameter block. len counts itself.
+    sf = load_programmed_symbols(lcid=0x41, start_code=0x41, rws=1,
+                                 symbols=bytes(range(8)), load_type=LPS_TYPE1)
+    assert sf[:7] == bytes([0xF3, 0x00, 0x0F, 0x06, LPS_TYPE1, 0x41, 0x41])
+    assert sf[7] == 0x01                                   # rws
+    assert sf[8:] == bytes(range(8))                       # symbol (dot-matrix) data
+    assert (sf[1] << 8 | sf[2]) == len(sf) - 1
+
+
+def test_load_programmed_symbols_flags_pack_clear_skip_and_type():
+    # CLEAR (bit1), SKIP (bit2) and the TYPE (bits 3-7) all pack into byte 3.
+    sf = load_programmed_symbols(0x41, 0x41, clear=True, skip_suppress=True,
+                                 load_type=LPS_TYPE3)
+    flags = sf[4]
+    assert flags & LPS_FLAG_CLEAR and flags & LPS_FLAG_SKIP
+    assert (flags & 0x1F) == LPS_TYPE3
+    assert not (flags & LPS_FLAG_EXTENDED)                 # basic form
+
+
+def test_load_programmed_symbols_extended_form():
+    # Passing ext_params sets the EXTENDED flag and inserts a [p-length][params]
+    # block (p-length counts itself) between byte 6 (rws) and the symbol data.
+    sf = load_programmed_symbols(0x41, 0x41, rws=0, symbols=b"\xff",
+                                 ext_params=bytes([0x00, 0x09, 0x00, 0x0C]))
+    assert sf[4] & LPS_FLAG_EXTENDED
+    # body: 06 flags 41 41 00 | 05 00 09 00 0C | FF   (p-length 0x05 = 4 params + itself)
+    assert sf[8] == 0x05 and sf[9:13] == bytes([0x00, 0x09, 0x00, 0x0C])
+    assert sf[13:] == b"\xff"
+
+
+def test_load_programmed_symbols_free_storage_lcid_ff():
+    # LCID 0xFF frees the set's storage; that 0xFF must be IAC-escaped on the wire.
+    sf = load_programmed_symbols(lcid=0xFF, start_code=0x41)
+    assert sf[5] == 0xFF
+    assert _iac_escape(sf).count(b"\xff\xff") == 1
+
+
+def test_select_char_set_is_an_sa_order():
+    # SA (0x28) + char-set attribute type (0x43) + LCID selects the loaded set for
+    # the following characters; CS_BASE (0x00) restores the base EBCDIC set.
+    assert select_char_set(0x41) == bytes([0x28, XA_CHARSET, 0x41])
+    assert select_char_set(CS_BASE) == bytes([0x28, XA_CHARSET, 0x00])
+
+
+def test_programmed_symbols_supported_gates_on_charsets_capability():
+    with_cap = replace(server.parse_terminal_type("IBM-3278-2-E"),
+                       query_caps=frozenset({QR_CHARSETS}))
+    without = server.parse_terminal_type("IBM-3278-2-E")
+    assert programmed_symbols_supported(with_cap) is True
+    assert programmed_symbols_supported(without) is False
 
 
 # ── the reply parser ─────────────────────────────────────────────────────────

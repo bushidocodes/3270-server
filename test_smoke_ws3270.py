@@ -543,6 +543,57 @@ def test_ws3270_accepts_erase_reset_structured_field():
     assert "ERASE RESET OK" in out, out[-1500:]
 
 
+def test_ws3270_accepts_create_partition_structured_field():
+    """A real emulator accepts a Create Partition Write Structured Field (#307).
+
+    x3270/ws3270 implements Create Partition for partition 0 (the implicit
+    partition). We prepend a Create Partition SF (id 0x0C, model-2 sized) to a
+    screen; the trace shows ``WriteStructuredField CreatePartition(pid=0x00,…)``
+    with no ``WriteStructuredField error``, and the screen still renders — the
+    headless acceptance is the verification (the viewport geometry isn't separately
+    observable in an Ascii() dump), exactly as for Erase/Reset (#102)."""
+    _require_emulator()
+    from screen import Screen, Text
+
+    scr = Screen().add(Text(1, 1, "CREATE PART OK"))
+    record = (server._iac_escape(server.create_partition(pid=0, rows=24, cols=80))
+              + bytes([0xFF, 0xEF]) + scr.render())
+    port = _serve_one_screen(record)
+    out, trace = _drive_traced(port, [
+        "Wait(3,Output)", "Ascii()", "Wait(1,Seconds)", "Quit()",
+    ], model="2", basic=True)
+
+    assert "CreatePartition" in trace, trace[-2000:]
+    assert "WriteStructuredField error" not in trace, trace[-2000:]
+    assert "CREATE PART OK" in out, out[-1500:]
+
+
+def test_ws3270_accepts_outbound_3270ds_structured_field():
+    """A real emulator accepts an Outbound 3270DS Write Structured Field (#307).
+
+    Outbound 3270DS (id 0x40) wraps a normal 3270 write targeted at a partition.
+    We wrap an Erase/Write of a screen (the record minus its own command byte,
+    since the SF supplies the SNA command in byte 4) for partition 0 and serve it;
+    the trace shows ``OutboundDS(0x00) EraseWrite`` with no error, and the wrapped
+    screen renders — proving the emulator unwraps and paints the inner write."""
+    _require_emulator()
+    from screen import Screen, Text
+
+    scr = Screen().add(Text(1, 1, "OUTBOUND DS OK"))
+    inner = scr.render()                       # [command, WCC, orders…]
+    record = server._iac_escape(
+        server.outbound_3270ds(0x00, inner[1:], command=server.ODS_ERASE_WRITE)
+    ) + bytes([0xFF, 0xEF])
+    port = _serve_one_screen(record)
+    out, trace = _drive_traced(port, [
+        "Wait(3,Output)", "Ascii()", "Wait(1,Seconds)", "Quit()",
+    ], model="2", basic=True)
+
+    assert "OutboundDS" in trace, trace[-2000:]
+    assert "WriteStructuredField error" not in trace, trace[-2000:]
+    assert "OUTBOUND DS OK" in out, out[-1500:]
+
+
 def _serve_one_screen(record_bytes):
     """Serve a single hand-built 3270 record to one basic-TN3270 client, then
     half-close: the emulator renders the buffered screen and sees EOF. (Holding
