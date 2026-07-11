@@ -7,7 +7,7 @@ into *data*: a :class:`Screen` is an ordered list of :class:`Text` and
 how to map a client response back to named fields.
 
 It is deliberately built on the existing, tested low-level primitives in
-:mod:`server` (``encode_pack_addr``, ``field_attribute``,
+:mod:`ds3270` (``encode_pack_addr``, ``field_attribute``,
 ``write_control_character``) so behaviour — and the exact bytes on the wire —
 match the hand-written screens exactly. The declarative DTL front-end
 (:mod:`dtl`) targets this model rather than emitting bytes directly.
@@ -18,7 +18,7 @@ from dataclasses import dataclass, field as _dc_field
 from enum import Enum
 from typing import List, Optional, Dict, Tuple
 
-from server import (
+from ds3270 import (
     DisplayIntensity,
     FieldType,
     IAC,

@@ -5,137 +5,33 @@ import binascii
 import threading
 from dataclasses import dataclass, replace
 from datetime import datetime
-from enum import Enum
 
-
-# Per-connection session context. Each client is served on its own thread (see
-# _client_thread), so its colour capability and EBCDIC code page are recorded here
-# once after negotiation and read by the render/encode helpers for every panel —
-# without threading flags through each one. Defined before the encode helpers
-# below because a module-level constant (_BIND_IMAGE) encodes text at import time.
-_session = threading.local()
-
-# The EBCDIC code page used to encode/decode text when a session hasn't chosen a
-# different one. cp037 (US) is what the bundled panels assume, so it stays the
-# default — leaving the mono data stream byte-for-byte unchanged.
-DEFAULT_CODE_PAGE = "cp037"
-
-
-def _session_code_page() -> str:
-    """The current session's EBCDIC code page (thread-local, see :data:`_session`),
-    or the US default when none was negotiated/selected."""
-    return getattr(_session, "code_page", DEFAULT_CODE_PAGE)
-
-
-def to_ebcdic(s: str, code_page: str = None, errors: str = "strict") -> bytes:
-    """Encode text to EBCDIC. Uses the session's code page (thread-local) unless
-    ``code_page`` is given — the explicit argument lets a caller override per field
-    (e.g. a future mixed-CCSID panel) without touching the session default."""
-    return s.encode(code_page or _session_code_page(), errors)
-
-
-def from_ebcdic(b: bytes, code_page: str = None, errors: str = "strict") -> str:
-    """Decode EBCDIC to text, mirroring :func:`to_ebcdic`'s code-page resolution."""
-    return bytes(b).decode(code_page or _session_code_page(), errors)
-
-
-# The largest presentation space the 12-bit coded-address pipeline can serve
-# (#348). A 12-bit address tops out at 4095, but encode_pack_addr sets the top
-# two bits of the high byte (0b11), so addresses 4032-4095 (high chunk 0x3F)
-# would encode to a high byte of 0xFF — a raw Telnet IAC that outbound screens
-# do not escape, mis-framing the record at the terminal. Capping at 0x0FC0
-# keeps 0xFF out of every coded address; every model 2-5 geometry (up to
-# 43x80 = 3440 and 27x132 = 3564 cells) fits well inside it.
-MAX_ADDRESSABLE_CELLS = 0x0FC0   # 4032 cells
-
-
-def encode_pack_addr(row: int, col: int, cols=80) -> bytes:
-    """Encodes a 12-bit 3270 presentation space address from row/col.
-
-    Addresses ``>= MAX_ADDRESSABLE_CELLS`` (0x0FC0) raise: they would need a
-    high byte of 0xFF, a raw Telnet IAC on the wire (see #348)."""
-    addr = row * cols + col
-    if addr < 0 or addr >= MAX_ADDRESSABLE_CELLS:
-        raise ValueError("Address out of range")
-    hi_chunk = (addr >> 6) & 0b0011_1111
-    lo_chunk = addr & 0b0011_1111
-    hi = hi_chunk | 0b1100_0000
-    lo = lo_chunk | 0b0100_0000
-    return bytes([hi, lo])
-
-
-def write_control_character(
-    reset_mdts: bool = True,
-    sound_alarm: bool = False,
-    keyboard_restore: bool = False,
-    start_printer: bool = False,
-) -> bytes:
-    # WCC bit layout per x3270/wc3270 source (3270ds.h):
-    #   0x40 = WCC_RESET_BIT      (always set for normal SNA/LU2 writes)
-    #   0x08 = WCC_START_PRINTER_BIT
-    #   0x04 = WCC_SOUND_ALARM_BIT
-    #   0x02 = WCC_KEYBOARD_RESTORE_BIT  ← unlocks keyboard after AID
-    #   0x01 = WCC_RESET_MDT_BIT         ← clears all MDT flags
-    wcc = 0x40  # WCC_RESET_BIT: always include for LU2 mode
-    if reset_mdts:
-        wcc |= 0x01
-    if sound_alarm:
-        wcc |= 0x04
-    if start_printer:
-        wcc |= 0x08
-    if keyboard_restore:
-        wcc |= 0x02
-    return bytes([wcc])
-
-
-class DisplayIntensity(Enum):
-    NORMAL = 0
-    HIGH = 1
-    HIGHLIGHTED = 2
-    NON_DISPLAY = 3
-
-
-class FieldType(Enum):
-    ALPHANUMERIC = 0
-    NUMERIC = 1
-
-
-_FA_BASE = 0x40  # bit 6: marks byte as a field attribute (valid FA range 0x40-0x7F)
-
-
-def field_attribute(
-    display: DisplayIntensity = DisplayIntensity.NORMAL,
-    protected: bool = True,
-    field_type: FieldType = FieldType.ALPHANUMERIC,
-    mdt: bool = False,
-    detectable: bool = False,
-) -> int:
-    attr = _FA_BASE
-    if display == DisplayIntensity.HIGH:
-        attr |= 0x08          # FA_INT_HIGH_SEL (bits 3-2 = 10): intensified + detectable
-    elif display == DisplayIntensity.HIGHLIGHTED:
-        attr |= 0x04          # FA_INT_NORM_SEL (bits 3-2 = 01)
-    elif display == DisplayIntensity.NON_DISPLAY:
-        attr |= 0x0C          # FA_INT_ZERO_NSEL (bits 3-2 = 11)
-    elif detectable:
-        # A normal-intensity selector-pen/cursor-select DETECTABLE field: display
-        # bits 01 (FA_INT_NORM_SEL). Intensified (HIGH, bits 10) is already
-        # detectable; non-display (bits 11) can never be. See #104.
-        attr |= 0x04
-    if protected:
-        attr |= 0x20          # FA_PROTECT
-    if field_type == FieldType.NUMERIC:
-        attr |= 0x10          # FA_NUMERIC
-    if mdt:
-        attr |= 0x01          # FA_MDT
-    return attr
-
-
-IAC = 0xFF
-EOR = 0xEF
-SBA = 0x11
-SF = 0x1D
-IC = 0x13
+# The pure 3270 codec primitives (order constants, coded-address packing,
+# field-attribute/WCC encoding, EBCDIC conversion, and the per-session
+# thread-local they read) live in ds3270 — the leaf module beneath both this
+# protocol layer and the render model. They are re-exported here so existing
+# call sites and tests (``from server import to_ebcdic`` …) work unchanged.
+from ds3270 import (  # noqa: F401  (re-exported)
+    DEFAULT_CODE_PAGE,
+    DisplayIntensity,
+    EOR,
+    FieldType,
+    IAC,
+    IC,
+    MAX_ADDRESSABLE_CELLS,
+    SBA,
+    SF,
+    _session,
+    encode_pack_addr,
+    field_attribute,
+    from_ebcdic,
+    to_ebcdic,
+    write_control_character,
+)
+# screen and dtl both import DOWN into ds3270 (not into this module), so these
+# module-scope imports are cycle-free (they used to be lazy in-function imports).
+from screen import Color, Field, Highlight, Screen, Text
+from dtl import load_panel, load_message_member
 
 # Telnet commands (used by the TN3270E negotiation and the framing layer below).
 SE = 240
@@ -1151,11 +1047,6 @@ def send_tso_logon(client_socket, error_msg: str = None, model=None, alarm=False
     colour terminal the panel's declared colours are emitted and a logon error
     is shown in red. ``alarm`` sounds the terminal alarm (an error message whose
     <msg> asks for it, e.g. a bad password), the way real ISPF beeps on error."""
-    # Imported lazily: screen.py imports primitives from this module, so a
-    # top-level import here would create a circular import at load time.
-    from dtl import load_panel
-    from screen import Text, Color
-
     color = _wants_color(model)
     screen = load_panel("logon")
     if error_msg:
@@ -1169,9 +1060,6 @@ def send_tso_logon(client_socket, error_msg: str = None, model=None, alarm=False
 
 def send_ispf_menu(client_socket, userid: str, short_msg: str = None):
     """Send the ISPF Primary Option Menu, rendered from panels/ispf.dtl."""
-    from dtl import load_panel
-    from screen import Text
-
     time_str = datetime.now().strftime("%H:%M")
     screen = load_panel("ispf", ZUSER=userid.ljust(8), ZTIME=time_str)
     if short_msg:
@@ -1197,8 +1085,6 @@ def _update_menu_message(client_socket, screen, short_msg):
     overwrites a longer previous one, and the cursor is returned to the command
     field. ``screen`` is the Screen from the last full render (unchanged layout),
     reused to locate the command field."""
-    from screen import Text
-
     color = getattr(_session, "color", False)
     text = (short_msg or "")[:_MENU_MSG_WIDTH].ljust(_MENU_MSG_WIDTH)
     msg_item = Text(_MENU_MSG_ROW, _MENU_MSG_COL, text, DisplayIntensity.HIGH)
@@ -1281,8 +1167,6 @@ def _show_command_shell(client_socket):
     """ISPF option 6: a TSO Command Shell. Loops reading a command from the
     panel's <cmdarea>, running it, and showing the response, until the user
     presses PF3 (or PF1 for help). Enter runs the typed command and stays."""
-    from dtl import load_panel
-
     msg = ""
     while True:
         screen = load_panel("command", CMDMSG=msg)
@@ -1383,9 +1267,6 @@ def _show_browse(client_socket, member: str, path: str, verb: str = "BROWSE",
     footer rule on the last row, paging with PF7/PF8; PF3/PF15 returns to the
     entry panel. On a larger terminal (model 3/4/5) the panel is drawn on the
     alternate screen, so a taller/wider screen shows more lines per page."""
-    from dtl import load_panel
-    from screen import Text, DisplayIntensity
-
     rows, cols = _screen_size(model)
     alternate = rows > 24 or cols > 80     # bigger than the 24x80 default space
     page = rows - 2                        # row 0 is the header, the last row the footer
@@ -1432,8 +1313,6 @@ def _show_view(client_socket, entry_panel: str = "viewentry", verb: str = "BROWS
     """ISPF option 1 (View) / option 2 (Edit): prompt for a panel-library member
     on ``entry_panel`` and open its source (as ``verb`` — BROWSE or EDIT). An
     unknown member is reported via &VIEWMSG; PF3/PF15 returns."""
-    from dtl import load_panel
-
     msg = ""
     while True:
         screen = load_panel(entry_panel, VIEWMSG=msg)
@@ -1458,9 +1337,6 @@ def _show_member_list(client_socket, model=None):
     that member's source. PF7/PF8 page the list; PF3/PF15 returns. On a larger
     terminal (model 3/4/5) the list is drawn on the alternate screen, so more
     members are shown per page."""
-    from dtl import load_panel
-    from screen import Text, DisplayIntensity
-
     rows, cols = _screen_size(model)
     alternate = rows > 24 or cols > 80
     # The auto-flowed <lstfld> data rows start at row 5; leave the last two rows
@@ -1520,8 +1396,6 @@ def _show_dialog_test(client_socket, userid=None, model=None):
     (read-only, dlgtest.dtl); PF5 opens the Table Input scratch panel, which
     exercises the ``<lstfld>`` table-input read-back (#249). Enter redisplays;
     PF3/PF15 returns to the Primary Option Menu. PF1 shows help."""
-    from dtl import load_panel
-
     while True:
         screen = load_panel("dlgtest", rows=_dialog_vars(userid, model))
         action = _await_action(client_socket, screen)
@@ -1543,10 +1417,6 @@ def _show_table_input(client_socket, model=None):
 
     The rows are re-seeded from the read-back on each Enter, so what the user
     typed persists across redisplays (the table holds its state, like TBDISPL)."""
-    from dtl import load_panel
-
-    from screen import Field
-
     rows = [{"tkey": "", "tval": ""} for _ in range(4)]
     msg = ""
     while True:
@@ -1599,8 +1469,6 @@ def _show_submenu(client_socket, panel_name: str, initial=None, userid=None,
     ``initial`` pre-selects a sub-option without displaying the menu first, so a
     dotted jump from the parent (``3.1``) lands straight on the leaf; PF3 from
     there falls back to this menu."""
-    from dtl import load_panel
-
     msg = ""
     pending = (initial or "").strip().upper() or None
     while True:
@@ -1652,8 +1520,6 @@ def _show_help(client_socket, panel_name: str):
     then a window of its content lines is drawn below the fixed title, with a
     "More: - +" scroll indicator on the last row. Enter or PF3 dismisses it."""
     import dataclasses
-    from dtl import load_panel
-    from screen import Screen, Text
 
     HELP_ROWS, HELP_COLS = 24, 80
     VIRT = 500  # a virtual depth tall enough that no bundled help panel clips
@@ -1719,8 +1585,6 @@ def _show_overlay(client_socket, panel_name: str, rows=None, enter_returns=True)
     display) sets it False so Enter just redisplays and only PF3/PF15 exits —
     the way ISPF treats those panels.
     """
-    from dtl import load_panel
-
     abc_idx = None  # which action-bar choice the cursor is parked on, or None
     while True:
         screen = load_panel(panel_name, rows=rows)
@@ -1778,7 +1642,6 @@ def _pdc_item_text(row, col, number, item, inner):
     An unavailable item (DTL ``<pdc unavail>``) drops to NORMAL intensity — the
     3270's only sub-high de-emphasis — and never underlines a mnemonic, matching how
     ``<choice unavail>`` greys a selection choice."""
-    from screen import Text, Highlight
     label = item["label"]
     t = f"{number}. {label}"
     framed = "|" + (" " + t).ljust(inner) + "|"
@@ -1802,8 +1665,6 @@ def _show_pulldown(client_socket, screen, choice):
     item and Enter is pressed; ``""`` if the pull-down is closed without a
     selection; or ``None`` if the client disconnected.
     """
-    from screen import Text
-
     pdc = choice["pdc"]
     # <pdsep> entries are non-selectable divider rows; only the real choices are
     # numbered (the numbering runs continuously across a separator).
@@ -2426,7 +2287,6 @@ def _messages():
     """Lazily load and cache the TSO message catalog (messages/tsomsgs.dtl)."""
     global _message_catalog
     if _message_catalog is None:
-        from dtl import load_message_member  # lazy: avoid circular import
         _message_catalog = load_message_member("tsomsgs")
     return _message_catalog
 
