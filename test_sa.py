@@ -79,3 +79,51 @@ def test_rich_screen_render_threads_color():
     scr = Screen().add(Text.rich(1, 0, [("a", Color.RED), ("b", None)]))
     assert SA not in scr.render(color=False)
     assert SA in scr.render(color=True)
+
+
+# ── the trailing reset (#345) ────────────────────────────────────────────────
+# SA sets the current character attribute for every character stored after it
+# in the whole write — SBA/SF/SFE do not clear it — so a rich field whose last
+# run left a non-default attribute must reset it to 0x00 ("use the field
+# attribute") or its colour bleeds into every item rendered after it.
+
+def test_rich_resets_fg_after_last_coloured_run():
+    rich = Text.rich(3, 2, [("Note:", Color.GREEN), (" body", None)], role="text")
+    out = _render(rich, color=True)
+    # The field's runs end green (base role colour), so the field must close
+    # with an SA foreground reset — and it must come after the last run's SA.
+    reset = bytes([SA, XA_FOREGROUND, 0x00])
+    assert reset in out
+    assert out.rindex(reset) > out.rindex(bytes([SA, XA_FOREGROUND, Color.GREEN.value]))
+
+
+def test_rich_resets_highlight_after_last_highlighted_run():
+    rich = Text.rich(1, 0, [("hi", Color.TURQUOISE, Highlight.REVERSE)])
+    out = _render(rich, color=True)
+    assert out.endswith(bytes([SA, XA_FOREGROUND, 0x00, SA, XA_HIGHLIGHT, 0x00]))
+
+
+def test_rich_skips_redundant_reset_when_last_run_is_default():
+    # The last run already emitted SA fg/hl 0x00 (no colour, no base), so a
+    # trailing reset would be redundant — none is emitted.
+    rich = Text.rich(1, 0, [("X", Color.RED), (" plain", None)])
+    out = _render(rich, color=True)
+    assert out.count(bytes([SA, XA_FOREGROUND, 0x00])) == 1
+    assert out.count(bytes([SA, XA_HIGHLIGHT, 0x00])) == 2
+
+
+def test_following_field_keeps_its_own_colour():
+    # A coloured note heading followed by the panel title: the title's SFE
+    # carries white and no green SA survives past the note's field (#345).
+    scr = (Screen()
+           .add(Text.rich(3, 2, [("Note:", Color.GREEN), (" body", None)], role="text"))
+           .add(Text(1, 30, "PANEL TITLE", role="title")))
+    out = scr.render(color=True)
+    title_sfe = out.index(bytes([SFE, 0x02, 0xC0]), out.index(b"\x28"))
+    # Between the rich field's last SA and the title's field start the
+    # foreground was reset, so the title's characters take the field attribute.
+    assert bytes([SA, XA_FOREGROUND, 0x00]) in out[:title_sfe]
+    last_sa_fg = out.rindex(bytes([SA, XA_FOREGROUND]))
+    assert out[last_sa_fg + 2] == 0x00
+    # And the title field itself still asserts its own (white) colour.
+    assert bytes([XA_FOREGROUND, Color.WHITE.value]) in out[title_sfe:]
