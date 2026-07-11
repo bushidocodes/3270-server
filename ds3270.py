@@ -140,3 +140,46 @@ EOR = 0xEF
 SBA = 0x11
 SF = 0x1D
 IC = 0x13
+
+
+# AID (attention identifier) byte -> key name. Pure codec vocabulary: the first
+# byte of every inbound 3270 reply names the key that submitted it. Shared by
+# the protocol layer (reply parsing/logging in :mod:`server`) and the
+# application (:mod:`session`), which routes on the decoded name.
+_AID_CODES = {
+    0x60: "No AID",
+    0x7D: "Enter",
+    0x7E: "CursorSelect",   # selector-pen / Cursor Select attention (#104)
+    0x6D: "Clear",
+    0x6C: "PA1",
+    0x6E: "PA2",
+    0x6B: "PA3",
+    0xF1: "PF1",
+    0xF2: "PF2",
+    0xF3: "PF3",
+    0xF4: "PF4",
+    0xF5: "PF5",
+    0xF6: "PF6",
+    0xF7: "PF7",
+    0xF8: "PF8",
+    0xF9: "PF9",
+    0x7A: "PF10",
+    0x7B: "PF11",
+    0x7C: "PF12",
+    0xC1: "PF13",
+    0xC2: "PF14",
+    0xC3: "PF15",
+    0xC4: "PF16",
+    0xC5: "PF17",
+    0xC6: "PF18",
+    0xC7: "PF19",
+    0xC8: "PF20",
+    0xC9: "PF21",
+    0x4A: "PF22",
+    0x4B: "PF23",
+    0x4C: "PF24",
+}
+
+
+def aid_to_string(aid: int):
+    return _AID_CODES.get(aid, f"Unknown AID {hex(aid)}")

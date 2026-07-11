@@ -528,16 +528,18 @@ def test_run_pdc_action_leaves_on_exit_family():
 
 
 def test_run_pdc_action_help_shows_overlay_and_stays():
-    import server
+    import session
     from server import _run_pdc_action
     from screen import Screen
     scr = Screen()
     scr.help = "tsohelp"
     shown = []
-    orig = server._show_overlay
-    server._show_overlay = lambda sock, name, **kw: shown.append(name)
+    # _run_pdc_action's overlay call resolves inside session.py (#351), so the
+    # stub must be installed there rather than on server's re-export.
+    orig = session._show_overlay
+    session._show_overlay = lambda transport, name, **kw: shown.append(name)
     try:
         assert _run_pdc_action(MagicMock(), scr, "help") is False        # bare
     finally:
-        server._show_overlay = orig
+        session._show_overlay = orig
     assert shown == ["tsohelp"]
