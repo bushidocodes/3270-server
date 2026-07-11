@@ -176,7 +176,7 @@ def test_ispf_dtl_option_field_and_title():
     # recorded as the command field at the same address as before (2*80 + 14).
     assert s.field_addr("ZCMD") == 2 * 80 + 14
     assert s.command_field is not None
-    assert s.command_field.data_addr == 2 * 80 + 14
+    assert s.command_field.data_addr(s.width) == 2 * 80 + 14
     assert s.title == "ISPF Primary Option Menu"
 
 
@@ -1987,9 +1987,9 @@ def test_read_table_rows_keeps_rows_distinct_despite_shared_datavar():
     modified = {}
     for f in cells:
         if f.name == "k" and f.row_index == 1:
-            modified[f.data_addr] = "Z"
+            modified[f.data_addr(s.width)] = "Z"
         if f.name == "v" and f.row_index == 0:
-            modified[f.data_addr] = "9"
+            modified[f.data_addr(s.width)] = "9"
     out = s.read_table_rows(modified)
     # one dict per displayed model row; modified cells override, others keep the
     # originally rendered value (the field default)
@@ -2022,7 +2022,8 @@ def test_lstcol_caps_on_folds_typed_value_to_uppercase_on_readback():
              if isinstance(f, Field) and f.row_index is not None}
     assert cells["k"].caps is True and cells["v"].caps is False
     # client types lowercase into both cells
-    modified = {cells["k"].data_addr: "abc", cells["v"].data_addr: "xyz"}
+    modified = {cells["k"].data_addr(s.width): "abc",
+                cells["v"].data_addr(s.width): "xyz"}
     out = s.read_table_rows(modified)
     # the caps column is folded, the plain column is left as typed
     assert out == [{"k": "ABC", "v": "xyz"}]
@@ -2036,7 +2037,7 @@ def test_lstcol_caps_default_off():
     cell = next(f for f in s.items
                 if isinstance(f, Field) and f.row_index is not None)
     assert cell.caps is False
-    assert s.read_table_rows({cell.data_addr: "abc"}) == [{"k": "abc"}]
+    assert s.read_table_rows({cell.data_addr(s.width): "abc"}) == [{"k": "abc"}]
 
 
 def _required_table(rows):
@@ -2065,7 +2066,7 @@ def test_required_blank_on_modified_row_is_an_error():
     cells = [f for f in s.items if isinstance(f, Field) and f.row_index is not None]
     # user types into row 0's Value only (row 0 modified, its Key still blank);
     # row 1 is left entirely untouched
-    modified = {f.data_addr: "hello"
+    modified = {f.data_addr(s.width): "hello"
                 for f in cells if f.name == "v" and f.row_index == 0}
     errors = s.table_required_errors(modified)
     assert errors == [(0, "k", "KEYREQ")]
@@ -2075,7 +2076,7 @@ def test_required_satisfied_when_cell_filled():
     # The required cell is non-blank on the modified row → no error.
     s = _required_table([{"k": "", "v": ""}])
     cells = [f for f in s.items if isinstance(f, Field) and f.row_index is not None]
-    modified = {f.data_addr: ("KEY1" if f.name == "k" else "val")
+    modified = {f.data_addr(s.width): ("KEY1" if f.name == "k" else "val")
                 for f in cells if f.row_index == 0}
     assert s.table_required_errors(modified) == []
 
@@ -2943,9 +2944,9 @@ def test_list_column_help_is_cursor_sensitive():
     cell = {(it.text if isinstance(it, Text) else it.name): it
             for it in s.items if getattr(it, "role", None) == "cell"}
     # help_for takes a buffer address inside the cell's data span.
-    assert s.help_for(cell["IBMUSER"].data_addr + 1) == "userhelp"   # output cell
-    assert s.help_for(cell["amt"].data_addr + 1) == "amthelp"        # input cell
-    assert s.help_for(cell["z"].data_addr + 1) is None               # no column help
+    assert s.help_for(cell["IBMUSER"].data_addr(s.width) + 1) == "userhelp"   # output cell
+    assert s.help_for(cell["amt"].data_addr(s.width) + 1) == "amthelp"        # input cell
+    assert s.help_for(cell["z"].data_addr(s.width) + 1) is None               # no column help
 
 
 def test_list_column_position_pins_column():
@@ -5855,7 +5856,7 @@ def test_cmdarea_datavar_override_and_command_value():
         'Option ===></cmdarea></panel>'
     )
     assert s.command_field.name == "OPT"
-    addr = s.command_field.data_addr
+    addr = s.command_field.data_addr(s.width)
     assert s.command_value({addr: "3   "}) == "3   "
     assert s.command_value({}) is None
 

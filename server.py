@@ -1060,12 +1060,17 @@ _CREDENTIALS = {
 }
 # Passwords are stored and compared uppercase (default RACF behavior without MIXEDCASE option)
 
-# Field addresses (row * 80 + col_after_sf) for fields the server reads back.
+# Field addresses (row * width + col_after_sf) for fields the server reads back.
+# The logon and ISPF menu panels always render on the *default* 24x80
+# presentation space, so their addresses use that width (a panel shown on a
+# wider alternate screen must use Screen.field_addr, which keys by the real
+# Screen.width — see #347).
 # TSO logon panel (auto-flow, panels/logon.dtl): the LOGON-parameter entry fields
 # are in the left column with the SF (attribute) byte at col 15, data at col 16 —
 # Userid on row 4, Password row 5, Procedure row 6. These must track logon.dtl;
 # they are also what redact_fields() masks, so a stale password address would leak
 # the password into the debug log.
+DEFAULT_COLS = 80
 LOGON_USERID_SF_COL = 15
 LOGON_USERID_ROW = 4
 LOGON_PASSWORD_SF_COL = 15
@@ -1073,14 +1078,14 @@ LOGON_PASSWORD_ROW = 5
 LOGON_PROC_SF_COL = 15
 LOGON_PROC_ROW = 6
 
-LOGON_USERID_ADDR = LOGON_USERID_ROW * 80 + (LOGON_USERID_SF_COL + 1)
-LOGON_PASSWORD_ADDR = LOGON_PASSWORD_ROW * 80 + (LOGON_PASSWORD_SF_COL + 1)
-LOGON_PROC_ADDR = LOGON_PROC_ROW * 80 + (LOGON_PROC_SF_COL + 1)
+LOGON_USERID_ADDR = LOGON_USERID_ROW * DEFAULT_COLS + (LOGON_USERID_SF_COL + 1)
+LOGON_PASSWORD_ADDR = LOGON_PASSWORD_ROW * DEFAULT_COLS + (LOGON_PASSWORD_SF_COL + 1)
+LOGON_PROC_ADDR = LOGON_PROC_ROW * DEFAULT_COLS + (LOGON_PROC_SF_COL + 1)
 
 # ISPF menu: Option ===> input SF at col 13, data at col 14
 ISPF_OPTION_SF_COL = 13
 ISPF_OPTION_ROW = 2
-ISPF_OPTION_ADDR = ISPF_OPTION_ROW * 80 + (ISPF_OPTION_SF_COL + 1)
+ISPF_OPTION_ADDR = ISPF_OPTION_ROW * DEFAULT_COLS + (ISPF_OPTION_SF_COL + 1)
 
 
 def redact_fields(fields):

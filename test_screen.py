@@ -155,6 +155,7 @@ def test_selected_designators_reads_toggled_selection_fields():
     a = Field(row=5, col=10, length=6, designator="?", name="north")
     b = Field(row=6, col=10, length=6, designator="?", name="south")
     s.add(a).add(b)
-    selected = s.selected_designators({a.data_addr: ">YES", b.data_addr: "?"})
+    selected = s.selected_designators({a.data_addr(s.width): ">YES",
+                                       b.data_addr(s.width): "?"})
     assert [it.name for it in selected] == ["north"]
     assert s.selected_designators({}) == []          # nothing modified → nothing selected

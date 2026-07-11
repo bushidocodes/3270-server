@@ -4402,7 +4402,7 @@ class _DTLParser(HTMLParser):
                 # Record how to read this multi-select mark field back.
                 self.screen.selection_fields.append(
                     {"value": match, "name": a.get("name", "").strip(),
-                     "addr": mark.data_addr}
+                     "addr": mark.data_addr(self.screen.width)}
                 )
             else:
                 # Single-select: remember which row this choice renders on, so the
