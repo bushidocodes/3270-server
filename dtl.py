@@ -608,103 +608,7 @@ class _DTLParser(HTMLParser):
         if handler is not None:
             handler(self, tag, a)
             return
-        if tag == "selfld":
-            ctx = self._areas[-1] if self._areas else None
-            # ISPDTLC block spacing: a flowed selection field gets a leading blank
-            # line (like a paragraph), then counts as content for the next block.
-            self._skip_blank_before(a)
-            if ctx is not None:
-                ctx["had_content"] = True
-            # The choice columns are offsets within the selection field, measured
-            # from its origin column — the enclosing flow box's column (so a flowed
-            # <selfld>, e.g. a dir=horiz column, shifts with the box). The number
-            # sits at the origin, the keyword one gap past a 2-wide number, the
-            # description one gap past that.
-            origin = ctx["col"] if ctx else 1
-            base = origin - 1
-            self._selfld = {
-                "row": ctx["row"] if ctx else 0,
-                "numcol": base + 1,
-                "namecol": base + 4,
-                "desccol": base + 21,
-                "numwidth": 2,
-                # Auto-layout: a keyword-less <choice> puts its description at the
-                # keyword column (right after the number) rather than the far
-                # description column.
-                "auto_cols": True,
-                "numintensity": DisplayIntensity.HIGH,
-                # DTL COLOR on a <selfld> colours its choices; a <choice> may
-                # override with its own COLOR.
-                "color": self._color(a),
-                "ctx": ctx,
-                "start_idx": len(self.screen.items),
-                # TYPE=MULTI is a multiple-selection field: each choice gets its
-                # own 1-char mark field (instead of a number the user types on a
-                # command line), so several choices can be selected at once. SINGLE
-                # (the default), MENU, MODEL and TUTOR keep the numbered layout.
-                "multi": str(a.get("type", "single")).strip().lower() == "multi",
-                "name": (a.get("name") or "").strip(),
-                "count": 0,
-                # FCHOICE is the number assigned to the first auto-numbered choice
-                # (default 1); FCHOICE=0 numbers the choices 0..n-1, as the ISPF
-                # primary menu does (option 0 = Settings). #128.
-                "fchoice": self._opt_int(a.get("fchoice"), 1),
-                # The field-prompt text (between <selfld ...> and the first
-                # <choice>) — a caption above the list (PMTLOC=ABOVE, default) or
-                # beside it (PMTLOC=BEFORE). Captured here, emitted before the first
-                # choice. Empty (the bundled numbered menus) → nothing rendered.
-                "origin": origin,
-                "pmtloc": str(a.get("pmtloc", "above")).strip().lower(),
-                "pmtwidth": self._opt_int(a.get("pmtwidth")),
-                # SELWIDTH sizes the selection entry; absent → the enclosing
-                # <dtacol>'s SELWIDTH default (#122).
-                "selwidth": (self._opt_int(a["selwidth"]) if "selwidth" in a
-                             else (ctx.get("selwidth") if ctx else None)),
-                # PAD/PADC fill the selection entry; OUTLINE draws box lines around
-                # it (applied to the field the user types into — the single-select
-                # input field or each MULTI mark field). None → the plain defaults.
-                "pad": self._pad_char(a),
-                "outline": self._outline(a),
-                # Multi-column choice grid (#128): CHOICECOLS columns, each
-                # CHOICEDEPTH rows deep (choices fill down each column in turn —
-                # column-major; row-major when no depth is given). CWIDTHS='w1 w2..'
-                # sets each column's stride. SELFMT=START|END aligns the selection
-                # entry within the selection width. DEPTH/EXTEND size the field.
-                "choicecols": self._opt_int(a.get("choicecols"), 1) or 1,
-                "choicedepth": self._opt_int(a.get("choicedepth")),
-                "cwidths": [int(w) for w in str(a.get("cwidths", "")).split()
-                            if w.isdigit()],
-                "selfmt": str(a.get("selfmt", "start")).strip().lower(),
-                "seldepth": (self._opt_int(a["depth"])
-                             if "depth" in a and str(a["depth"]).strip() != "*"
-                             else None),
-                "extend": str(a.get("extend", "off")).strip().lower(),
-                "field_row0": None,     # the row the first choice lands on
-                "grid_maxrow": None,
-                "prompt_chars": [],
-                "prompt_done": False,
-            }
-            sf = self._selfld
-            # A standard single-choice field (TYPE=SINGLE, the default; not
-            # MENU/MODEL/TUTOR/MULTI) whose choices are auto-numbered (no explicit
-            # NUM) and which has no explicit grid follows the CHOICE reference
-            # figure: a selection input field precedes the first choice, and each
-            # choice is numbered "N." (number + period). Decided on the first
-            # choice (its NUM tells us). Explicit NUM / columns keep the fixed grid.
-            sf["single_eligible"] = (sf["auto_cols"] and not sf["multi"]
-                                     and sf["choicecols"] <= 1
-                                     and str(a.get("type", "single")).strip().lower()
-                                     == "single")
-            # ENTWIDTH is 2 | n | 'e1 e2...en'; we take a single width (the list
-            # form falls back to the default 2).
-            sf["entwidth"] = self._opt_int(a.get("entwidth"), 2)
-            sf["auto_single"] = False
-            sf["period"] = False
-        elif tag == "dtafldd":
-            # The authentic data-field description (prompt) child of a field.
-            if self._tag in _FIELD_TAGS:
-                self._in_dtafldd, self._dtafldd = True, []
-        elif tag == "keyl":
+        if tag == "keyl":
             # NAME identifies the keylist (referenced by <panel keylist=name>);
             # APPLID is the application it belongs to. Both are metadata recorded
             # on the Screen so the dialog can name/scope its keylist.
@@ -861,52 +765,6 @@ class _DTLParser(HTMLParser):
             self._in_varlist = True
         elif tag == "vardcl":
             self._emit_vardcl(a)
-        elif tag == "lstfld":
-            # A scrollable list/table: <lstcol> columns, optionally grouped under
-            # a <lstgrp> heading. We render the static column header structure
-            # (group headings + column headings); model data rows are populated
-            # by the table service at runtime, so there are none to lay out here.
-            ctx = self._areas[-1] if self._areas else None
-            self._lstfld = {
-                "cols": [], "groups": [], "ctx": ctx,
-                "row": ctx["row"] if ctx else 0,
-                "col": ctx["col"] if ctx else 1,
-                "div": a.get("div", "none"),   # divider after each model set (raw)
-            }
-            self._lstgrp = None
-            self._lstgrp_stack = []
-            # SCROLLVAR puts a "Scroll ===>" amount field on the command line; the
-            # <cmdarea> (coded after the list) picks this up when it renders.
-            if a.get("scrollvar"):
-                self._scroll = {
-                    "var": a["scrollvar"],
-                    "help": self._field_help(a and {"help": a.get("scrvhelp", "")}),
-                    "tab": str(a.get("scrolltab", "")).strip().lower() == "yes",
-                    "caps": str(a.get("scrcaps", "")).strip().lower() == "on",
-                }
-        elif tag == "lstgrp":
-            if self._lstfld is None:
-                raise DTLError("<lstgrp> outside of a <lstfld>")
-            hv = a.get("headline")
-            # HEADLINE=YES|DASH both draw the group's dashed rule (under NOGRAPHIC
-            # they are identical); NO / absent draws the heading text alone.
-            headline = "headline" in a and (
-                hv is None or str(hv).lower() in ("yes", "dash", "true", "1", "headline")
-            )
-            align = a.get("align", "center").lower()
-            # <lstgrp> nests: a group may contain child groups for a second heading
-            # row. Track the open groups on a stack so a column binds to the
-            # innermost group and each group records its parent and nesting depth.
-            parent = self._lstgrp_stack[-1] if self._lstgrp_stack else None
-            self._lstgrp = {"heading": "", "headline": headline, "align": align,
-                            "parent": parent, "depth": parent["depth"] + 1 if parent else 1}
-            self._lstgrp_stack.append(self._lstgrp)
-            self._lstfld["groups"].append(self._lstgrp)
-            self._tag, self._attrs, self._chars = "lstgrp", a, []  # capture heading
-        elif tag == "lstcol":
-            if self._lstfld is None:
-                raise DTLError("<lstcol> outside of a <lstfld>")
-            self._tag, self._attrs, self._chars = "lstcol", a, []  # capture heading
         elif tag == "msgmbr":
             self._in_msgmbr = True
             self._msgmbr_name = a.get("name", "")
@@ -1445,6 +1303,158 @@ class _DTLParser(HTMLParser):
     def _start_ga(self, tag, a):
         self._emit_ga(a)
 
+    # ── start handlers: fields, selection & list fields ──────────────────────
+    # <selfld> (selection/menu choices), <dtafldd> (a field's prompt child) and
+    # the scrollable table elements <lstfld>/<lstgrp>/<lstcol>. (<dtafld>/
+    # <cmdarea>/<choice> themselves are captured content tags — _start_content.)
+
+    def _start_selfld(self, tag, a):
+        ctx = self._areas[-1] if self._areas else None
+        # ISPDTLC block spacing: a flowed selection field gets a leading blank
+        # line (like a paragraph), then counts as content for the next block.
+        self._skip_blank_before(a)
+        if ctx is not None:
+            ctx["had_content"] = True
+        # The choice columns are offsets within the selection field, measured
+        # from its origin column — the enclosing flow box's column (so a flowed
+        # <selfld>, e.g. a dir=horiz column, shifts with the box). The number
+        # sits at the origin, the keyword one gap past a 2-wide number, the
+        # description one gap past that.
+        origin = ctx["col"] if ctx else 1
+        base = origin - 1
+        self._selfld = {
+            "row": ctx["row"] if ctx else 0,
+            "numcol": base + 1,
+            "namecol": base + 4,
+            "desccol": base + 21,
+            "numwidth": 2,
+            # Auto-layout: a keyword-less <choice> puts its description at the
+            # keyword column (right after the number) rather than the far
+            # description column.
+            "auto_cols": True,
+            "numintensity": DisplayIntensity.HIGH,
+            # DTL COLOR on a <selfld> colours its choices; a <choice> may
+            # override with its own COLOR.
+            "color": self._color(a),
+            "ctx": ctx,
+            "start_idx": len(self.screen.items),
+            # TYPE=MULTI is a multiple-selection field: each choice gets its
+            # own 1-char mark field (instead of a number the user types on a
+            # command line), so several choices can be selected at once. SINGLE
+            # (the default), MENU, MODEL and TUTOR keep the numbered layout.
+            "multi": str(a.get("type", "single")).strip().lower() == "multi",
+            "name": (a.get("name") or "").strip(),
+            "count": 0,
+            # FCHOICE is the number assigned to the first auto-numbered choice
+            # (default 1); FCHOICE=0 numbers the choices 0..n-1, as the ISPF
+            # primary menu does (option 0 = Settings). #128.
+            "fchoice": self._opt_int(a.get("fchoice"), 1),
+            # The field-prompt text (between <selfld ...> and the first
+            # <choice>) — a caption above the list (PMTLOC=ABOVE, default) or
+            # beside it (PMTLOC=BEFORE). Captured here, emitted before the first
+            # choice. Empty (the bundled numbered menus) → nothing rendered.
+            "origin": origin,
+            "pmtloc": str(a.get("pmtloc", "above")).strip().lower(),
+            "pmtwidth": self._opt_int(a.get("pmtwidth")),
+            # SELWIDTH sizes the selection entry; absent → the enclosing
+            # <dtacol>'s SELWIDTH default (#122).
+            "selwidth": (self._opt_int(a["selwidth"]) if "selwidth" in a
+                         else (ctx.get("selwidth") if ctx else None)),
+            # PAD/PADC fill the selection entry; OUTLINE draws box lines around
+            # it (applied to the field the user types into — the single-select
+            # input field or each MULTI mark field). None → the plain defaults.
+            "pad": self._pad_char(a),
+            "outline": self._outline(a),
+            # Multi-column choice grid (#128): CHOICECOLS columns, each
+            # CHOICEDEPTH rows deep (choices fill down each column in turn —
+            # column-major; row-major when no depth is given). CWIDTHS='w1 w2..'
+            # sets each column's stride. SELFMT=START|END aligns the selection
+            # entry within the selection width. DEPTH/EXTEND size the field.
+            "choicecols": self._opt_int(a.get("choicecols"), 1) or 1,
+            "choicedepth": self._opt_int(a.get("choicedepth")),
+            "cwidths": [int(w) for w in str(a.get("cwidths", "")).split()
+                        if w.isdigit()],
+            "selfmt": str(a.get("selfmt", "start")).strip().lower(),
+            "seldepth": (self._opt_int(a["depth"])
+                         if "depth" in a and str(a["depth"]).strip() != "*"
+                         else None),
+            "extend": str(a.get("extend", "off")).strip().lower(),
+            "field_row0": None,     # the row the first choice lands on
+            "grid_maxrow": None,
+            "prompt_chars": [],
+            "prompt_done": False,
+        }
+        sf = self._selfld
+        # A standard single-choice field (TYPE=SINGLE, the default; not
+        # MENU/MODEL/TUTOR/MULTI) whose choices are auto-numbered (no explicit
+        # NUM) and which has no explicit grid follows the CHOICE reference
+        # figure: a selection input field precedes the first choice, and each
+        # choice is numbered "N." (number + period). Decided on the first
+        # choice (its NUM tells us). Explicit NUM / columns keep the fixed grid.
+        sf["single_eligible"] = (sf["auto_cols"] and not sf["multi"]
+                                 and sf["choicecols"] <= 1
+                                 and str(a.get("type", "single")).strip().lower()
+                                 == "single")
+        # ENTWIDTH is 2 | n | 'e1 e2...en'; we take a single width (the list
+        # form falls back to the default 2).
+        sf["entwidth"] = self._opt_int(a.get("entwidth"), 2)
+        sf["auto_single"] = False
+        sf["period"] = False
+
+    def _start_dtafldd(self, tag, a):
+        # The authentic data-field description (prompt) child of a field.
+        if self._tag in _FIELD_TAGS:
+            self._in_dtafldd, self._dtafldd = True, []
+
+    def _start_lstfld(self, tag, a):
+        # A scrollable list/table: <lstcol> columns, optionally grouped under
+        # a <lstgrp> heading. We render the static column header structure
+        # (group headings + column headings); model data rows are populated
+        # by the table service at runtime, so there are none to lay out here.
+        ctx = self._areas[-1] if self._areas else None
+        self._lstfld = {
+            "cols": [], "groups": [], "ctx": ctx,
+            "row": ctx["row"] if ctx else 0,
+            "col": ctx["col"] if ctx else 1,
+            "div": a.get("div", "none"),   # divider after each model set (raw)
+        }
+        self._lstgrp = None
+        self._lstgrp_stack = []
+        # SCROLLVAR puts a "Scroll ===>" amount field on the command line; the
+        # <cmdarea> (coded after the list) picks this up when it renders.
+        if a.get("scrollvar"):
+            self._scroll = {
+                "var": a["scrollvar"],
+                "help": self._field_help(a and {"help": a.get("scrvhelp", "")}),
+                "tab": str(a.get("scrolltab", "")).strip().lower() == "yes",
+                "caps": str(a.get("scrcaps", "")).strip().lower() == "on",
+            }
+
+    def _start_lstgrp(self, tag, a):
+        if self._lstfld is None:
+            raise DTLError("<lstgrp> outside of a <lstfld>")
+        hv = a.get("headline")
+        # HEADLINE=YES|DASH both draw the group's dashed rule (under NOGRAPHIC
+        # they are identical); NO / absent draws the heading text alone.
+        headline = "headline" in a and (
+            hv is None or str(hv).lower() in ("yes", "dash", "true", "1", "headline")
+        )
+        align = a.get("align", "center").lower()
+        # <lstgrp> nests: a group may contain child groups for a second heading
+        # row. Track the open groups on a stack so a column binds to the
+        # innermost group and each group records its parent and nesting depth.
+        parent = self._lstgrp_stack[-1] if self._lstgrp_stack else None
+        self._lstgrp = {"heading": "", "headline": headline, "align": align,
+                        "parent": parent, "depth": parent["depth"] + 1 if parent else 1}
+        self._lstgrp_stack.append(self._lstgrp)
+        self._lstfld["groups"].append(self._lstgrp)
+        self._tag, self._attrs, self._chars = "lstgrp", a, []  # capture heading
+
+    def _start_lstcol(self, tag, a):
+        if self._lstfld is None:
+            raise DTLError("<lstcol> outside of a <lstfld>")
+        self._tag, self._attrs, self._chars = "lstcol", a, []  # capture heading
+
     def _close_skip(self):
         """Leave the current non-rendering block. A <source>'s accumulated text is
         handed to _emit_source (ZSEL routing); the rest is discarded."""
@@ -1508,33 +1518,6 @@ class _DTLParser(HTMLParser):
         if handler is not None:
             handler(self, tag)
             return
-        if tag == "selfld":
-            # Advance the enclosing flow past the choices just laid out.
-            sf = self._selfld
-            if sf:
-                self._emit_selfld_prompt(sf)   # a prompt-only selfld still shows it
-            if sf and sf.get("choicecols", 1) > 1 and sf.get("grid_maxrow") is not None:
-                # A multi-column grid tracked its deepest row; resume below it. #128.
-                sf["row"] = sf["grid_maxrow"] + 1
-            if sf and sf.get("field_row0") is not None:
-                # DEPTH reserves a fixed height for the field; EXTEND fills to the
-                # panel foot. Both measured from the field's first row. #128.
-                if sf.get("seldepth"):
-                    sf["row"] = max(sf["row"], sf["field_row0"] + sf["seldepth"])
-                if sf.get("extend") in ("on", "force"):
-                    sf["row"] = max(sf["row"], self.screen.depth - self._bmargin)
-            if sf and sf.get("ctx") is not None:
-                ctx = sf["ctx"]
-                if ctx.get("dir") == "horiz":
-                    self._flow_horiz(ctx, sf.get("start_idx", len(self.screen.items)))
-                else:
-                    ctx["row"] = sf["row"]
-            self._selfld = None
-            return
-        if tag == "dtafldd":
-            if self._in_dtafldd:
-                self._in_dtafldd, self._dtafldd = False, "".join(self._dtafldd)
-            return
         if tag == "keyi":
             self._finalize_keyi()
             return
@@ -1595,19 +1578,6 @@ class _DTLParser(HTMLParser):
             return
         if tag == "xlatl":
             self._end_xlatl()
-            return
-        if tag == "lstgrp":
-            # Pop back to the enclosing group (nested <lstgrp>); the open <lstcol>,
-            # if any, was flushed above and bound to this group.
-            if self._lstgrp_stack:
-                self._lstgrp_stack.pop()
-            self._lstgrp = self._lstgrp_stack[-1] if self._lstgrp_stack else None
-            return
-        if tag == "lstfld":
-            if self._lstfld is not None:
-                self._emit_lstfld()
-            self._lstfld, self._lstgrp = None, None
-            self._lstgrp_stack = []
             return
         if tag == "varlist":
             self._in_varlist = False
@@ -1764,6 +1734,52 @@ class _DTLParser(HTMLParser):
         self._da = None
         return
 
+    # ── end handlers: fields, selection & list fields ────────────────────────
+
+    def _end_selfld(self, tag):
+        # Advance the enclosing flow past the choices just laid out.
+        sf = self._selfld
+        if sf:
+            self._emit_selfld_prompt(sf)   # a prompt-only selfld still shows it
+        if sf and sf.get("choicecols", 1) > 1 and sf.get("grid_maxrow") is not None:
+            # A multi-column grid tracked its deepest row; resume below it. #128.
+            sf["row"] = sf["grid_maxrow"] + 1
+        if sf and sf.get("field_row0") is not None:
+            # DEPTH reserves a fixed height for the field; EXTEND fills to the
+            # panel foot. Both measured from the field's first row. #128.
+            if sf.get("seldepth"):
+                sf["row"] = max(sf["row"], sf["field_row0"] + sf["seldepth"])
+            if sf.get("extend") in ("on", "force"):
+                sf["row"] = max(sf["row"], self.screen.depth - self._bmargin)
+        if sf and sf.get("ctx") is not None:
+            ctx = sf["ctx"]
+            if ctx.get("dir") == "horiz":
+                self._flow_horiz(ctx, sf.get("start_idx", len(self.screen.items)))
+            else:
+                ctx["row"] = sf["row"]
+        self._selfld = None
+        return
+
+    def _end_dtafldd(self, tag):
+        if self._in_dtafldd:
+            self._in_dtafldd, self._dtafldd = False, "".join(self._dtafldd)
+        return
+
+    def _end_lstfld(self, tag):
+        if self._lstfld is not None:
+            self._emit_lstfld()
+        self._lstfld, self._lstgrp = None, None
+        self._lstgrp_stack = []
+        return
+
+    def _end_lstgrp(self, tag):
+        # Pop back to the enclosing group (nested <lstgrp>); the open <lstcol>,
+        # if any, was flushed above and bound to this group.
+        if self._lstgrp_stack:
+            self._lstgrp_stack.pop()
+        self._lstgrp = self._lstgrp_stack[-1] if self._lstgrp_stack else None
+        return
+
     # ── tag-handler registries ───────────────────────────────────────────────
     # {tag -> handler} dispatch tables for handle_starttag / handle_endtag.
     # The *_INLINE registries hold the inline/annotating tags dispatched before
@@ -1815,6 +1831,12 @@ class _DTLParser(HTMLParser):
         "da": _start_da,
         "attr": _start_attr,
         "ga": _start_ga,
+        # fields, selection & list fields
+        "selfld": _start_selfld,
+        "dtafldd": _start_dtafldd,
+        "lstfld": _start_lstfld,
+        "lstgrp": _start_lstgrp,
+        "lstcol": _start_lstcol,
         # text flow & lists
         "ul": _start_list,
         "ol": _start_list,
@@ -1842,6 +1864,11 @@ class _DTLParser(HTMLParser):
         "dtacol": _end_area,
         "fig": _end_fig,
         "da": _end_da,
+        # fields, selection & list fields
+        "selfld": _end_selfld,
+        "dtafldd": _end_dtafldd,
+        "lstfld": _end_lstfld,
+        "lstgrp": _end_lstgrp,
         # text flow & lists
         "nt": _end_note,
         "note": _end_note,
