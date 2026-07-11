@@ -39,10 +39,23 @@ def from_ebcdic(b: bytes, code_page: str = None, errors: str = "strict") -> str:
     return bytes(b).decode(code_page or _session_code_page(), errors)
 
 
+# The largest presentation space the 12-bit coded-address pipeline can serve
+# (#348). A 12-bit address tops out at 4095, but encode_pack_addr sets the top
+# two bits of the high byte (0b11), so addresses 4032-4095 (high chunk 0x3F)
+# would encode to a high byte of 0xFF — a raw Telnet IAC that outbound screens
+# do not escape, mis-framing the record at the terminal. Capping at 0x0FC0
+# keeps 0xFF out of every coded address; every model 2-5 geometry (up to
+# 43x80 = 3440 and 27x132 = 3564 cells) fits well inside it.
+MAX_ADDRESSABLE_CELLS = 0x0FC0   # 4032 cells
+
+
 def encode_pack_addr(row: int, col: int, cols=80) -> bytes:
-    """Encodes a 12-bit 3270 presentation space address from row/col"""
+    """Encodes a 12-bit 3270 presentation space address from row/col.
+
+    Addresses ``>= MAX_ADDRESSABLE_CELLS`` (0x0FC0) raise: they would need a
+    high byte of 0xFF, a raw Telnet IAC on the wire (see #348)."""
     addr = row * cols + col
-    if addr < 0 or addr >= 0x1000:
+    if addr < 0 or addr >= MAX_ADDRESSABLE_CELLS:
         raise ValueError("Address out of range")
     hi_chunk = (addr >> 6) & 0b0011_1111
     lo_chunk = addr & 0b0011_1111
@@ -1034,8 +1047,21 @@ def query_terminal(client_socket, model: "TerminalModel") -> "TerminalModel":
               caps["ge"], caps["dbcs"], base_cgcsgid))
     updates = {"query_caps": frozenset(caps["qcodes"])}
     if caps["usable_cols"] and caps["usable_rows"]:
-        updates["alt_cols"] = caps["usable_cols"]
-        updates["alt_rows"] = caps["usable_rows"]
+        if caps["usable_cols"] * caps["usable_rows"] <= MAX_ADDRESSABLE_CELLS:
+            updates["alt_cols"] = caps["usable_cols"]
+            updates["alt_rows"] = caps["usable_rows"]
+        else:
+            # #348: an -oversize terminal (e.g. 132x60 = 7920 cells) reports a
+            # usable area beyond what 12-bit coded addressing can reach; folding
+            # it in unchecked made the first full-screen render raise (or, for
+            # 4032-4095 cells, put a raw IAC on the wire). Keep the type-string
+            # geometry — the largest model size we know the terminal supports —
+            # so the session stays alive on a screen we can actually address.
+            print("Query Reply: usable area {}x{} exceeds 12-bit addressing "
+                  "({} > {} cells) — keeping {}x{}".format(
+                      caps["usable_cols"], caps["usable_rows"],
+                      caps["usable_cols"] * caps["usable_rows"],
+                      MAX_ADDRESSABLE_CELLS, model.alt_cols, model.alt_rows))
     # The reply is authoritative for colour: a terminal that answers but does not
     # advertise Colour is mono, even if its type string looked extended.
     updates["color"] = caps["color"]
@@ -1961,6 +1987,17 @@ class _SessionLogoff(Exception):
     """Raised to tear the session down after a SYSREQ-session LOGOFF."""
 
 
+def _decode_buffer_addr(hi: int, lo: int) -> int:
+    """Decode an inbound 2-byte 3270 buffer address, honouring both forms
+    (GA23-0059): top two bits of the first byte 01/11 mean a 12-bit *coded*
+    address (6 bits per byte); 00 means a 14-bit *binary* address, which a
+    terminal with more than 4096 cells (e.g. x3270 -oversize) legitimately
+    sends for positions beyond coded range (#348)."""
+    if hi & 0xC0:
+        return ((hi & 0x3F) << 6) | (lo & 0x3F)
+    return ((hi & 0x3F) << 8) | lo
+
+
 def _parse_3270_reply(buffer):
     """Decode one inbound 3270 AID reply into ``(aid, {addr: text}, cursor,
     {addr: [(attr_type, attr_value), …]})``.
@@ -1984,7 +2021,7 @@ def _parse_3270_reply(buffer):
     SF_ORD = 0x1D
     cursor = None
     if len(buffer) >= 3 and buffer[1] not in (SBA_ORD, SF_ORD):
-        cursor = ((buffer[1] & 0x3F) << 6) | (buffer[2] & 0x3F)
+        cursor = _decode_buffer_addr(buffer[1], buffer[2])
 
     results = {}
     field_attrs = {}
@@ -1992,7 +2029,7 @@ def _parse_3270_reply(buffer):
     while i < len(buffer):
         if buffer[i] == SBA_ORD and i + 2 < len(buffer):
             addr_hi, addr_lo = buffer[i + 1], buffer[i + 2]
-            addr = ((addr_hi & 0x3F) << 6) | (addr_lo & 0x3F)
+            addr = _decode_buffer_addr(addr_hi, addr_lo)
             i += 3
             field_bytes = bytearray()
             attrs = []
