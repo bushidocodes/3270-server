@@ -290,6 +290,46 @@ def test_retransmit_gives_up_after_the_retry_cap():
     assert len(sent) == 1 + _RESPONSE_MAX_RETRIES
 
 
+def test_header_seq_bytes_are_iac_escaped():
+    # RFC 2355 §3.5: the data header does not change the IAC rules — a 0xFF in
+    # the header must be doubled. Unescaped, seq 0x00FF makes the client's
+    # Telnet layer swallow the FF plus the following 3270 command byte, and seq
+    # 0xFFEF puts a literal IAC EOR mid-header, ending the record early and
+    # desynchronizing framing (issue #344).
+    from server import TN3270EStream
+
+    def telnet_decode(frame):
+        # A minimal client Telnet layer: IAC IAC is a data 0xFF, IAC EOR ends
+        # the record. Returns (record, record-ended-exactly-at-frame-end).
+        out, i = bytearray(), 0
+        while i < len(frame):
+            b = frame[i]
+            if b == IAC:
+                c = frame[i + 1]
+                if c == IAC:
+                    out.append(IAC)
+                    i += 2
+                    continue
+                assert c == EOR, f"unexpected IAC {c:#x} mid-record"
+                return bytes(out), i + 2 == len(frame)
+            out.append(b)
+            i += 1
+        raise AssertionError("no IAC EOR terminator")
+
+    # Payload as the screen-sending caller builds it: already IAC-escaped (the
+    # doubled FF is a data 0xFF) and IAC-EOR-terminated. The stream must escape
+    # the header it prepends — and only the header (no double-escaping).
+    payload = bytes([ERASE_WRITE]) + b"SCREEN" + bytes([IAC, IAC, IAC, EOR])
+    for seq in (0x00FF, 0xFFEF):
+        st = TN3270EStream(_CountingSock(), responses=True)
+        st._seq = (seq - 1) & 0xFFFF
+        st.sendall(payload)
+        record, ended_at_frame_end = telnet_decode(st._sock.records[-1])
+        assert ended_at_frame_end            # nothing terminated the record early
+        assert record[:5] == bytes([0x00, 0x00, 0x02, (seq >> 8) & 0xFF, seq & 0xFF])
+        assert record[5:] == bytes([ERASE_WRITE]) + b"SCREEN" + bytes([IAC])
+
+
 def test_client_declining_responses_gets_no_response_flag(e_session):
     # A client that agrees an empty FUNCTIONS set gets plain no-response headers.
     leftover, _ = _negotiate_e(e_session, responses=False)

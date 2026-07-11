@@ -300,7 +300,12 @@ class TN3270EStream:
         else:
             # No RESPONSES function: no response wanted, sequence number 0.
             header = bytes([E_DT_3270_DATA, request_flag, E_RSF_NO_RESPONSE, 0x00, 0x00])
-        self._sock.sendall(header + data)
+        # RFC 2355 §3.5: the header does not change the IAC rules — any 0xFF in
+        # it must be doubled. The SEQ-NUMBER bytes deterministically pass through
+        # 0xFF (seq 0x00FF, and 0xFFEF is literally IAC EOR mid-header). ``data``
+        # is already escaped and IAC-EOR-terminated by the caller, so only the
+        # header needs escaping here.
+        self._sock.sendall(_iac_escape(header) + data)
 
     def send_bind(self, image=_BIND_IMAGE):
         """Send the SNA BIND image (DATA-TYPE BIND-IMAGE), binding the LU-LU
@@ -308,20 +313,21 @@ class TN3270EStream:
         3270-DATA until it has seen a BIND (RFC 2355 §10.3), and being bound is
         what lets the client's ATTN key send its Telnet IP. Idempotent."""
         header = bytes([E_DT_BIND_IMAGE, 0x00, E_RSF_NO_RESPONSE, 0x00, 0x00])
-        self._sock.sendall(header + image + bytes([IAC, EOR]))
+        self._sock.sendall(_iac_escape(header + image) + bytes([IAC, EOR]))
         self.bound = True
 
     def send_sscp(self, text):
         """Send an SSCP-LU-DATA message (unformatted EBCDIC text) — used while the
         SYSREQ key has put the session in the SSCP-LU (suspended) mode."""
         header = bytes([E_DT_SSCP_LU_DATA, 0x00, E_RSF_NO_RESPONSE, 0x00, 0x00])
-        self._sock.sendall(header + to_ebcdic(text) + bytes([IAC, EOR]))
+        self._sock.sendall(_iac_escape(header + to_ebcdic(text)) + bytes([IAC, EOR]))
 
     def send_unbind(self, reason=0x01):
         """Tell the client the session has ended (DATA-TYPE UNBIND). 0x01 is
         'normal end of session' (RFC 2355 §10.3)."""
-        self._sock.sendall(bytes([E_DT_UNBIND, 0x00, E_RSF_NO_RESPONSE, 0x00, 0x00,
-                                  reason, IAC, EOR]))
+        self._sock.sendall(_iac_escape(bytes([E_DT_UNBIND, 0x00, E_RSF_NO_RESPONSE,
+                                              0x00, 0x00, reason]))
+                           + bytes([IAC, EOR]))
         self.bound = False
 
     def redisplay(self):
