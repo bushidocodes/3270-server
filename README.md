@@ -252,6 +252,8 @@ panels/         — the screens authored declaratively (ISPF ISPPLIB)
   zuser.dtl       z/OS User applications sub-menu (option 13)
 messages/       — message members, kept apart from panels as on z/OS (ISPMLIB vs ISPPLIB)
   tsomsgs.dtl     TSO/E logon messages (IKJ56425I, IKJ56700I)
+golden/         — recorded outbound byte-streams (corpus.txt), asserted emulator-free by
+                  test_golden.py; regenerate deliberately with golden_corpus.py --write (#354)
 ```
 
 Screens are **data, not code**. `server.py` no longer hand-assembles bytes; `send_tso_logon`
@@ -373,7 +375,19 @@ pass while the server is broken against a real terminal (the Read Partition Quer
 that). `test_smoke_ws3270.py` boots the real server and connects an actual `ws3270`/`s3270`
 emulator to it, logging in and navigating the ISPF panels, so the full TN3270E negotiation, header
 framing, and session loop are exercised end-to-end. It skips automatically when no emulator is
-installed, so it never blocks a machine that doesn't have one.
+installed, so it never blocks a machine that doesn't have one (CI sets `REQUIRE_EMULATOR=1`, which
+turns a missing emulator into a failure rather than a silent skip).
+
+### Golden byte-stream corpus
+
+Because the smoke tests skip without an emulator, the outbound bytes are *also* pinned by a pure,
+emulator-free snapshot (#354): `golden/corpus.txt` records every bundled panel's mono and colour
+render plus two scripted session transcripts (logon errors, the in-place partial-Write menu
+message, the Command Shell, a colour flow) captured from a smoke-verified build, and
+`test_golden.py` rebuilds them in memory and asserts each record byte-for-byte on every run — the
+emulator tests verify the *emulator*, the golden corpus guards the *bytes*. When a byte change is
+intended (a panel edit, a layout or codec change), verify it against a real emulator and re-record
+with `python golden_corpus.py --write`, committing the new fixture with the change.
 
 ## Extending
 
