@@ -29,10 +29,9 @@ from datetime import datetime
 
 from ds3270 import (
     DisplayIntensity,
-    _session,
+    SessionContext,
     aid_to_string,
-    from_ebcdic,
-    to_ebcdic,
+    current_session,
 )
 from screen import Color, Field, Highlight, Screen, Text
 from dtl import load_panel, load_message_member
@@ -94,35 +93,39 @@ def _wants_color(model) -> bool:
     return bool(model is not None and model.color)
 
 
-def _send_screen(transport, screen, color: bool = None):
-    """Render a screen.Screen to the 3270 data stream and send it. ``color``
-    enables extended (colour/highlight) attributes; when omitted it defaults to
-    the session's colour capability (:data:`_session`). A mono session leaves it
+def _send_screen(transport, screen, color: bool = None, ctx: SessionContext = None):
+    """Render a screen.Screen to the 3270 data stream and send it. ``ctx`` is
+    the session's explicit context (#352): its code page encodes the text and
+    its colour capability enables extended (colour/highlight) attributes; a
+    caller that passed none gets the ambient thread-local shim, as before. An
+    explicit ``color`` overrides the context's. A mono session leaves ``color``
     false, so the bytes are unchanged."""
-    if color is None:
-        color = getattr(_session, "color", False)
-    data = screen.render(color=color)
+    if ctx is None:
+        ctx = current_session()
+    data = screen.render(color=color, session=ctx)
     print("TX:", binascii.hexlify(data))
     transport.send(data)
 
 
-def send_tso_logon(transport, error_msg: str = None, model=None, alarm=False):
+def send_tso_logon(transport, error_msg: str = None, model=None, alarm=False,
+                   ctx: SessionContext = None):
     """Send the z/OS TSO/E LOGON panel, rendered from panels/logon.dtl. On a
     colour terminal the panel's declared colours are emitted and a logon error
     is shown in red. ``alarm`` sounds the terminal alarm (an error message whose
     <msg> asks for it, e.g. a bad password), the way real ISPF beeps on error."""
-    color = _wants_color(model)
+    color = ctx.color if ctx is not None else _wants_color(model)
     screen = load_panel("logon")
     if error_msg:
         col = max(0, (80 - len(error_msg)) // 2)
         screen.add(Text(19, col, error_msg, DisplayIntensity.HIGH,
                         color=Color.RED if color else None))
         screen.sound_alarm = alarm
-    _send_screen(transport, screen, color=color)
+    _send_screen(transport, screen, color=color, ctx=ctx)
     return screen
 
 
-def send_ispf_menu(transport, userid: str, short_msg: str = None):
+def send_ispf_menu(transport, userid: str, short_msg: str = None,
+                   ctx: SessionContext = None):
     """Send the ISPF Primary Option Menu, rendered from panels/ispf.dtl."""
     time_str = datetime.now().strftime("%H:%M")
     screen = load_panel("ispf", ZUSER=userid.ljust(8), ZTIME=time_str)
@@ -131,7 +134,7 @@ def send_ispf_menu(transport, userid: str, short_msg: str = None):
         # A menu message is always an error (INVALID OPTION / NOT YET
         # IMPLEMENTED); real ISPF sounds the alarm on it, as the logon errors do.
         screen.sound_alarm = True
-    _send_screen(transport, screen)
+    _send_screen(transport, screen, ctx=ctx)
     return screen
 
 
@@ -140,7 +143,7 @@ def send_ispf_menu(transport, userid: str, short_msg: str = None):
 _MENU_MSG_ROW, _MENU_MSG_COL, _MENU_MSG_WIDTH = 2, 25, 54
 
 
-def _update_menu_message(transport, screen, short_msg):
+def _update_menu_message(transport, screen, short_msg, ctx: SessionContext = None):
     """Redisplay the ISPF menu's message line *in place* with a plain Write,
     the way real ISPF does — so the option the user typed (and the rest of the
     panel) stays put instead of being repainted and cleared.
@@ -149,7 +152,8 @@ def _update_menu_message(transport, screen, short_msg):
     overwrites a longer previous one, and the cursor is returned to the command
     field. ``screen`` is the Screen from the last full render (unchanged layout),
     reused to locate the command field."""
-    color = getattr(_session, "color", False)
+    if ctx is None:
+        ctx = current_session()
     text = (short_msg or "")[:_MENU_MSG_WIDTH].ljust(_MENU_MSG_WIDTH)
     msg_item = Text(_MENU_MSG_ROW, _MENU_MSG_COL, text, DisplayIntensity.HIGH)
     # Beep on an error message (like real ISPF), stay silent when clearing it.
@@ -158,7 +162,7 @@ def _update_menu_message(transport, screen, short_msg):
     if screen.command_field is not None:
         cf = screen.command_field
         cursor_at = (cf.row, cf.col + 1)   # the command field's data start
-    data = screen.render_partial([msg_item], color=color, cursor_at=cursor_at)
+    data = screen.render_partial([msg_item], cursor_at=cursor_at, session=ctx)
     print("TX:", binascii.hexlify(data))
     transport.send(data)
 
@@ -204,13 +208,13 @@ def _run_tso_command(cmd: str) -> str:
 _LEAVE = object()
 
 
-def _await_action(transport, screen):
+def _await_action(transport, screen, ctx: SessionContext = None):
     """Send ``screen`` and read one response, handling the cases every simple
     sub-panel loop shares: a disconnect or a leave key (PF3/PF15) both yield
     :data:`_LEAVE`; PF1 with a help panel shows the help overlay and redisplays.
     Anything else is returned as ``(aid_str, fields, cursor)`` for the caller."""
     while True:
-        _send_screen(transport, screen)
+        _send_screen(transport, screen, ctx=ctx)
         result = transport.read_input()
         if result is None:
             return _LEAVE
@@ -222,19 +226,19 @@ def _await_action(transport, screen):
             # Context-sensitive HELP: the field the cursor is on, else the panel.
             help_panel = screen.help_for(cursor) or screen.help
             if help_panel:
-                _show_help(transport, help_panel)
+                _show_help(transport, help_panel, ctx=ctx)
                 continue  # redisplay this panel after help
         return aid_str, fields, cursor
 
 
-def _show_command_shell(transport):
+def _show_command_shell(transport, ctx: SessionContext = None):
     """ISPF option 6: a TSO Command Shell. Loops reading a command from the
     panel's <cmdarea>, running it, and showing the response, until the user
     presses PF3 (or PF1 for help). Enter runs the typed command and stays."""
     msg = ""
     while True:
         screen = load_panel("command", CMDMSG=msg)
-        action = _await_action(transport, screen)
+        action = _await_action(transport, screen, ctx=ctx)
         if action is _LEAVE:
             return
         _aid_str, fields, _cursor = action
@@ -325,12 +329,14 @@ def _scroll_amount(value: str, page: int, total: int = None,
 
 
 def _show_browse(transport, member: str, path: str, verb: str = "BROWSE",
-                 model=None):
+                 model=None, ctx: SessionContext = None):
     """Browse a panel-library member's source (ISPF option 1 View, or option 2
     Edit with verb="EDIT"). Renders the file's lines below a header, with the
     footer rule on the last row, paging with PF7/PF8; PF3/PF15 returns to the
     entry panel. On a larger terminal (model 3/4/5) the panel is drawn on the
     alternate screen, so a taller/wider screen shows more lines per page."""
+    if ctx is None:
+        ctx = current_session()
     rows, cols = _screen_size(model)
     alternate = rows > 24 or cols > 80     # bigger than the 24x80 default space
     page = rows - 2                        # row 0 is the header, the last row the footer
@@ -354,10 +360,10 @@ def _show_browse(transport, member: str, path: str, verb: str = "BROWSE",
         for i, ln in enumerate(lines[top:top + page]):
             # Browsed content is arbitrary; drop any byte the session's EBCDIC
             # code page can't encode so the render can never crash.
-            safe = from_ebcdic(to_ebcdic(ln, errors="replace"))
+            safe = ctx.decode(ctx.encode(ln, errors="replace"))
             screen.add(Text(1 + i, 0, safe[:line_width]))
         screen.add(Text(rows - 1, 0, foot, DisplayIntensity.HIGH))
-        _send_screen(transport, screen)
+        _send_screen(transport, screen, ctx=ctx)
         result = transport.read_input()
         if result is None:
             return
@@ -373,14 +379,14 @@ def _show_browse(transport, member: str, path: str, verb: str = "BROWSE",
 
 
 def _show_view(transport, entry_panel: str = "viewentry", verb: str = "BROWSE",
-               model=None):
+               model=None, ctx: SessionContext = None):
     """ISPF option 1 (View) / option 2 (Edit): prompt for a panel-library member
     on ``entry_panel`` and open its source (as ``verb`` — BROWSE or EDIT). An
     unknown member is reported via &VIEWMSG; PF3/PF15 returns."""
     msg = ""
     while True:
         screen = load_panel(entry_panel, VIEWMSG=msg)
-        action = _await_action(transport, screen)
+        action = _await_action(transport, screen, ctx=ctx)
         if action is _LEAVE:
             return
         _aid_str, fields, _cursor = action
@@ -389,13 +395,13 @@ def _show_view(transport, entry_panel: str = "viewentry", verb: str = "BROWSE",
             continue
         path = _member_path(member)
         if path:
-            _show_browse(transport, member, path, verb=verb, model=model)
+            _show_browse(transport, member, path, verb=verb, model=model, ctx=ctx)
             msg = ""
         else:
             msg = f"MEMBER {member.upper()} NOT FOUND"
 
 
-def _show_member_list(transport, model=None):
+def _show_member_list(transport, model=None, ctx: SessionContext = None):
     """Utilities -> Library (3.1): the panel-library member list, with ISPF
     point-and-shoot — put the cursor on a member row and press Enter to browse
     that member's source. PF7/PF8 page the list; PF3/PF15 returns. On a larger
@@ -431,7 +437,7 @@ def _show_member_list(transport, model=None):
                 if isinstance(it, Text) and it.text == m["mname"]:
                     member_by_row[it.row] = m["mname"]
                     break
-        action = _await_action(transport, screen)
+        action = _await_action(transport, screen, ctx=ctx)
         if action is _LEAVE:
             return
         aid_str, _fields, cursor = action
@@ -445,33 +451,33 @@ def _show_member_list(transport, model=None):
         elif aid_str == "PF1":   # HELP: the member cell's <lstcol help=>, else panel
             help_panel = screen.help_for(cursor) or screen.help
             if help_panel:
-                _show_help(transport, help_panel)
+                _show_help(transport, help_panel, ctx=ctx)
         elif _is_cursor_select(aid_str) and cursor is not None:
             member = member_by_row.get(cursor // cols)   # width-aware row decode
             if member:
                 path = _member_path(member)
                 if path:
-                    _show_browse(transport, member, path, model=model)
+                    _show_browse(transport, member, path, model=model, ctx=ctx)
         # otherwise just redisplay the current page
 
 
-def _show_dialog_test(transport, userid=None, model=None):
+def _show_dialog_test(transport, userid=None, model=None, ctx: SessionContext = None):
     """ISPF Dialog Test (option 7). Displays the session's dialog variables
     (read-only, dlgtest.dtl); PF5 opens the Table Input scratch panel, which
     exercises the ``<lstfld>`` table-input read-back (#249). Enter redisplays;
     PF3/PF15 returns to the Primary Option Menu. PF1 shows help."""
     while True:
         screen = load_panel("dlgtest", rows=_dialog_vars(userid, model))
-        action = _await_action(transport, screen)
+        action = _await_action(transport, screen, ctx=ctx)
         if action is _LEAVE:
             return
         aid_str, _fields, _cursor = action
         if aid_str == "PF5":
-            _show_table_input(transport)
+            _show_table_input(transport, ctx=ctx)
         # Enter (or any other non-leave key) just redisplays the variables.
 
 
-def _show_table_input(transport, model=None):
+def _show_table_input(transport, model=None, ctx: SessionContext = None):
     """Dialog Test scratch table (tabtest.dtl): an input ``<lstfld>`` the user
     types into. On Enter the modified cells are read back *per model row* via
     :meth:`screen.Screen.read_table_rows` — despite every row's cell in a column
@@ -491,7 +497,7 @@ def _show_table_input(transport, model=None):
                       if isinstance(f, Field) and f.row_index is not None), None)
         if first is not None:
             screen.cursor_at = (first.row, first.col + 1)
-        _send_screen(transport, screen)
+        _send_screen(transport, screen, ctx=ctx)
         result = transport.read_input()
         if result is None:
             return
@@ -502,7 +508,7 @@ def _show_table_input(transport, model=None):
         if aid_str == "PF1":
             help_panel = screen.help_for(cursor) or screen.help
             if help_panel:
-                _show_overlay(transport, help_panel)
+                _show_overlay(transport, help_panel, ctx=ctx)
             continue
         # Read the whole table back per row (modified cells override the rendered
         # defaults) and re-seed from it, so edits persist.
@@ -523,7 +529,7 @@ def _show_table_input(transport, model=None):
 
 
 def _show_submenu(transport, panel_name: str, initial=None, userid=None,
-                  model=None):
+                  model=None, ctx: SessionContext = None):
     """Display a nested selection menu (e.g. option 3, Utilities) and drive it
     like the Primary Option Menu: read the option from the panel's <cmdarea> and
     route it through the panel's own )PROC (Screen.selection_targets, #55). An
@@ -540,7 +546,7 @@ def _show_submenu(transport, panel_name: str, initial=None, userid=None,
         if pending is not None:
             opt, pending = pending, None
         else:
-            action = _await_action(transport, screen)
+            action = _await_action(transport, screen, ctx=ctx)
             if action is _LEAVE:
                 return
             aid_str, fields, cursor = action
@@ -561,7 +567,8 @@ def _show_submenu(transport, panel_name: str, initial=None, userid=None,
         if target is not None and head in screen.selections:
             # A leaf runs its behaviour; EXIT (or a nested return) falls back to
             # this menu, and a declared-but-unhandled leaf reports via &SELMSG.
-            leaving = _run_selection(transport, target, tail, userid, model)
+            leaving = _run_selection(transport, target, tail, userid, model,
+                                     ctx=ctx)
             if leaving:
                 return
             elif leaving is False:
@@ -575,7 +582,7 @@ def _show_submenu(transport, panel_name: str, initial=None, userid=None,
             msg = f"INVALID OPTION: {opt}"
 
 
-def _show_help(transport, panel_name: str):
+def _show_help(transport, panel_name: str, ctx: SessionContext = None):
     """Display a help/tutorial panel, paging it with PF7/PF8 (and PF10/PF11, the
     ISPF PrvPage/NxtPage) when its content overflows the 24-row screen (#281).
 
@@ -596,11 +603,11 @@ def _show_help(transport, panel_name: str):
             if getattr(it, "row", None) is not None and 0 < it.row < VIRT - 4]
     page_h = HELP_ROWS - 2            # rows 1..HELP_ROWS-2 hold content
     if not body:
-        return _show_overlay(transport, panel_name)
+        return _show_overlay(transport, panel_name, ctx=ctx)
     content_top = min(it.row for it in body)
     content_height = max(it.row for it in body) - content_top + 1
     if content_height <= page_h:      # fits on a 24-row screen → unchanged path
-        return _show_overlay(transport, panel_name)
+        return _show_overlay(transport, panel_name, ctx=ctx)
 
     title = [it for it in tall.items if getattr(it, "row", None) == 0]
     max_offset = content_height - page_h
@@ -621,7 +628,7 @@ def _show_help(transport, panel_name: str):
         marker = "More:" + (" -" if more_up else "") + (" +" if more_down else "")
         indicator = (f"{marker}    PF7=Up  PF8=Down  PF3=Return")[:HELP_COLS - 1]
         screen.add(Text(HELP_ROWS - 1, 0, indicator, DisplayIntensity.HIGH))
-        _send_screen(transport, screen)
+        _send_screen(transport, screen, ctx=ctx)
         result = transport.read_input()
         if result is None:
             return
@@ -636,7 +643,8 @@ def _show_help(transport, panel_name: str):
         # any other key just redisplays the current page
 
 
-def _show_overlay(transport, panel_name: str, rows=None, enter_returns=True):
+def _show_overlay(transport, panel_name: str, rows=None, enter_returns=True,
+                  ctx: SessionContext = None):
     """Display an overlay panel (help or sub-panel) and wait for the user to
     leave it. The underlying panel is re-sent by the caller's loop on return —
     mirroring ISPF's PF1 HELP and option-select behaviour.
@@ -655,7 +663,7 @@ def _show_overlay(transport, panel_name: str, rows=None, enter_returns=True):
         if abc_idx is not None and screen.action_bar:
             ch = screen.action_bar[abc_idx % len(screen.action_bar)]
             screen.cursor_at = (ch["row"], ch["col"] + 1)  # on the choice label
-        _send_screen(transport, screen)
+        _send_screen(transport, screen, ctx=ctx)
         result = transport.read_input()
         if result is None:
             return
@@ -668,7 +676,7 @@ def _show_overlay(transport, panel_name: str, rows=None, enter_returns=True):
             # is on, else this panel's own help. (Overlays ignored PF1 before.)
             help_panel = screen.help_for(cursor) or screen.help
             if help_panel:
-                _show_help(transport, help_panel)
+                _show_help(transport, help_panel, ctx=ctx)
             continue
         if screen.action_bar and aid_str in ("PF10", "PF11"):
             # F10/F11 move the cursor left/right along the action-bar choices
@@ -687,10 +695,10 @@ def _show_overlay(transport, panel_name: str, rows=None, enter_returns=True):
             # off a choice it just redisplays.
             choice = screen.action_choice_at(cursor)
             if choice and choice.get("pdc"):
-                action = _show_pulldown(transport, screen, choice)
+                action = _show_pulldown(transport, screen, choice, ctx=ctx)
                 if action is None:
                     return  # client disconnected
-                if _run_pdc_action(transport, screen, action):
+                if _run_pdc_action(transport, screen, action, ctx=ctx):
                     return  # the action left the overlay (e.g. EXIT)
                 continue
             if aid_str == "Enter" and enter_returns:
@@ -722,7 +730,7 @@ def _pdc_item_text(row, col, number, item, inner):
     return Text(row, col, framed, intensity)
 
 
-def _show_pulldown(transport, screen, choice):
+def _show_pulldown(transport, screen, choice, ctx: SessionContext = None):
     """Overlay a choice's pull-down menu and wait for the user to act on it.
 
     Returns the selected pull-down item's action string when the cursor is on an
@@ -769,7 +777,7 @@ def _show_pulldown(transport, screen, choice):
     screen.cursor_at = (land, col + 1)
 
     while True:
-        _send_screen(transport, screen)
+        _send_screen(transport, screen, ctx=ctx)
         result = transport.read_input()
         if result is None:
             return None
@@ -779,14 +787,14 @@ def _show_pulldown(transport, screen, choice):
         on_item = crow in action_by_row and col <= ccol <= col + inner + 1
         if aid_str == "PF1":  # HELP for the item under the cursor
             if on_item and crow in help_by_row:
-                _show_help(transport, help_by_row[crow])
+                _show_help(transport, help_by_row[crow], ctx=ctx)
             continue  # redisplay the pull-down either way
         if _is_cursor_select(aid_str) and on_item:
             return action_by_row[crow]
         return ""  # any other key closes the pull-down without selecting
 
 
-def _run_pdc_action(transport, screen, action) -> bool:
+def _run_pdc_action(transport, screen, action, ctx: SessionContext = None) -> bool:
     """Run a selected pull-down action. Returns True if it should leave the
     overlay (an EXIT-family command), False otherwise (the panel is redisplayed).
 
@@ -796,7 +804,7 @@ def _run_pdc_action(transport, screen, action) -> bool:
     if act in ("exit", "end", "return", "cancel"):
         return True
     if act == "help" and screen.help:
-        _show_help(transport, screen.help)
+        _show_help(transport, screen.help, ctx=ctx)
         return False
     return False  # passthru / unknown / no selection: just redisplay
 
@@ -824,23 +832,25 @@ _LEAVE_COMMANDS = {"EXIT", "END", "RETURN", "LOGOFF"}
 
 def _submenu(panel):
     """A handler that opens a nested selection sub-menu panel (passing the dotted
-    tail through as the sub-menu's initial option, and userid/model through so the
-    sub-menu's own )PROC leaves can run)."""
-    return lambda cs, tail=None, userid=None, model=None, **kw: _show_submenu(
-        cs, panel, initial=tail, userid=userid, model=model)
+    tail through as the sub-menu's initial option, and userid/model/ctx through so
+    the sub-menu's own )PROC leaves can run)."""
+    return lambda cs, tail=None, userid=None, model=None, ctx=None, **kw: \
+        _show_submenu(cs, panel, initial=tail, userid=userid, model=model, ctx=ctx)
 
 
 _SELECTION_HANDLERS = {
-    "settings":   lambda cs, **kw: _show_overlay(cs, "settings"),
-    "workplace":  lambda cs, **kw: _show_overlay(cs, "workplace"),
-    "view":       lambda cs, model=None, **kw: _show_view(cs, model=model),
-    "edit":       lambda cs, model=None, **kw: _show_view(
-                      cs, entry_panel="editentry", verb="EDIT", model=model),
-    "cmdshell":   lambda cs, **kw: _show_command_shell(cs),
-    "dlgtest":    lambda cs, userid=None, model=None, **kw: _show_dialog_test(
-                      cs, userid=userid, model=model),
+    "settings":   lambda cs, ctx=None, **kw: _show_overlay(cs, "settings", ctx=ctx),
+    "workplace":  lambda cs, ctx=None, **kw: _show_overlay(cs, "workplace", ctx=ctx),
+    "view":       lambda cs, model=None, ctx=None, **kw: _show_view(
+                      cs, model=model, ctx=ctx),
+    "edit":       lambda cs, model=None, ctx=None, **kw: _show_view(
+                      cs, entry_panel="editentry", verb="EDIT", model=model, ctx=ctx),
+    "cmdshell":   lambda cs, ctx=None, **kw: _show_command_shell(cs, ctx=ctx),
+    "dlgtest":    lambda cs, userid=None, model=None, ctx=None, **kw: _show_dialog_test(
+                      cs, userid=userid, model=model, ctx=ctx),
     # A utility sub-menu leaf: the Library list (utility.dtl's )PROC routes 1 here).
-    "memberlist": lambda cs, model=None, **kw: _show_member_list(cs, model=model),
+    "memberlist": lambda cs, model=None, ctx=None, **kw: _show_member_list(
+                      cs, model=model, ctx=ctx),
     "utility":    _submenu("utility"),
     "foreground": _submenu("foreground"),
     "batch":      _submenu("batch"),
@@ -859,7 +869,7 @@ def _parse_selection(target):
     return kind.strip().upper(), rest.partition(")")[0].strip()
 
 
-def _run_selection(transport, target, tail, userid, model):
+def _run_selection(transport, target, tail, userid, model, ctx: SessionContext = None):
     """Run the behaviour a )PROC selection string names. ``EXIT`` leaves ISPF;
     ``PANEL(x)``/``PGM(x)`` dispatch to the handler registered for ``x``. Returns
     True to leave, False after running a handler, or None if the target has no
@@ -870,7 +880,7 @@ def _run_selection(transport, target, tail, userid, model):
     handler = _SELECTION_HANDLERS.get(name.lower()) if name else None
     if handler is None:
         return None
-    handler(transport, tail=tail, userid=userid, model=model)
+    handler(transport, tail=tail, userid=userid, model=model, ctx=ctx)
     return False
 
 _message_catalog = None
@@ -884,13 +894,25 @@ def _messages():
     return _message_catalog
 
 
-def run(transport, model=None):
+def run(transport, model=None, ctx: SessionContext = None):
     """Run the TSO/ISPF application for one connection: the logon loop, then the
     ISPF Primary Option Menu loop — lifted verbatim from server.handle_client
     (#351). ``transport`` is the Transport port described in the module
     docstring; ``model`` is the negotiated TerminalModel (only its capability
     attributes are read, so a test may pass ``None`` for a plain 24x80 mono
-    terminal). Returns when the user logs off or the client disconnects."""
+    terminal). ``ctx`` is the explicit session context (#352) threaded through
+    every panel render; a caller that passes none (an unmigrated caller, or a
+    test) gets one assembled from the ambient thread-local shim — with the
+    colour capability taken from ``model`` when one is given, matching what
+    server.handle_client would have installed. Returns when the user logs off
+    or the client disconnects."""
+    if ctx is None:
+        amb = current_session()
+        ctx = SessionContext(
+            code_page=amb.code_page,
+            color=_wants_color(model) if model is not None else amb.color,
+            model=model,
+        )
     while True:
         # Logon loop
         error_msg = None
@@ -899,7 +921,7 @@ def run(transport, model=None):
         userid = None
         while True:
             screen = send_tso_logon(transport, error_msg, model=model,
-                                    alarm=error_alarm)
+                                    alarm=error_alarm, ctx=ctx)
             result = transport.read_input()
             if result is None:
                 return
@@ -918,7 +940,7 @@ def run(transport, model=None):
                 # the panel's general help.
                 help_panel = error_help or screen.help_for(cursor) or screen.help
                 if help_panel:
-                    _show_help(transport, help_panel)
+                    _show_help(transport, help_panel, ctx=ctx)
                     continue
 
             # Validate fields against their <varclass> checks (e.g. SIZE range)
@@ -959,9 +981,9 @@ def run(transport, model=None):
         needs_full_redraw = True
         while True:
             if needs_full_redraw:
-                screen = send_ispf_menu(transport, userid, short_msg)
+                screen = send_ispf_menu(transport, userid, short_msg, ctx=ctx)
             else:
-                _update_menu_message(transport, screen, short_msg)
+                _update_menu_message(transport, screen, short_msg, ctx=ctx)
             result = transport.read_input()
             if result is None:
                 return
@@ -989,7 +1011,7 @@ def run(transport, model=None):
             if cmd == "HELP":
                 help_panel = screen.help_for(cursor) or screen.help
                 if help_panel:
-                    _show_help(transport, help_panel)
+                    _show_help(transport, help_panel, ctx=ctx)
                     continue
 
             # A typed value is a menu selection, a command from the panel's
@@ -1005,7 +1027,8 @@ def run(transport, model=None):
             # reachable by typing it either.
             target = screen.selection_targets.get(head)
             if target is not None and head in screen.selections:
-                leaving = _run_selection(transport, target, tail, userid, model)
+                leaving = _run_selection(transport, target, tail, userid, model,
+                                         ctx=ctx)
                 if leaving:
                     break
                 elif leaving is False:

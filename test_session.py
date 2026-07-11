@@ -12,6 +12,7 @@ import socket as socket_module
 
 import pytest
 
+import ds3270
 import session
 from dtl import load_panel
 from ds3270 import to_ebcdic
@@ -42,10 +43,11 @@ class FakeTransport:
 
 @pytest.fixture(autouse=True)
 def _mono_session(monkeypatch):
-    """Pin the thread-local session context to the mono/cp037 defaults so
-    renders are deterministic regardless of test order."""
-    monkeypatch.setattr(session._session, "color", False, raising=False)
-    monkeypatch.setattr(session._session, "code_page", "cp037", raising=False)
+    """Pin the thread-local shim to the mono/cp037 defaults so a run() that is
+    given no explicit SessionContext derives a deterministic one regardless of
+    test order. (session.py itself no longer reads the thread-local — see #352.)"""
+    monkeypatch.setattr(ds3270._session, "color", False, raising=False)
+    monkeypatch.setattr(ds3270._session, "code_page", "cp037", raising=False)
 
 
 def _forbid_sockets(monkeypatch):
