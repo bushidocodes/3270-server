@@ -590,35 +590,65 @@ class _DTLParser(HTMLParser):
         # ends at that first child tag — bank it and stop capturing (#125).
         if self._grpbox_pending is not None:
             self._finalize_grpbox_title()
-        if tag in ("comment", "copyr", "compopt", "generate", "source"):
-            # Non-rendering blocks. <comment> (a comment), <copyr> (copyright),
-            # <compopt> (ISPDTLC compiler options) and <generate> (a build-time
-            # directive that generates panels/messages from a model) have no
-            # host-display effect in this display server, so their content is
-            # dropped. <source> ()INIT/)PROC logic also renders nothing, but its raw
-            # text is kept for the ZSEL selection routing (see _close_skip). #119.
-            self._skip = [tag, [], a]
+        # Inline/annotating tags (<hp>/<ps>/<scrfld>/…) and non-rendering
+        # directive blocks dispatch BEFORE the implicit flush below: they do not
+        # close the open content element. A handler returns True when it consumed
+        # the tag (an <hp>/<rp> outside a text element declines and falls through
+        # to the ordinary block handling).
+        inline = self._START_INLINE.get(tag)
+        if inline is not None and inline(self, tag, a):
             return
+        # Implicit end tags: a new block element closes the open content element
+        # (DTL omits most end tags). <dtafldd> (a field's prompt/description) and
+        # <lit> (a literal run inside e.g. an <xlati> external) are exceptions —
+        # they are inline children that must not close their parent.
+        if tag not in ("dtafldd", "lit") and self._tag is not None:
+            self._emit_current()
+        handler = self._START_HANDLERS.get(tag)
+        if handler is not None:
+            handler(self, tag, a)
+        # An unregistered tag renders nothing (the implicit flush above still
+        # closed the open content element, as a new block element does).
+
+    # ── start handlers: inline / annotating tags ─────────────────────────────
+    # Dispatched from handle_starttag via _START_INLINE, BEFORE the implicit
+    # flush — these tags do not close the open content element. Each returns
+    # True when it consumed the tag; False falls through to block handling.
+
+    def _inline_start_skip(self, tag, a):
+        # Non-rendering blocks. <comment> (a comment), <copyr> (copyright),
+        # <compopt> (ISPDTLC compiler options) and <generate> (a build-time
+        # directive that generates panels/messages from a model) have no
+        # host-display effect in this display server, so their content is
+        # dropped. <source> ()INIT/)PROC logic also renders nothing, but its raw
+        # text is kept for the ZSEL selection routing (see _close_skip). #119.
+        self._skip = [tag, [], a]
+        return True
+
+    def _inline_start_hp(self, tag, a):
         # An inline <hp> (highlighted phrase) inside a text element does NOT close
         # it — it emphasises a phrase *within* one field. Bank the runs and return
-        # before the implicit-flush below (see _begin_hp / _finalize_runs). A <rp>
+        # before the implicit flush (see _begin_hp / _finalize_runs). A <rp>
         # (reference phrase — a hypertext link to another help panel) is the same
         # kind of inline emphasis; with no explicit emphasis it renders underlined,
         # the CUA point-and-shoot link style.
-        if tag in ("hp", "rp") and (self._tag in _TEXT_TAGS
-                                    or self._tag == "divider"):
-            self._begin_hp(a)
-            if tag == "rp" and self._hp == (None, None, None):
-                self._hp = (None, Highlight.UNDERSCORE, None)
-            return
+        if not (self._tag in _TEXT_TAGS or self._tag == "divider"):
+            return False
+        self._begin_hp(a)
+        if tag == "rp" and self._hp == (None, None, None):
+            self._hp = (None, Highlight.UNDERSCORE, None)
+        return True
+
+    def _inline_start_varsub(self, tag, a):
         # <varsub var=NAME> substitutes a dialog variable inside message text: emit
         # an ISPF ``&NAME.`` reference into the text being captured, resolved at
         # display time (MessageCatalog.format) exactly like a literal &NAME would be.
-        if tag == "varsub":
-            var = a.get("var")
-            if var:
-                self.handle_data(f"&{var}.")
-            return
+        var = a.get("var")
+        if var:
+            self.handle_data(f"&{var}.")
+        return True
+
+    def _inline_start_ps(self, tag, a):
         # <ps> (point-and-shoot): an inline phrase whose text the user can select by
         # cursor — placing the cursor on it and pressing Enter sets VAR to VALUE
         # (before )PROC). Like <hp>/<rp> it does NOT close its parent and its text
@@ -627,27 +657,29 @@ class _DTLParser(HTMLParser):
         # VALUE=* on a <ps> in a <choice> means "the choice's number" (resolved in
         # _emit_choice). The point-and-shoot text is color-emphasised on real ISPF
         # colour terminals; in host/mono it renders like the surrounding text.
-        if tag == "ps":
-            var = a.get("var")
-            if var:
-                self._pending_ps = (var, str(a.get("value", "")))
-                # CSRGRP (cursor group) and DEPTH (rows the phrase spans) have no
-                # host-display effect on a text terminal; record them as metadata.
-                if "csrgrp" in a or "depth" in a:
-                    self.screen.ps_meta.append(
-                        {"var": var, "csrgrp": a.get("csrgrp"),
-                         "depth": self._opt_int(a.get("depth"))})
-            return
+        var = a.get("var")
+        if var:
+            self._pending_ps = (var, str(a.get("value", "")))
+            # CSRGRP (cursor group) and DEPTH (rows the phrase spans) have no
+            # host-display effect on a text terminal; record them as metadata.
+            if "csrgrp" in a or "depth" in a:
+                self.screen.ps_meta.append(
+                    {"var": var, "csrgrp": a.get("csrgrp"),
+                     "depth": self._opt_int(a.get("depth"))})
+        return True
+
+    def _inline_start_chofld(self, tag, a):
         # <chofld> (choice data field): an input field within a <choice> row. The
         # text captured before it is the choice description; the text after it is the
         # field's own description. Both are banked and laid out when the choice is
         # emitted (_emit_choice); like <dtafldd> it does not close its parent.
-        if tag == "chofld":
-            if self._tag == "choice":
-                self._chofld_choicetext = "".join(self._chars)
-                self._chars = []
-                self._pending_chofld = a
-            return
+        if self._tag == "choice":
+            self._chofld_choicetext = "".join(self._chars)
+            self._chars = []
+            self._pending_chofld = a
+        return True
+
+    def _inline_start_scrfld(self, tag, a):
         # <scrfld> (scrollable field): annotates the enclosing <dtafld>/<lstcol>,
         # making it horizontally scrollable — DISPLEN is the field's logical data
         # length (wider than the on-screen window, which stays the field's
@@ -655,11 +687,12 @@ class _DTLParser(HTMLParser):
         # variables. It does not close its parent (attached when the field/column is
         # emitted); finalise an open <dtafldd> capture first so a description isn't
         # swallowed.
-        if tag == "scrfld":
-            if self._in_dtafldd and isinstance(self._dtafldd, list):
-                self._in_dtafldd, self._dtafldd = False, "".join(self._dtafldd)
-            self._pending_scrfld = a
-            return
+        if self._in_dtafldd and isinstance(self._dtafldd, list):
+            self._in_dtafldd, self._dtafldd = False, "".join(self._dtafldd)
+        self._pending_scrfld = a
+        return True
+
+    def _inline_start_assignl(self, tag, a):
         # <assignl>/<assigni> (assignment list): a value→result table attached to
         # the enclosing <dtafld>. Like <scrfld> it annotates the field without
         # closing it — each <assigni value=v result=r> adds a mapping; the finished
@@ -667,728 +700,798 @@ class _DTLParser(HTMLParser):
         # surface syntax for an ISPF )PROC `&destvar = TRANS(&field v,'r' …)`
         # assignment (see #55, docs/dtl-action-routing-plan.md Phase 2 PR B).
         # Finalise an open <dtafldd> capture first so a description isn't swallowed.
-        if tag == "assignl":
-            if self._in_dtafldd and isinstance(self._dtafldd, list):
-                self._in_dtafldd, self._dtafldd = False, "".join(self._dtafldd)
-            self._assignl = {"destvar": a.get("destvar"), "pairs": []}
-            self._pending_assignl = self._assignl
-            return
-        if tag == "assigni":
-            # A VALUE with no RESULT assigns the empty string (ISPF's TRANS default);
-            # a stray <assigni> outside an <assignl> carries nowhere, so drop it.
-            if self._assignl is not None and a.get("value") is not None:
-                self._assignl["pairs"].append((a.get("value"), a.get("result", "")))
-            return
-        # Implicit end tags: a new block element closes the open content element
-        # (DTL omits most end tags). <dtafldd> (a field's prompt/description) and
-        # <lit> (a literal run inside e.g. an <xlati> external) are exceptions —
-        # they are inline children that must not close their parent.
-        if tag not in ("dtafldd", "lit") and self._tag is not None:
-            self._emit_current()
-        if tag in ("ul", "ol", "sl"):
-            # <ul>/<ol> mark each item with a bullet/number; <sl> (simple list)
-            # indents its items with no marker (see _emit_listitem). TEXT= gives
-            # the list a heading line above its items; INDENT shifts the whole list
-            # right; SPACE sets the item-text indentation (YES → 3 cols, else 4),
-            # inherited by every <li> that does not carry its own SPACE (#123).
-            # ISPDTLC also inserts a leading blank line before the list, ahead of any
-            # heading (COMPACT/NOSKIP suppress it — #210).
-            self._skip_blank_before(a)
-            ctx = self._areas[-1] if self._areas else None
+        if self._in_dtafldd and isinstance(self._dtafldd, list):
+            self._in_dtafldd, self._dtafldd = False, "".join(self._dtafldd)
+        self._assignl = {"destvar": a.get("destvar"), "pairs": []}
+        self._pending_assignl = self._assignl
+        return True
+
+    def _inline_start_assigni(self, tag, a):
+        # A VALUE with no RESULT assigns the empty string (ISPF's TRANS default);
+        # a stray <assigni> outside an <assignl> carries nowhere, so drop it.
+        if self._assignl is not None and a.get("value") is not None:
+            self._assignl["pairs"].append((a.get("value"), a.get("result", "")))
+        return True
+
+    # ── start handlers: text flow & lists ────────────────────────────────────
+    # Block-level text: captured content elements (paragraphs, list items,
+    # headings, instructions, …), the list containers that shape them, and the
+    # <textline>/<textseg> title builder.
+
+    def _start_list(self, tag, a):
+        # <ul>/<ol> mark each item with a bullet/number; <sl> (simple list)
+        # indents its items with no marker (see _emit_listitem). TEXT= gives
+        # the list a heading line above its items; INDENT shifts the whole list
+        # right; SPACE sets the item-text indentation (YES → 3 cols, else 4),
+        # inherited by every <li> that does not carry its own SPACE (#123).
+        # ISPDTLC also inserts a leading blank line before the list, ahead of any
+        # heading (COMPACT/NOSKIP suppress it — #210).
+        self._skip_blank_before(a)
+        ctx = self._areas[-1] if self._areas else None
+        indent = self._opt_int(a.get("indent"), 0)
+        heading = str(a.get("text", "")).strip()
+        if ctx is not None and heading:
+            self.screen.add(Text(ctx["row"], ctx["col"] + indent, heading,
+                                 role="text"))
+            ctx["row"] += 2               # heading + a blank line before the items
+        self._lists.append({"type": tag, "n": 0,
+                            "indent": indent,
+                            "space": self._space_indent(a)})
+
+    def _start_notel(self, tag, a):
+        # A note list: a "Notes:" heading (TEXT= override, INTENS/COLOR/HILITE
+        # style it), a blank line, then NUMBERED <li> items (1. 2. …).
+        # ISPDTLC inserts a leading blank line before the heading (COMPACT/
+        # NOSKIP suppress it — #210).
+        self._skip_blank_before(a)
+        ctx = self._areas[-1] if self._areas else None
+        if ctx is not None:
+            heading = (a.get("text") or "Notes:").strip()
             indent = self._opt_int(a.get("indent"), 0)
-            heading = str(a.get("text", "")).strip()
-            if ctx is not None and heading:
-                self.screen.add(Text(ctx["row"], ctx["col"] + indent, heading,
-                                     role="text"))
-                ctx["row"] += 2               # heading + a blank line before the items
-            self._lists.append({"type": tag, "n": 0,
-                                "indent": indent,
-                                "space": self._space_indent(a)})
-        elif tag == "notel":
-            # A note list: a "Notes:" heading (TEXT= override, INTENS/COLOR/HILITE
-            # style it), a blank line, then NUMBERED <li> items (1. 2. …).
-            # ISPDTLC inserts a leading blank line before the heading (COMPACT/
-            # NOSKIP suppress it — #210).
-            self._skip_blank_before(a)
-            ctx = self._areas[-1] if self._areas else None
-            if ctx is not None:
-                heading = (a.get("text") or "Notes:").strip()
-                indent = self._opt_int(a.get("indent"), 0)
-                self.screen.add(Text(ctx["row"], ctx["col"] + indent, heading,
-                                     _intensity(a, "intens"), color=self._text_colour(a),
-                                     highlight=self._hilite(a), role="text"))
-                ctx["row"] += 2               # heading + blank line before the items
-            # SPACE sets the item-text indentation: YES → 3 columns, else 4.
-            self._lists.append({"type": "ol", "n": 0,
-                                "space": self._space_indent(a)})
-        elif tag in ("dl", "parml"):
-            # A definition/parameter list carries its term-column width (tsize)
-            # and break style; <dt>/<dd> (<pt>/<pd>) entries lay out against it.
-            # ISPDTLC inserts a blank line before the list (COMPACT/NOSKIP suppress).
-            self._skip_blank_before(a)
-            # TSIZE='n' | 's1 s2 … sn' → one width per definition-term COLUMN; a
-            # multi-column list codes one <dt> per width (see _emit_defitem).
-            tsizes = [int(p) for p in str(a.get("tsize", "")).split() if p.isdigit()] \
-                or [self._DL_TSIZE]
-            self._lists.append({
-                "type": tag, "n": 0,
-                "tsizes": tsizes,
-                "tsize": tsizes[0],           # first-column width (single-column paths)
-                "col": 0,                     # current term-column index in the entry
-                "seg_row": None,              # next <dtseg> stacking row for this column
-                "break": a.get("break", "none").lower(),
-                "compact": _bool_attr(a, "compact"),  # no blank after a <ddhd> header
-                "indent": self._opt_int(a.get("indent"), 0),  # shift the list right
-                # FORMAT positions the DT term within its TSIZE column.
-                "format": str(a.get("format", "start")).strip().lower(),
-                # DIVEND=YES draws a dashed rule across the list when it closes.
-                "divend": _bool_attr(a, "divend"),
-                "pending": None,
-            })
-        elif tag == "textline":
-            # <textline> builds the panel/help title from its <textseg> segments,
-            # replacing the tag's own title text (see _emit_textline). The empty
-            # title captured before it was just flushed to nothing above.
-            self._textline = []
-        elif tag == "pandef":
-            # <pandef id=…> defines reusable panel defaults (HELP/DEPTH/WIDTH/
-            # KEYLIST/…) applied to any <panel PANDEF=id>. It renders nothing.
-            pid = str(a.get("id", "")).strip().lower()
-            if pid:
-                self._pandefs[pid] = {k: v for k, v in a.items() if k != "id"}
-        elif tag == "helpdef":
-            # <helpdef id=…> is the help-panel analogue of <pandef>: shared help
-            # defaults (HELP/DEPTH/WIDTH/KEYLIST/…) inherited by any <help HELPDEF=id>.
-            # It renders nothing (#54).
-            hid = str(a.get("id", "")).strip().lower()
-            if hid:
-                self._helpdefs[hid] = {k: v for k, v in a.items() if k != "id"}
-        elif tag in ("dtdiv", "dthdiv", "ptdiv"):
-            # A vertical `|` between definition-term (or -heading) columns; the
-            # preceding <dt>/<dthd> was flushed just above, so its column state is set.
-            self._emit_defdiv(tag)
-        if tag in ("panel", "help"):
-            # A <panel PANDEF=id> / <help HELPDEF=id> inherits the named default
-            # block's attributes — the panel's own attributes win (setdefault fills
-            # only what it omits). A panel carries PANDEF, a help panel HELPDEF (#54);
-            # in practice only one is present, so applying both is harmless.
-            for defaults in (self._pandefs.get(str(a.get("pandef", "")).strip().lower()),
-                             self._helpdefs.get(str(a.get("helpdef", "")).strip().lower())):
-                if defaults:
-                    for k, v in defaults.items():
-                        a.setdefault(k, v)
-            # A top-level <help> is itself a (help) panel — same flow root. The
-            # title is the panel's content text (panel-title-text), captured into
-            # screen.title by _finalize_panel_title — not an attribute.
-            self.screen.help = a.get("help")
-            # TITLINE=NO keeps the title as metadata but suppresses its on-screen
-            # line (default YES); see _finalize_panel_title.
-            self._titline = _bool_attr(a, "titline", default=True)
-            # PANEL CURSOR=field-name names the field the cursor starts in; the
-            # replacement for the non-standard field-level cursor= (resolved in
-            # close(), once every field has been emitted).
-            self._panel_cursor = a.get("cursor")
-            # Window/key-list metadata (#125). KEYLIST names the panel's key-list;
-            # WINDOW=YES marks it a pop-up; WINTITLE is the pop-up's title; CURSOR is
-            # the start field. None of these change the rendered field stream — they
-            # are recorded on the Screen so the server/dialog can act on them (frame a
-            # window, activate a key-list, …). Reached both directly and via
-            # <pandef>/<helpdef> inheritance (the setdefault above), so honouring them
-            # here covers both paths.
-            if "keylist" in a:
-                self.screen.keylist_ref = a.get("keylist")
-            if "window" in a:
-                self.screen.window = _bool_attr(a, "window", default=False)
-            if "wintitle" in a:
-                self.screen.window_title = a.get("wintitle")
-            if a.get("cursor"):
-                self.screen.cursor_field = a.get("cursor")
-            # Panel classification / codepage metadata (#125, #117). MENU (a
-            # selection menu), ACTBAR (force an action-bar area), CCSID (codepage)
-            # and EXPAND=xy (the two field-expansion characters) have no host-display
-            # effect on this single-byte text server — recorded so the dialog/
-            # compiler can act on them. IMAP (image map) is GUI-only (dropped).
-            if "menu" in a:
-                self.screen.menu = _bool_attr(a, "menu", default=True)
-            if "actbar" in a:
-                self.screen.actbar = _bool_attr(a, "actbar", default=True)
-            if a.get("ccsid"):
-                self.screen.ccsid = a.get("ccsid")
-            if a.get("expand"):
-                self.screen.expand = a.get("expand")
-            if self._override_cols is not None:
-                self.screen.width = self._override_cols
-            elif "width" in a:
-                w = self._panel_dim(a["width"], self._WIDTH_MIN, self._WIDTH_MAX)
-                if w is not None:
-                    self.screen.width = w
-            if self._override_rows is not None:
-                self.screen.depth = self._override_rows
-            elif "depth" in a:
-                d = self._panel_dim(a["depth"], self._DEPTH_MIN, self._DEPTH_MAX)
-                if d is not None:
-                    self.screen.depth = d
-            # TMARGIN/BMARGIN reserve rows at the top/bottom of the panel: the whole
-            # panel (title + body) starts TMARGIN rows down, and content is kept out
-            # of the last BMARGIN rows. Both default to 0, so an unmarked panel is
-            # byte-for-byte unchanged. #125.
-            self._tmargin = self._opt_int(a.get("tmargin"), 0) or 0
-            self._bmargin = self._opt_int(a.get("bmargin"), 0) or 0
-            # The panel itself is the root flow box: every element flows down
-            # from the top (or from the top margin).
-            self._areas.append(
-                {"row": self._tmargin, "col": 1, "fldgap": 1, "explicit": True,
-                 "parent": None}
-            )
-            self._panel_title = []  # capture the title text that follows
-        elif tag == "selfld":
-            ctx = self._areas[-1] if self._areas else None
-            # ISPDTLC block spacing: a flowed selection field gets a leading blank
-            # line (like a paragraph), then counts as content for the next block.
-            self._skip_blank_before(a)
-            if ctx is not None:
-                ctx["had_content"] = True
-            # The choice columns are offsets within the selection field, measured
-            # from its origin column — the enclosing flow box's column (so a flowed
-            # <selfld>, e.g. a dir=horiz column, shifts with the box). The number
-            # sits at the origin, the keyword one gap past a 2-wide number, the
-            # description one gap past that.
-            origin = ctx["col"] if ctx else 1
-            base = origin - 1
-            self._selfld = {
-                "row": ctx["row"] if ctx else 0,
-                "numcol": base + 1,
-                "namecol": base + 4,
-                "desccol": base + 21,
-                "numwidth": 2,
-                # Auto-layout: a keyword-less <choice> puts its description at the
-                # keyword column (right after the number) rather than the far
-                # description column.
-                "auto_cols": True,
-                "numintensity": DisplayIntensity.HIGH,
-                # DTL COLOR on a <selfld> colours its choices; a <choice> may
-                # override with its own COLOR.
-                "color": self._color(a),
-                "ctx": ctx,
-                "start_idx": len(self.screen.items),
-                # TYPE=MULTI is a multiple-selection field: each choice gets its
-                # own 1-char mark field (instead of a number the user types on a
-                # command line), so several choices can be selected at once. SINGLE
-                # (the default), MENU, MODEL and TUTOR keep the numbered layout.
-                "multi": str(a.get("type", "single")).strip().lower() == "multi",
-                "name": (a.get("name") or "").strip(),
-                "count": 0,
-                # FCHOICE is the number assigned to the first auto-numbered choice
-                # (default 1); FCHOICE=0 numbers the choices 0..n-1, as the ISPF
-                # primary menu does (option 0 = Settings). #128.
-                "fchoice": self._opt_int(a.get("fchoice"), 1),
-                # The field-prompt text (between <selfld ...> and the first
-                # <choice>) — a caption above the list (PMTLOC=ABOVE, default) or
-                # beside it (PMTLOC=BEFORE). Captured here, emitted before the first
-                # choice. Empty (the bundled numbered menus) → nothing rendered.
-                "origin": origin,
-                "pmtloc": str(a.get("pmtloc", "above")).strip().lower(),
-                "pmtwidth": self._opt_int(a.get("pmtwidth")),
-                # SELWIDTH sizes the selection entry; absent → the enclosing
-                # <dtacol>'s SELWIDTH default (#122).
-                "selwidth": (self._opt_int(a["selwidth"]) if "selwidth" in a
-                             else (ctx.get("selwidth") if ctx else None)),
-                # PAD/PADC fill the selection entry; OUTLINE draws box lines around
-                # it (applied to the field the user types into — the single-select
-                # input field or each MULTI mark field). None → the plain defaults.
-                "pad": self._pad_char(a),
-                "outline": self._outline(a),
-                # Multi-column choice grid (#128): CHOICECOLS columns, each
-                # CHOICEDEPTH rows deep (choices fill down each column in turn —
-                # column-major; row-major when no depth is given). CWIDTHS='w1 w2..'
-                # sets each column's stride. SELFMT=START|END aligns the selection
-                # entry within the selection width. DEPTH/EXTEND size the field.
-                "choicecols": self._opt_int(a.get("choicecols"), 1) or 1,
-                "choicedepth": self._opt_int(a.get("choicedepth")),
-                "cwidths": [int(w) for w in str(a.get("cwidths", "")).split()
-                            if w.isdigit()],
-                "selfmt": str(a.get("selfmt", "start")).strip().lower(),
-                "seldepth": (self._opt_int(a["depth"])
-                             if "depth" in a and str(a["depth"]).strip() != "*"
-                             else None),
-                "extend": str(a.get("extend", "off")).strip().lower(),
-                "field_row0": None,     # the row the first choice lands on
-                "grid_maxrow": None,
-                "prompt_chars": [],
-                "prompt_done": False,
-            }
-            sf = self._selfld
-            # A standard single-choice field (TYPE=SINGLE, the default; not
-            # MENU/MODEL/TUTOR/MULTI) whose choices are auto-numbered (no explicit
-            # NUM) and which has no explicit grid follows the CHOICE reference
-            # figure: a selection input field precedes the first choice, and each
-            # choice is numbered "N." (number + period). Decided on the first
-            # choice (its NUM tells us). Explicit NUM / columns keep the fixed grid.
-            sf["single_eligible"] = (sf["auto_cols"] and not sf["multi"]
-                                     and sf["choicecols"] <= 1
-                                     and str(a.get("type", "single")).strip().lower()
-                                     == "single")
-            # ENTWIDTH is 2 | n | 'e1 e2...en'; we take a single width (the list
-            # form falls back to the default 2).
-            sf["entwidth"] = self._opt_int(a.get("entwidth"), 2)
-            sf["auto_single"] = False
-            sf["period"] = False
-        elif tag == "dtafldd":
-            # The authentic data-field description (prompt) child of a field.
-            if self._tag in _FIELD_TAGS:
-                self._in_dtafldd, self._dtafldd = True, []
-        elif tag == "keyl":
-            # NAME identifies the keylist (referenced by <panel keylist=name>);
-            # APPLID is the application it belongs to. Both are metadata recorded
-            # on the Screen so the dialog can name/scope its keylist.
-            self._keylist = {}
-            self._keylist_name = a.get("name")
-            self._keylist_applid = a.get("applid")
-            # HELP names the keylist's help panel; ACTION=UPDATE|DELETE is a
-            # keylist-table maintenance directive (codegen only). Both metadata.
-            self._keylist_help = a.get("help")
-            self._keylist_action = a.get("action")
-        elif tag == "keyi":
-            self._emit_keyi(a)
-        elif tag == "cmdtbl":
-            self._in_cmdtbl = True
-            # APPLID scopes the command table to an application (metadata). SORT is
-            # a compile-time ordering of the table with no host-display effect (the
-            # table renders nothing — it only feeds command recognition). #126.
-            if a.get("applid"):
-                self.screen.commands_applid = a.get("applid")
-        elif tag == "cmd":
-            if not self._in_cmdtbl:
-                raise DTLError("<cmd> outside of a <cmdtbl>")
-            name = a.get("name")
-            if not name:
-                raise DTLError("<cmd> missing required attribute 'name'")
-            self._finalize_cmd_trunc()   # close a previous <cmd> whose end tag was omitted
-            # Truncation comes from a <t> marker in the external name (standard DTL);
-            # ALTDESCR is the command's human description (metadata). trunc starts 0
-            # and a nested <t> sets it (see _finalize_cmd_trunc).
-            self._cur_cmd = {"action": "", "trunc": 0, "descr": a.get("altdescr", "")}
-            self.screen.commands[name.upper()] = self._cur_cmd
-            # Capture the command's external-name text so a nested <t> can mark its
-            # truncation point.
-            self._cmd_chars, self._cmd_tpos = [], None
-        elif tag == "cmdact":
-            # The command action; read on start, since DTL often omits </cmdact>.
-            if self._cur_cmd is not None:
-                self._cur_cmd["action"] = a.get("action", "")
-        elif tag == "t":
-            # A truncation point inside a <cmd> external name: the text before it is
-            # the minimum abbreviation the user must type (<cmd>CANC<t>EL → trunc 4).
-            if self._cmd_chars is not None:
-                self._cmd_tpos = len("".join(self._cmd_chars).strip())
-        elif tag == "ab":
-            # The action bar sits on the top row; its choices are separated by a
-            # fixed gap (the non-standard per-bar gap= attribute has been removed).
-            # ABSEPSTR is the string drawn between the choices (IBM's default is two
-            # blanks; we keep the wider gap when it is absent so bundled panels stay
-            # byte-identical). ABSEPCHAR is the character of the separator *line*
-            # ISPF draws on the row below the bar — both default to nothing shown.
-            self._ab = {"row": 0, "col": 1, "gap": 3, "choices": [],
-                        "absepstr": a.get("absepstr"),
-                        "absepchar": a.get("absepchar"),
-                        # MNEMGEN=YES auto-assigns the first letter of a choice as
-                        # its mnemonic when it carries no explicit <M>. Treated as
-                        # opt-in (absent → off) so existing bare-label action bars
-                        # stay byte-identical; MNEMGEN=NO is also off. #126.
-                        "mnemgen": str(a.get("mnemgen", "")).strip().lower()
-                        == "yes"}
-        elif tag == "abc":
-            if self._ab is None:
-                raise DTLError("<abc> outside of an <ab>")
-            self._end_abc()                     # implicit end of a previous <abc>
-            # PDCVAR names the )PROC variable that receives the selected pull-down
-            # choice number — a dialog-variable concern with no host-display effect;
-            # recorded on the choice model.
-            self._cur_abc = {"chars": [], "pdc": [], "help": self._field_help(a),
-                             "pdcvar": a.get("pdcvar")}
-        elif tag == "pdc":
-            if self._cur_abc is None:
-                raise DTLError("<pdc> outside of an <abc>")
-            self._end_pdc()                     # implicit end of a previous <pdc>
-            # A pull-down item can be conditionally unavailable (shown but not
-            # selectable), mirroring <choice unavail>: UNAVAIL=var greys it when the
-            # variable is true. CHECKVAR=var MATCH=x marks it the *current* setting
-            # (a "> " current-choice indicator) when the variable equals MATCH — the
-            # pull-down analogue of <choice checkvar> landing on the current choice.
-            unavail = "unavail" in a and self._var_truthy(a.get("unavail"))
-            checkvar = a.get("checkvar")
-            match = str(a.get("match", "")).strip().upper()
-            checked = bool(checkvar) and \
-                self._subs.get(str(checkvar).strip().upper(), "").strip().upper() == match
-            # ACC1-3 are GUI keyboard accelerators (e.g. Ctrl+key) shown beside the
-            # item in a GUI client; a text 3270 terminal has no accelerator display,
-            # so they are recorded (GUI-only) but not rendered.
-            acc = [a.get(k) for k in ("acc1", "acc2", "acc3") if a.get(k)]
-            self._cur_pdc = {"chars": [], "action": "",
-                             "help": self._field_help(a),
-                             "unavail": unavail, "checked": checked,
-                             "acc": acc}
-        elif tag == "action":
-            # A pull-down choice's command: <pdc>label<action run=cmd>. RUN= names
-            # the command the choice runs. SETVAR/TOGVAR model the variable an action
-            # assigns/toggles (an ISPF "Settings"-style on/off pull-down item): SETVAR
-            # sets VAR to VALUE; TOGVAR flips VAR between VALUE1 and VALUE2. TYPE is
-            # the action kind (CMD | PGM | PANEL | EXIT), defaulting to CMD.
-            if self._cur_pdc is not None:
-                self._cur_pdc["action"] = a.get("run") or self._cur_pdc["action"]
-                if a.get("type"):
-                    self._cur_pdc["type"] = str(a["type"]).strip().lower()
-                if a.get("parm"):
-                    self._cur_pdc["parm"] = a["parm"]
-                if a.get("setvar"):
-                    self._cur_pdc["setvar"] = (a["setvar"], a.get("value", "1"))
-                if a.get("togvar"):
-                    self._cur_pdc["togvar"] = (
-                        a["togvar"], a.get("value1", "0"), a.get("value2", "1"))
-                # APPLCMD/NEWAPPL/MODE/LANG and the other ACTION forms are ISPF
-                # SELECT/command-dispatch semantics (how/where the command runs) —
-                # no host-display effect. Recorded so the action model is lossless.
-                for k in ("applcmd", "newappl", "mode", "lang"):
-                    if a.get(k):
-                        self._cur_pdc[k] = a[k]
-        elif tag == "pdsep":
-            # A separator line within an action-bar pull-down: close the choice
-            # above it (DTL omits end tags) and record a divider row between the
-            # pull-down choices. Rendered by _show_pulldown when the menu opens.
-            if self._cur_abc is None:
-                raise DTLError("<pdsep> outside of an <abc>")
-            self._end_pdc()
-            self._cur_abc["pdc"].append({"separator": True})
-        elif tag == "m":
-            # <M> marks the mnemonic character of an action-bar choice or pull-down
-            # item — the shortcut letter ISPF shows highlighted. Record where it
-            # falls in the label text being captured (offset in the raw chars).
-            if self._cur_pdc is not None:
-                self._cur_pdc["mnemonic"] = len("".join(self._cur_pdc["chars"]))
-            elif self._cur_abc is not None:
-                self._cur_abc["mnemonic"] = len("".join(self._cur_abc["chars"]))
-        elif tag == "varclass":
-            self._emit_varclass(a)
-        elif tag == "checkl":
-            if self._cur_varclass is None:
-                raise DTLError("<checkl> outside of a <varclass>")
-            self._checkl = {"msg": a.get("msg"), "checks": []}
-        elif tag == "checki":
-            if self._checkl is None:
-                raise DTLError("<checki> outside of a <checkl>")
-            self._tag, self._attrs, self._chars = "checki", a, []
-        elif tag == "xlatl":
-            if self._cur_varclass is None:
-                raise DTLError("<xlatl> outside of a <varclass>")
-            self._xlatl = {
-                "msg": a.get("msg"),
-                "upper": str(a.get("format", "")).strip().lower() == "upper",
-                "items": [],
-                "pairs": [],     # (internal value, external/displayed) translations
-            }
-        elif tag == "xlati":
-            if self._xlatl is None:
-                raise DTLError("<xlati> outside of an <xlatl>")
-            self._tag, self._attrs, self._chars = "xlati", a, []
-        elif tag == "varlist":
-            self._in_varlist = True
-        elif tag == "vardcl":
-            self._emit_vardcl(a)
-        elif tag == "lstfld":
-            # A scrollable list/table: <lstcol> columns, optionally grouped under
-            # a <lstgrp> heading. We render the static column header structure
-            # (group headings + column headings); model data rows are populated
-            # by the table service at runtime, so there are none to lay out here.
-            ctx = self._areas[-1] if self._areas else None
-            self._lstfld = {
-                "cols": [], "groups": [], "ctx": ctx,
-                "row": ctx["row"] if ctx else 0,
-                "col": ctx["col"] if ctx else 1,
-                "div": a.get("div", "none"),   # divider after each model set (raw)
-            }
-            self._lstgrp = None
-            self._lstgrp_stack = []
-            # SCROLLVAR puts a "Scroll ===>" amount field on the command line; the
-            # <cmdarea> (coded after the list) picks this up when it renders.
-            if a.get("scrollvar"):
-                self._scroll = {
-                    "var": a["scrollvar"],
-                    "help": self._field_help(a and {"help": a.get("scrvhelp", "")}),
-                    "tab": str(a.get("scrolltab", "")).strip().lower() == "yes",
-                    "caps": str(a.get("scrcaps", "")).strip().lower() == "on",
-                }
-        elif tag == "lstgrp":
-            if self._lstfld is None:
-                raise DTLError("<lstgrp> outside of a <lstfld>")
-            hv = a.get("headline")
-            # HEADLINE=YES|DASH both draw the group's dashed rule (under NOGRAPHIC
-            # they are identical); NO / absent draws the heading text alone.
-            headline = "headline" in a and (
-                hv is None or str(hv).lower() in ("yes", "dash", "true", "1", "headline")
-            )
-            align = a.get("align", "center").lower()
-            # <lstgrp> nests: a group may contain child groups for a second heading
-            # row. Track the open groups on a stack so a column binds to the
-            # innermost group and each group records its parent and nesting depth.
-            parent = self._lstgrp_stack[-1] if self._lstgrp_stack else None
-            self._lstgrp = {"heading": "", "headline": headline, "align": align,
-                            "parent": parent, "depth": parent["depth"] + 1 if parent else 1}
-            self._lstgrp_stack.append(self._lstgrp)
-            self._lstfld["groups"].append(self._lstgrp)
-            self._tag, self._attrs, self._chars = "lstgrp", a, []  # capture heading
-        elif tag == "lstcol":
-            if self._lstfld is None:
-                raise DTLError("<lstcol> outside of a <lstfld>")
-            self._tag, self._attrs, self._chars = "lstcol", a, []  # capture heading
-        elif tag == "da":
-            # A data area: a free-form region whose body text carries inline
-            # attribute characters (defined by nested <attr>) that start colour/
-            # type fields, like the classic ISPF )ATTR + )BODY model.
-            ctx = self._areas[-1] if self._areas else None
-            self._da = {
-                "row": ctx["row"] if ctx else 0,
-                "col": ctx["col"] if ctx else 1,
-                "attrs": {}, "body": [],
-                "ctx": ctx,
-                # DEPTH reserves a fixed height (the flow resumes DEPTH rows below
-                # the area's top); WIDTH constrains the DIV span; DIV draws a closing
-                # divider (SOLID/DASH rule, BLANK spacer, TEXT caption, FORMAT-placed).
-                # DEPTH=* / absent → the body's own height. #125.
-                "depth": (self._opt_int(a["depth"])
-                          if "depth" in a and str(a["depth"]).strip() != "*" else None),
-                "width": self._opt_int(a.get("width")),
-                "div": str(a.get("div", "none")).strip().lower(),
-                "divtext": " ".join(str(a.get("text", "")).split()),
-                "divformat": str(a.get("format", "start")).strip().lower(),
-                # EXTEND=ON|FORCE fills the remaining panel depth (like DEPTH=*).
-                "extend": str(a.get("extend", "off")).strip().lower(),
-            }
-            # SCROLL/SCROLLVAR record the dynamic area's scroll intent (the body is
-            # rendered statically here; LVLINE/USERMOD/DATAMOD/SHADOW are dynamic-
-            # area / GDDM concerns with no static-render effect). #125.
-            self.screen.dynamic_areas.append({
-                "name": a.get("name"),
-                "scroll": str(a.get("scroll", "off")).strip().lower(),
-                "scrollvar": a.get("scrollvar"),
-            })
-        elif tag == "attr":
-            self._emit_attr(a)
-        elif tag == "dtacol":
-            # A data-column flow box: like <area>, but it also carries default
-            # prompt/entry widths (PMTWIDTH/ENTWIDTH) that its <dtafld>s inherit
-            # so their captions and entries line up in a column.
-            parent = self._areas[-1] if self._areas else None
-            row = parent["row"] if parent else 0
-            self._areas.append({
-                "row": row, "row0": row, "maxbottom": row,
-                "col": parent["col"] if parent else 1,
-                # FLDSPACE sets the gap between a child field's prompt and its entry
-                # (the flow's fldgap); absent → inherit the parent box's gap (#122).
-                "fldgap": (int(a["fldspace"]) if "fldspace" in a
-                           else (parent["fldgap"] if parent else 1)),
-                "dir": str(a.get("dir", "vert")).strip().lower(),
-                "start_idx": len(self.screen.items),
-                "explicit": False,
-                "parent": parent,
-                "pmtwidth": (self._opt_int(a["pmtwidth"]) if "pmtwidth" in a
-                             else (parent.get("pmtwidth") if parent else None)),
-                "entwidth": (self._opt_int(a["entwidth"]) if "entwidth" in a
-                             else (parent.get("entwidth") if parent else None)),
-                # SELWIDTH defaults the selection-entry width of nested <selfld>s;
-                # PMTLOC (BEFORE/ABOVE), REQUIRED, VARCLASS and CAPS default the
-                # matching attribute of each child <dtafld>/<selfld>, the child's own
-                # value overriding. All inherit through nested columns (#122).
-                "selwidth": (self._opt_int(a["selwidth"]) if "selwidth" in a
-                             else (parent.get("selwidth") if parent else None)),
-                "pmtloc": (str(a["pmtloc"]).strip().lower() if "pmtloc" in a
-                           else (parent.get("pmtloc") if parent else None)),
-                "required": (str(a["required"]).strip().lower() if "required" in a
-                             else (parent.get("required") if parent else None)),
-                "varclass": (str(a["varclass"]) if "varclass" in a
-                             else (parent.get("varclass") if parent else None)),
-                "caps": (str(a["caps"]).strip().lower() if "caps" in a
-                         else (parent.get("caps") if parent else None)),
-                # PAD/PADC default the column's <dtafld> fill character; a field's
-                # own PAD/PADC overrides it (see _add_field).
-                "pad": self._pad_char(a) or (parent.get("pad") if parent else None),
-                # OUTLINE (box lines) and DESWIDTH (description width) also default
-                # the column's <dtafld>s, each field's own value overriding (#122).
-                "outline": self._outline(a) or (parent.get("outline") if parent else None),
-                "deswidth": (str(a["deswidth"]).strip() if "deswidth" in a
-                             else (parent.get("deswidth") if parent else None)),
-                # PMTFMT (CUA leader dots / ISPF / NONE / END) defaults the column's
-                # <dtafld> prompt formatting; a field's own PMTFMT overrides it.
-                "pmtfmt": (a["pmtfmt"] if "pmtfmt" in a
-                           else (parent.get("pmtfmt") if parent else None)),
-            })
-        elif tag == "divider":
-            ctx = self._areas[-1] if self._areas else None
-            if ctx is not None and ctx.get("dir") == "horiz" and "row" not in a:
-                # Inside a horizontal flow box a divider is a vertical gutter
-                # between the columns either side of it: advance the column cursor
-                # (by GUTTER, else the default gap) and draw no rule.
-                ctx["col"] += int(a["gutter"]) if "gutter" in a else self._HGAP
-            elif ctx is not None:
-                # A horizontal rule spanning the rest of the flow box's width.
-                row = ctx["row"]
-                col = ctx["col"] if ctx else 1
-                ctx["row"] = row + 1
-                # TYPE=NONE/BLANK is a blank spacer (consumes the row but draws no
-                # rule). Any other TYPE draws a rule; DASH/SOLID/TEXT differ in look,
-                # and TEXT lays out the divider's own text — which follows the start
-                # tag — so the rule is *deferred*: we fix its position now and emit it
-                # at the flush (like a captured content element, see _emit_divider).
-                if str(a.get("type", "dash")).strip().lower() not in ("none", "blank"):
-                    if ctx.get("width"):
-                        width = ctx["width"]          # span the box's fixed width
-                    else:
-                        width = max(1, self.screen.width - col - 1)
-                    a["_row"], a["_col"], a["_width"] = row, col, width
-                    self._tag, self._attrs, self._chars = "divider", a, []
-                    self._in_dtafldd, self._dtafldd = False, None
-        elif tag == "ga":
-            self._emit_ga(a)
-        elif tag in ("area", "region"):
-            # A flow box that transparently continues the enclosing flow: its
-            # content flows after the parent's, and the parent resumes after it.
-            # DIR=HORIZ lays the box's children left-to-right instead of stacking
-            # them top-to-bottom (side-by-side region columns).
-            parent = self._areas[-1] if self._areas else None
-            explicit = False
-            # INDENT shifts the box's content that many columns to the right of its
-            # origin (a <region indent=n>), nesting cumulatively.
-            base_col = parent["col"] if parent else 1
-            # MARGINW insets an <area>'s content horizontally (an AREA-only margin;
-            # measured from the borderless origin, so the CUA default collapses to 0
-            # — this text server draws no area border for the margin to sit inside).
-            marginw = int(a["marginw"]) if (tag == "area" and "marginw" in a) else 0
-            indent = base_col + (int(a["indent"]) if "indent" in a else 0) + marginw
-            # MARGIND reserves blank rows above (and, at close, below) an <area>'s
-            # content — again 0 by default with no border.
-            margind = int(a["margind"]) if (tag == "area" and "margind" in a) else 0
-            row = (parent["row"] if parent else 0) + margind
-            # <region GRPBOX=YES> frames its content in a group box: a GE box border
-            # (like the pull-down / other borders) with an optional title on the top
-            # edge (#125). The border is drawn at the box's close (once its content
-            # extent is known); here we just reserve the top-border row and inset the
-            # content one column past the left border. Only regions (not areas) can be
-            # group boxes, and only when GRPBOX is on — a plain box is unchanged.
-            grpbox = tag == "region" and _bool_attr(a, "grpbox", default=False)
-            box = {
-                "row": row, "row0": row, "maxbottom": row,
-                "col": indent,
-                "fldgap": parent["fldgap"] if parent else 1,
-                "dir": str(a.get("dir", "vert")).strip().lower(),
-                "start_idx": len(self.screen.items),
-                "explicit": explicit,
-                "parent": parent,
-                # WIDTH=n fixes the box's column width: a rule inside it spans
-                # exactly WIDTH, and a horiz sibling starts WIDTH+gap to its right
-                # regardless of the box's actual content (so a full-width divider
-                # inside a left column doesn't shove the right column off-screen).
-                "width": self._opt_int(a.get("width")) if "width" in a else None,
-                # DIV draws a divider as the box's last line when it closes: SOLID/
-                # DASH a dashed rule, BLANK a spacer, TEXT the divider text (FORMAT
-                # positioned). NONE (default) draws nothing. #125.
-                "div": str(a.get("div", "none")).strip().lower(),
-                "divtext": " ".join(str(a.get("text", "")).split()),
-                "divformat": str(a.get("format", "start")).strip().lower(),
-                # DEPTH=n reserves a fixed height: the box occupies at least n rows
-                # (the parent resumes DEPTH rows below its start), padding with blank
-                # rows when the content is shorter. DEPTH=* / absent → the content's
-                # own height (unchanged). #125.
-                "depth": (self._opt_int(a["depth"])
-                          if "depth" in a and str(a["depth"]).strip() != "*"
-                          else None),
-                # EXTEND=ON|FORCE grows the box to fill the remaining panel depth
-                # (its bottom edge reaches the last usable row); OFF (default) uses
-                # the content's own height. #125.
-                "extend": str(a.get("extend", "off")).strip().lower(),
-                # MARGIND also reserves blank rows below the content (see close).
-                "margind": margind,
-                # A box that transparently continues the parent's flow inherits its
-                # content state, so the first paragraph below a panel title still
-                # gets the CUA title/body separator. An explicitly-positioned box
-                # starts fresh.
-                "had_content": bool(parent and not explicit
-                                    and parent.get("had_content")),
-            }
-            if grpbox:
-                box["grpbox"] = True
-                box["gb_row0"] = row                     # the top-border row
-                box["gb_col"] = indent                   # border's left column
-                box["gb_width"] = self._opt_int(a.get("grpwidth"))  # GRPWIDTH, or None
-                # GRPBXVAR/GRPBXMAT conditionally draw the box: the border shows only
-                # when the named dialog variable's value matches GRPBXMAT (default
-                # "1"), exactly like CHOICE's CHECKVAR/MATCH. When the value is known
-                # (a substitution is supplied) and does not match, the box is not
-                # framed — the content flows as a plain region. LOCATION=TITLE routes
-                # the group heading to the panel-title line instead of the box edge.
-                box["gb_var"] = a.get("grpbxvar")
-                box["gb_match"] = str(a.get("grpbxmat", "1"))
-                box["gb_location"] = str(a.get("location", "default")).strip().lower()
-                box["gb_title_chars"] = []
-                box["gb_title"] = ""
-                box["row"] = box["row0"] = box["maxbottom"] = row + 1  # content below top
-                box["col"] = indent + 2                  # inset past │ + a pad column
-                self._grpbox_pending = box               # capture the group-box title
-            self._areas.append(box)
-        elif tag == "fig":
-            # A figure: a flow sub-box, optionally framed by a horizontal rule
-            # (FRAME=RULE, the default) above and below its content, with a
-            # <figcap> caption line beneath. Its children (<p>, lists, <xmp>, …)
-            # flow through the box like an <area>.
-            # ISPDTLC inserts a leading blank line before the figure (COMPACT/
-            # NOSKIP suppress it — #210); it advances the parent flow cursor before
-            # we snapshot the figure's origin row below.
-            self._skip_blank_before(a)
-            parent = self._areas[-1] if self._areas else None
-            col = parent["col"] if parent else 1
-            row = parent["row"] if parent else 0
-            frame = str(a.get("frame", "rule")).strip().lower() != "none"
-            # WIDTH=PAGE (default) frames to the page width; WIDTH=COL frames only
-            # the enclosing column's width (a figure inside a width-constrained
-            # <region>), so the rule doesn't overrun the column.
-            pw = parent.get("width") if parent else None
-            if str(a.get("width", "page")).strip().lower() == "col" and pw:
-                width = max(1, pw)
-            else:
-                width = max(1, self.screen.width - col - 1)
-            if frame:                                  # top rule
-                self.screen.add(Text(row, col, "-" * width))
-                row += 1
-            self._areas.append({
-                "row": row, "row0": row, "maxbottom": row, "col": col,
-                "fldgap": parent["fldgap"] if parent else 1, "dir": "vert",
-                "start_idx": len(self.screen.items), "explicit": False,
-                "parent": parent, "fig": True, "frame": frame,
-                "fig_col": col, "fig_width": width, "caption": None,
-            })
-        elif tag == "msgmbr":
-            self._in_msgmbr = True
-            self._msgmbr_name = a.get("name", "")
-            self._msgmbr_width = self._opt_int(a.get("width"))
-            self._msgmbr_ccsid = self._opt_int(a.get("ccsid"))
-        elif tag == "msg":
-            if not self._in_msgmbr:
-                raise DTLError("<msg> outside of a <msgmbr>")
-            if "msgid" not in a:
-                # ISPF forms the id from the member name + a per-message suffix
-                # (e.g. <msgmbr name=abcd00><msg suffix=1> → abcd001).
-                if "suffix" in a and self._msgmbr_name:
-                    a["msgid"] = self._msgmbr_name + a["suffix"]
+            self.screen.add(Text(ctx["row"], ctx["col"] + indent, heading,
+                                 _intensity(a, "intens"), color=self._text_colour(a),
+                                 highlight=self._hilite(a), role="text"))
+            ctx["row"] += 2               # heading + blank line before the items
+        # SPACE sets the item-text indentation: YES → 3 columns, else 4.
+        self._lists.append({"type": "ol", "n": 0,
+                            "space": self._space_indent(a)})
+
+    def _start_deflist(self, tag, a):
+        # A definition/parameter list carries its term-column width (tsize)
+        # and break style; <dt>/<dd> (<pt>/<pd>) entries lay out against it.
+        # ISPDTLC inserts a blank line before the list (COMPACT/NOSKIP suppress).
+        self._skip_blank_before(a)
+        # TSIZE='n' | 's1 s2 … sn' → one width per definition-term COLUMN; a
+        # multi-column list codes one <dt> per width (see _emit_defitem).
+        tsizes = [int(p) for p in str(a.get("tsize", "")).split() if p.isdigit()] \
+            or [self._DL_TSIZE]
+        self._lists.append({
+            "type": tag, "n": 0,
+            "tsizes": tsizes,
+            "tsize": tsizes[0],           # first-column width (single-column paths)
+            "col": 0,                     # current term-column index in the entry
+            "seg_row": None,              # next <dtseg> stacking row for this column
+            "break": a.get("break", "none").lower(),
+            "compact": _bool_attr(a, "compact"),  # no blank after a <ddhd> header
+            "indent": self._opt_int(a.get("indent"), 0),  # shift the list right
+            # FORMAT positions the DT term within its TSIZE column.
+            "format": str(a.get("format", "start")).strip().lower(),
+            # DIVEND=YES draws a dashed rule across the list when it closes.
+            "divend": _bool_attr(a, "divend"),
+            "pending": None,
+        })
+
+    def _start_textline(self, tag, a):
+        # <textline> builds the panel/help title from its <textseg> segments,
+        # replacing the tag's own title text (see _emit_textline). The empty
+        # title captured before it was just flushed to nothing above.
+        self._textline = []
+
+    def _start_defdiv(self, tag, a):
+        # A vertical `|` between definition-term (or -heading) columns; the
+        # preceding <dt>/<dthd> was flushed just above, so its column state is set.
+        self._emit_defdiv(tag)
+
+    def _start_content(self, tag, a):
+        # A captured content element (paragraph, list item, instruction, field,
+        # choice, …): bank the tag and start capturing its text; the element is
+        # emitted when the next block tag (or its end tag) closes it.
+        if tag == "info":
+            # <info indent=n> shifts its whole content right; the flow picks
+            # this up in _resolve_pos until the matching </info> (or box end).
+            self._info_indent = self._opt_int(a.get("indent"), 0)
+        self._tag, self._attrs, self._chars = tag, a, []
+        # A new content tag closes any still-open <dtafldd> (SGML omits the
+        # end tag), so the dtafldd capture state must not leak into it.
+        self._in_dtafldd, self._dtafldd = False, None
+
+    # ── start handlers: panel & layout structure ─────────────────────────────
+    # The flow-box roots and containers: <panel>/<help> (and their <pandef>/
+    # <helpdef> defaults), <area>/<region>, <dtacol>, <fig>, plus the directly
+    # emitted layout elements <divider>, <da>+<attr> and <ga>.
+
+    def _start_pandef(self, tag, a):
+        # <pandef id=…> defines reusable panel defaults (HELP/DEPTH/WIDTH/
+        # KEYLIST/…) applied to any <panel PANDEF=id>. It renders nothing.
+        pid = str(a.get("id", "")).strip().lower()
+        if pid:
+            self._pandefs[pid] = {k: v for k, v in a.items() if k != "id"}
+
+    def _start_helpdef(self, tag, a):
+        # <helpdef id=…> is the help-panel analogue of <pandef>: shared help
+        # defaults (HELP/DEPTH/WIDTH/KEYLIST/…) inherited by any <help HELPDEF=id>.
+        # It renders nothing (#54).
+        hid = str(a.get("id", "")).strip().lower()
+        if hid:
+            self._helpdefs[hid] = {k: v for k, v in a.items() if k != "id"}
+
+    def _start_panel(self, tag, a):
+        # A <panel PANDEF=id> / <help HELPDEF=id> inherits the named default
+        # block's attributes — the panel's own attributes win (setdefault fills
+        # only what it omits). A panel carries PANDEF, a help panel HELPDEF (#54);
+        # in practice only one is present, so applying both is harmless.
+        for defaults in (self._pandefs.get(str(a.get("pandef", "")).strip().lower()),
+                         self._helpdefs.get(str(a.get("helpdef", "")).strip().lower())):
+            if defaults:
+                for k, v in defaults.items():
+                    a.setdefault(k, v)
+        # A top-level <help> is itself a (help) panel — same flow root. The
+        # title is the panel's content text (panel-title-text), captured into
+        # screen.title by _finalize_panel_title — not an attribute.
+        self.screen.help = a.get("help")
+        # TITLINE=NO keeps the title as metadata but suppresses its on-screen
+        # line (default YES); see _finalize_panel_title.
+        self._titline = _bool_attr(a, "titline", default=True)
+        # PANEL CURSOR=field-name names the field the cursor starts in; the
+        # replacement for the non-standard field-level cursor= (resolved in
+        # close(), once every field has been emitted).
+        self._panel_cursor = a.get("cursor")
+        # Window/key-list metadata (#125). KEYLIST names the panel's key-list;
+        # WINDOW=YES marks it a pop-up; WINTITLE is the pop-up's title; CURSOR is
+        # the start field. None of these change the rendered field stream — they
+        # are recorded on the Screen so the server/dialog can act on them (frame a
+        # window, activate a key-list, …). Reached both directly and via
+        # <pandef>/<helpdef> inheritance (the setdefault above), so honouring them
+        # here covers both paths.
+        if "keylist" in a:
+            self.screen.keylist_ref = a.get("keylist")
+        if "window" in a:
+            self.screen.window = _bool_attr(a, "window", default=False)
+        if "wintitle" in a:
+            self.screen.window_title = a.get("wintitle")
+        if a.get("cursor"):
+            self.screen.cursor_field = a.get("cursor")
+        # Panel classification / codepage metadata (#125, #117). MENU (a
+        # selection menu), ACTBAR (force an action-bar area), CCSID (codepage)
+        # and EXPAND=xy (the two field-expansion characters) have no host-display
+        # effect on this single-byte text server — recorded so the dialog/
+        # compiler can act on them. IMAP (image map) is GUI-only (dropped).
+        if "menu" in a:
+            self.screen.menu = _bool_attr(a, "menu", default=True)
+        if "actbar" in a:
+            self.screen.actbar = _bool_attr(a, "actbar", default=True)
+        if a.get("ccsid"):
+            self.screen.ccsid = a.get("ccsid")
+        if a.get("expand"):
+            self.screen.expand = a.get("expand")
+        if self._override_cols is not None:
+            self.screen.width = self._override_cols
+        elif "width" in a:
+            w = self._panel_dim(a["width"], self._WIDTH_MIN, self._WIDTH_MAX)
+            if w is not None:
+                self.screen.width = w
+        if self._override_rows is not None:
+            self.screen.depth = self._override_rows
+        elif "depth" in a:
+            d = self._panel_dim(a["depth"], self._DEPTH_MIN, self._DEPTH_MAX)
+            if d is not None:
+                self.screen.depth = d
+        # TMARGIN/BMARGIN reserve rows at the top/bottom of the panel: the whole
+        # panel (title + body) starts TMARGIN rows down, and content is kept out
+        # of the last BMARGIN rows. Both default to 0, so an unmarked panel is
+        # byte-for-byte unchanged. #125.
+        self._tmargin = self._opt_int(a.get("tmargin"), 0) or 0
+        self._bmargin = self._opt_int(a.get("bmargin"), 0) or 0
+        # The panel itself is the root flow box: every element flows down
+        # from the top (or from the top margin).
+        self._areas.append(
+            {"row": self._tmargin, "col": 1, "fldgap": 1, "explicit": True,
+             "parent": None}
+        )
+        self._panel_title = []  # capture the title text that follows
+
+    def _start_area(self, tag, a):
+        # A flow box that transparently continues the enclosing flow: its
+        # content flows after the parent's, and the parent resumes after it.
+        # DIR=HORIZ lays the box's children left-to-right instead of stacking
+        # them top-to-bottom (side-by-side region columns).
+        parent = self._areas[-1] if self._areas else None
+        explicit = False
+        # INDENT shifts the box's content that many columns to the right of its
+        # origin (a <region indent=n>), nesting cumulatively.
+        base_col = parent["col"] if parent else 1
+        # MARGINW insets an <area>'s content horizontally (an AREA-only margin;
+        # measured from the borderless origin, so the CUA default collapses to 0
+        # — this text server draws no area border for the margin to sit inside).
+        marginw = int(a["marginw"]) if (tag == "area" and "marginw" in a) else 0
+        indent = base_col + (int(a["indent"]) if "indent" in a else 0) + marginw
+        # MARGIND reserves blank rows above (and, at close, below) an <area>'s
+        # content — again 0 by default with no border.
+        margind = int(a["margind"]) if (tag == "area" and "margind" in a) else 0
+        row = (parent["row"] if parent else 0) + margind
+        # <region GRPBOX=YES> frames its content in a group box: a GE box border
+        # (like the pull-down / other borders) with an optional title on the top
+        # edge (#125). The border is drawn at the box's close (once its content
+        # extent is known); here we just reserve the top-border row and inset the
+        # content one column past the left border. Only regions (not areas) can be
+        # group boxes, and only when GRPBOX is on — a plain box is unchanged.
+        grpbox = tag == "region" and _bool_attr(a, "grpbox", default=False)
+        box = {
+            "row": row, "row0": row, "maxbottom": row,
+            "col": indent,
+            "fldgap": parent["fldgap"] if parent else 1,
+            "dir": str(a.get("dir", "vert")).strip().lower(),
+            "start_idx": len(self.screen.items),
+            "explicit": explicit,
+            "parent": parent,
+            # WIDTH=n fixes the box's column width: a rule inside it spans
+            # exactly WIDTH, and a horiz sibling starts WIDTH+gap to its right
+            # regardless of the box's actual content (so a full-width divider
+            # inside a left column doesn't shove the right column off-screen).
+            "width": self._opt_int(a.get("width")) if "width" in a else None,
+            # DIV draws a divider as the box's last line when it closes: SOLID/
+            # DASH a dashed rule, BLANK a spacer, TEXT the divider text (FORMAT
+            # positioned). NONE (default) draws nothing. #125.
+            "div": str(a.get("div", "none")).strip().lower(),
+            "divtext": " ".join(str(a.get("text", "")).split()),
+            "divformat": str(a.get("format", "start")).strip().lower(),
+            # DEPTH=n reserves a fixed height: the box occupies at least n rows
+            # (the parent resumes DEPTH rows below its start), padding with blank
+            # rows when the content is shorter. DEPTH=* / absent → the content's
+            # own height (unchanged). #125.
+            "depth": (self._opt_int(a["depth"])
+                      if "depth" in a and str(a["depth"]).strip() != "*"
+                      else None),
+            # EXTEND=ON|FORCE grows the box to fill the remaining panel depth
+            # (its bottom edge reaches the last usable row); OFF (default) uses
+            # the content's own height. #125.
+            "extend": str(a.get("extend", "off")).strip().lower(),
+            # MARGIND also reserves blank rows below the content (see close).
+            "margind": margind,
+            # A box that transparently continues the parent's flow inherits its
+            # content state, so the first paragraph below a panel title still
+            # gets the CUA title/body separator. An explicitly-positioned box
+            # starts fresh.
+            "had_content": bool(parent and not explicit
+                                and parent.get("had_content")),
+        }
+        if grpbox:
+            box["grpbox"] = True
+            box["gb_row0"] = row                     # the top-border row
+            box["gb_col"] = indent                   # border's left column
+            box["gb_width"] = self._opt_int(a.get("grpwidth"))  # GRPWIDTH, or None
+            # GRPBXVAR/GRPBXMAT conditionally draw the box: the border shows only
+            # when the named dialog variable's value matches GRPBXMAT (default
+            # "1"), exactly like CHOICE's CHECKVAR/MATCH. When the value is known
+            # (a substitution is supplied) and does not match, the box is not
+            # framed — the content flows as a plain region. LOCATION=TITLE routes
+            # the group heading to the panel-title line instead of the box edge.
+            box["gb_var"] = a.get("grpbxvar")
+            box["gb_match"] = str(a.get("grpbxmat", "1"))
+            box["gb_location"] = str(a.get("location", "default")).strip().lower()
+            box["gb_title_chars"] = []
+            box["gb_title"] = ""
+            box["row"] = box["row0"] = box["maxbottom"] = row + 1  # content below top
+            box["col"] = indent + 2                  # inset past │ + a pad column
+            self._grpbox_pending = box               # capture the group-box title
+        self._areas.append(box)
+
+    def _start_dtacol(self, tag, a):
+        # A data-column flow box: like <area>, but it also carries default
+        # prompt/entry widths (PMTWIDTH/ENTWIDTH) that its <dtafld>s inherit
+        # so their captions and entries line up in a column.
+        parent = self._areas[-1] if self._areas else None
+        row = parent["row"] if parent else 0
+        self._areas.append({
+            "row": row, "row0": row, "maxbottom": row,
+            "col": parent["col"] if parent else 1,
+            # FLDSPACE sets the gap between a child field's prompt and its entry
+            # (the flow's fldgap); absent → inherit the parent box's gap (#122).
+            "fldgap": (int(a["fldspace"]) if "fldspace" in a
+                       else (parent["fldgap"] if parent else 1)),
+            "dir": str(a.get("dir", "vert")).strip().lower(),
+            "start_idx": len(self.screen.items),
+            "explicit": False,
+            "parent": parent,
+            "pmtwidth": (self._opt_int(a["pmtwidth"]) if "pmtwidth" in a
+                         else (parent.get("pmtwidth") if parent else None)),
+            "entwidth": (self._opt_int(a["entwidth"]) if "entwidth" in a
+                         else (parent.get("entwidth") if parent else None)),
+            # SELWIDTH defaults the selection-entry width of nested <selfld>s;
+            # PMTLOC (BEFORE/ABOVE), REQUIRED, VARCLASS and CAPS default the
+            # matching attribute of each child <dtafld>/<selfld>, the child's own
+            # value overriding. All inherit through nested columns (#122).
+            "selwidth": (self._opt_int(a["selwidth"]) if "selwidth" in a
+                         else (parent.get("selwidth") if parent else None)),
+            "pmtloc": (str(a["pmtloc"]).strip().lower() if "pmtloc" in a
+                       else (parent.get("pmtloc") if parent else None)),
+            "required": (str(a["required"]).strip().lower() if "required" in a
+                         else (parent.get("required") if parent else None)),
+            "varclass": (str(a["varclass"]) if "varclass" in a
+                         else (parent.get("varclass") if parent else None)),
+            "caps": (str(a["caps"]).strip().lower() if "caps" in a
+                     else (parent.get("caps") if parent else None)),
+            # PAD/PADC default the column's <dtafld> fill character; a field's
+            # own PAD/PADC overrides it (see _add_field).
+            "pad": self._pad_char(a) or (parent.get("pad") if parent else None),
+            # OUTLINE (box lines) and DESWIDTH (description width) also default
+            # the column's <dtafld>s, each field's own value overriding (#122).
+            "outline": self._outline(a) or (parent.get("outline") if parent else None),
+            "deswidth": (str(a["deswidth"]).strip() if "deswidth" in a
+                         else (parent.get("deswidth") if parent else None)),
+            # PMTFMT (CUA leader dots / ISPF / NONE / END) defaults the column's
+            # <dtafld> prompt formatting; a field's own PMTFMT overrides it.
+            "pmtfmt": (a["pmtfmt"] if "pmtfmt" in a
+                       else (parent.get("pmtfmt") if parent else None)),
+        })
+
+    def _start_fig(self, tag, a):
+        # A figure: a flow sub-box, optionally framed by a horizontal rule
+        # (FRAME=RULE, the default) above and below its content, with a
+        # <figcap> caption line beneath. Its children (<p>, lists, <xmp>, …)
+        # flow through the box like an <area>.
+        # ISPDTLC inserts a leading blank line before the figure (COMPACT/
+        # NOSKIP suppress it — #210); it advances the parent flow cursor before
+        # we snapshot the figure's origin row below.
+        self._skip_blank_before(a)
+        parent = self._areas[-1] if self._areas else None
+        col = parent["col"] if parent else 1
+        row = parent["row"] if parent else 0
+        frame = str(a.get("frame", "rule")).strip().lower() != "none"
+        # WIDTH=PAGE (default) frames to the page width; WIDTH=COL frames only
+        # the enclosing column's width (a figure inside a width-constrained
+        # <region>), so the rule doesn't overrun the column.
+        pw = parent.get("width") if parent else None
+        if str(a.get("width", "page")).strip().lower() == "col" and pw:
+            width = max(1, pw)
+        else:
+            width = max(1, self.screen.width - col - 1)
+        if frame:                                  # top rule
+            self.screen.add(Text(row, col, "-" * width))
+            row += 1
+        self._areas.append({
+            "row": row, "row0": row, "maxbottom": row, "col": col,
+            "fldgap": parent["fldgap"] if parent else 1, "dir": "vert",
+            "start_idx": len(self.screen.items), "explicit": False,
+            "parent": parent, "fig": True, "frame": frame,
+            "fig_col": col, "fig_width": width, "caption": None,
+        })
+
+    def _start_divider(self, tag, a):
+        ctx = self._areas[-1] if self._areas else None
+        if ctx is not None and ctx.get("dir") == "horiz" and "row" not in a:
+            # Inside a horizontal flow box a divider is a vertical gutter
+            # between the columns either side of it: advance the column cursor
+            # (by GUTTER, else the default gap) and draw no rule.
+            ctx["col"] += int(a["gutter"]) if "gutter" in a else self._HGAP
+        elif ctx is not None:
+            # A horizontal rule spanning the rest of the flow box's width.
+            row = ctx["row"]
+            col = ctx["col"] if ctx else 1
+            ctx["row"] = row + 1
+            # TYPE=NONE/BLANK is a blank spacer (consumes the row but draws no
+            # rule). Any other TYPE draws a rule; DASH/SOLID/TEXT differ in look,
+            # and TEXT lays out the divider's own text — which follows the start
+            # tag — so the rule is *deferred*: we fix its position now and emit it
+            # at the flush (like a captured content element, see _emit_divider).
+            if str(a.get("type", "dash")).strip().lower() not in ("none", "blank"):
+                if ctx.get("width"):
+                    width = ctx["width"]          # span the box's fixed width
                 else:
-                    raise DTLError("<msg> missing required attribute 'msgid'")
-            self._tag, self._attrs, self._chars = "msg", a, []
-        elif tag in _CONTENT_TAGS:
-            if tag == "info":
-                # <info indent=n> shifts its whole content right; the flow picks
-                # this up in _resolve_pos until the matching </info> (or box end).
-                self._info_indent = self._opt_int(a.get("indent"), 0)
-            self._tag, self._attrs, self._chars = tag, a, []
-            # A new content tag closes any still-open <dtafldd> (SGML omits the
-            # end tag), so the dtafldd capture state must not leak into it.
-            self._in_dtafldd, self._dtafldd = False, None
+                    width = max(1, self.screen.width - col - 1)
+                a["_row"], a["_col"], a["_width"] = row, col, width
+                self._tag, self._attrs, self._chars = "divider", a, []
+                self._in_dtafldd, self._dtafldd = False, None
+
+    def _start_da(self, tag, a):
+        # A data area: a free-form region whose body text carries inline
+        # attribute characters (defined by nested <attr>) that start colour/
+        # type fields, like the classic ISPF )ATTR + )BODY model.
+        ctx = self._areas[-1] if self._areas else None
+        self._da = {
+            "row": ctx["row"] if ctx else 0,
+            "col": ctx["col"] if ctx else 1,
+            "attrs": {}, "body": [],
+            "ctx": ctx,
+            # DEPTH reserves a fixed height (the flow resumes DEPTH rows below
+            # the area's top); WIDTH constrains the DIV span; DIV draws a closing
+            # divider (SOLID/DASH rule, BLANK spacer, TEXT caption, FORMAT-placed).
+            # DEPTH=* / absent → the body's own height. #125.
+            "depth": (self._opt_int(a["depth"])
+                      if "depth" in a and str(a["depth"]).strip() != "*" else None),
+            "width": self._opt_int(a.get("width")),
+            "div": str(a.get("div", "none")).strip().lower(),
+            "divtext": " ".join(str(a.get("text", "")).split()),
+            "divformat": str(a.get("format", "start")).strip().lower(),
+            # EXTEND=ON|FORCE fills the remaining panel depth (like DEPTH=*).
+            "extend": str(a.get("extend", "off")).strip().lower(),
+        }
+        # SCROLL/SCROLLVAR record the dynamic area's scroll intent (the body is
+        # rendered statically here; LVLINE/USERMOD/DATAMOD/SHADOW are dynamic-
+        # area / GDDM concerns with no static-render effect). #125.
+        self.screen.dynamic_areas.append({
+            "name": a.get("name"),
+            "scroll": str(a.get("scroll", "off")).strip().lower(),
+            "scrollvar": a.get("scrollvar"),
+        })
+
+    def _start_attr(self, tag, a):
+        self._emit_attr(a)
+
+    def _start_ga(self, tag, a):
+        self._emit_ga(a)
+
+    # ── start handlers: fields, selection & list fields ──────────────────────
+    # <selfld> (selection/menu choices), <dtafldd> (a field's prompt child) and
+    # the scrollable table elements <lstfld>/<lstgrp>/<lstcol>. (<dtafld>/
+    # <cmdarea>/<choice> themselves are captured content tags — _start_content.)
+
+    def _start_selfld(self, tag, a):
+        ctx = self._areas[-1] if self._areas else None
+        # ISPDTLC block spacing: a flowed selection field gets a leading blank
+        # line (like a paragraph), then counts as content for the next block.
+        self._skip_blank_before(a)
+        if ctx is not None:
+            ctx["had_content"] = True
+        # The choice columns are offsets within the selection field, measured
+        # from its origin column — the enclosing flow box's column (so a flowed
+        # <selfld>, e.g. a dir=horiz column, shifts with the box). The number
+        # sits at the origin, the keyword one gap past a 2-wide number, the
+        # description one gap past that.
+        origin = ctx["col"] if ctx else 1
+        base = origin - 1
+        self._selfld = {
+            "row": ctx["row"] if ctx else 0,
+            "numcol": base + 1,
+            "namecol": base + 4,
+            "desccol": base + 21,
+            "numwidth": 2,
+            # Auto-layout: a keyword-less <choice> puts its description at the
+            # keyword column (right after the number) rather than the far
+            # description column.
+            "auto_cols": True,
+            "numintensity": DisplayIntensity.HIGH,
+            # DTL COLOR on a <selfld> colours its choices; a <choice> may
+            # override with its own COLOR.
+            "color": self._color(a),
+            "ctx": ctx,
+            "start_idx": len(self.screen.items),
+            # TYPE=MULTI is a multiple-selection field: each choice gets its
+            # own 1-char mark field (instead of a number the user types on a
+            # command line), so several choices can be selected at once. SINGLE
+            # (the default), MENU, MODEL and TUTOR keep the numbered layout.
+            "multi": str(a.get("type", "single")).strip().lower() == "multi",
+            "name": (a.get("name") or "").strip(),
+            "count": 0,
+            # FCHOICE is the number assigned to the first auto-numbered choice
+            # (default 1); FCHOICE=0 numbers the choices 0..n-1, as the ISPF
+            # primary menu does (option 0 = Settings). #128.
+            "fchoice": self._opt_int(a.get("fchoice"), 1),
+            # The field-prompt text (between <selfld ...> and the first
+            # <choice>) — a caption above the list (PMTLOC=ABOVE, default) or
+            # beside it (PMTLOC=BEFORE). Captured here, emitted before the first
+            # choice. Empty (the bundled numbered menus) → nothing rendered.
+            "origin": origin,
+            "pmtloc": str(a.get("pmtloc", "above")).strip().lower(),
+            "pmtwidth": self._opt_int(a.get("pmtwidth")),
+            # SELWIDTH sizes the selection entry; absent → the enclosing
+            # <dtacol>'s SELWIDTH default (#122).
+            "selwidth": (self._opt_int(a["selwidth"]) if "selwidth" in a
+                         else (ctx.get("selwidth") if ctx else None)),
+            # PAD/PADC fill the selection entry; OUTLINE draws box lines around
+            # it (applied to the field the user types into — the single-select
+            # input field or each MULTI mark field). None → the plain defaults.
+            "pad": self._pad_char(a),
+            "outline": self._outline(a),
+            # Multi-column choice grid (#128): CHOICECOLS columns, each
+            # CHOICEDEPTH rows deep (choices fill down each column in turn —
+            # column-major; row-major when no depth is given). CWIDTHS='w1 w2..'
+            # sets each column's stride. SELFMT=START|END aligns the selection
+            # entry within the selection width. DEPTH/EXTEND size the field.
+            "choicecols": self._opt_int(a.get("choicecols"), 1) or 1,
+            "choicedepth": self._opt_int(a.get("choicedepth")),
+            "cwidths": [int(w) for w in str(a.get("cwidths", "")).split()
+                        if w.isdigit()],
+            "selfmt": str(a.get("selfmt", "start")).strip().lower(),
+            "seldepth": (self._opt_int(a["depth"])
+                         if "depth" in a and str(a["depth"]).strip() != "*"
+                         else None),
+            "extend": str(a.get("extend", "off")).strip().lower(),
+            "field_row0": None,     # the row the first choice lands on
+            "grid_maxrow": None,
+            "prompt_chars": [],
+            "prompt_done": False,
+        }
+        sf = self._selfld
+        # A standard single-choice field (TYPE=SINGLE, the default; not
+        # MENU/MODEL/TUTOR/MULTI) whose choices are auto-numbered (no explicit
+        # NUM) and which has no explicit grid follows the CHOICE reference
+        # figure: a selection input field precedes the first choice, and each
+        # choice is numbered "N." (number + period). Decided on the first
+        # choice (its NUM tells us). Explicit NUM / columns keep the fixed grid.
+        sf["single_eligible"] = (sf["auto_cols"] and not sf["multi"]
+                                 and sf["choicecols"] <= 1
+                                 and str(a.get("type", "single")).strip().lower()
+                                 == "single")
+        # ENTWIDTH is 2 | n | 'e1 e2...en'; we take a single width (the list
+        # form falls back to the default 2).
+        sf["entwidth"] = self._opt_int(a.get("entwidth"), 2)
+        sf["auto_single"] = False
+        sf["period"] = False
+
+    def _start_dtafldd(self, tag, a):
+        # The authentic data-field description (prompt) child of a field.
+        if self._tag in _FIELD_TAGS:
+            self._in_dtafldd, self._dtafldd = True, []
+
+    def _start_lstfld(self, tag, a):
+        # A scrollable list/table: <lstcol> columns, optionally grouped under
+        # a <lstgrp> heading. We render the static column header structure
+        # (group headings + column headings); model data rows are populated
+        # by the table service at runtime, so there are none to lay out here.
+        ctx = self._areas[-1] if self._areas else None
+        self._lstfld = {
+            "cols": [], "groups": [], "ctx": ctx,
+            "row": ctx["row"] if ctx else 0,
+            "col": ctx["col"] if ctx else 1,
+            "div": a.get("div", "none"),   # divider after each model set (raw)
+        }
+        self._lstgrp = None
+        self._lstgrp_stack = []
+        # SCROLLVAR puts a "Scroll ===>" amount field on the command line; the
+        # <cmdarea> (coded after the list) picks this up when it renders.
+        if a.get("scrollvar"):
+            self._scroll = {
+                "var": a["scrollvar"],
+                "help": self._field_help(a and {"help": a.get("scrvhelp", "")}),
+                "tab": str(a.get("scrolltab", "")).strip().lower() == "yes",
+                "caps": str(a.get("scrcaps", "")).strip().lower() == "on",
+            }
+
+    def _start_lstgrp(self, tag, a):
+        if self._lstfld is None:
+            raise DTLError("<lstgrp> outside of a <lstfld>")
+        hv = a.get("headline")
+        # HEADLINE=YES|DASH both draw the group's dashed rule (under NOGRAPHIC
+        # they are identical); NO / absent draws the heading text alone.
+        headline = "headline" in a and (
+            hv is None or str(hv).lower() in ("yes", "dash", "true", "1", "headline")
+        )
+        align = a.get("align", "center").lower()
+        # <lstgrp> nests: a group may contain child groups for a second heading
+        # row. Track the open groups on a stack so a column binds to the
+        # innermost group and each group records its parent and nesting depth.
+        parent = self._lstgrp_stack[-1] if self._lstgrp_stack else None
+        self._lstgrp = {"heading": "", "headline": headline, "align": align,
+                        "parent": parent, "depth": parent["depth"] + 1 if parent else 1}
+        self._lstgrp_stack.append(self._lstgrp)
+        self._lstfld["groups"].append(self._lstgrp)
+        self._tag, self._attrs, self._chars = "lstgrp", a, []  # capture heading
+
+    def _start_lstcol(self, tag, a):
+        if self._lstfld is None:
+            raise DTLError("<lstcol> outside of a <lstfld>")
+        self._tag, self._attrs, self._chars = "lstcol", a, []  # capture heading
+
+    # ── start handlers: action bar & pull-down menus ─────────────────────────
+    # <ab> and its <abc> choices, each holding <pdc> pull-down items with
+    # <action>/<pdsep>/<m> (mnemonic) children.
+
+    def _start_ab(self, tag, a):
+        # The action bar sits on the top row; its choices are separated by a
+        # fixed gap (the non-standard per-bar gap= attribute has been removed).
+        # ABSEPSTR is the string drawn between the choices (IBM's default is two
+        # blanks; we keep the wider gap when it is absent so bundled panels stay
+        # byte-identical). ABSEPCHAR is the character of the separator *line*
+        # ISPF draws on the row below the bar — both default to nothing shown.
+        self._ab = {"row": 0, "col": 1, "gap": 3, "choices": [],
+                    "absepstr": a.get("absepstr"),
+                    "absepchar": a.get("absepchar"),
+                    # MNEMGEN=YES auto-assigns the first letter of a choice as
+                    # its mnemonic when it carries no explicit <M>. Treated as
+                    # opt-in (absent → off) so existing bare-label action bars
+                    # stay byte-identical; MNEMGEN=NO is also off. #126.
+                    "mnemgen": str(a.get("mnemgen", "")).strip().lower()
+                    == "yes"}
+
+    def _start_abc(self, tag, a):
+        if self._ab is None:
+            raise DTLError("<abc> outside of an <ab>")
+        self._close_abc()                     # implicit end of a previous <abc>
+        # PDCVAR names the )PROC variable that receives the selected pull-down
+        # choice number — a dialog-variable concern with no host-display effect;
+        # recorded on the choice model.
+        self._cur_abc = {"chars": [], "pdc": [], "help": self._field_help(a),
+                         "pdcvar": a.get("pdcvar")}
+
+    def _start_pdc(self, tag, a):
+        if self._cur_abc is None:
+            raise DTLError("<pdc> outside of an <abc>")
+        self._close_pdc()                     # implicit end of a previous <pdc>
+        # A pull-down item can be conditionally unavailable (shown but not
+        # selectable), mirroring <choice unavail>: UNAVAIL=var greys it when the
+        # variable is true. CHECKVAR=var MATCH=x marks it the *current* setting
+        # (a "> " current-choice indicator) when the variable equals MATCH — the
+        # pull-down analogue of <choice checkvar> landing on the current choice.
+        unavail = "unavail" in a and self._var_truthy(a.get("unavail"))
+        checkvar = a.get("checkvar")
+        match = str(a.get("match", "")).strip().upper()
+        checked = bool(checkvar) and \
+            self._subs.get(str(checkvar).strip().upper(), "").strip().upper() == match
+        # ACC1-3 are GUI keyboard accelerators (e.g. Ctrl+key) shown beside the
+        # item in a GUI client; a text 3270 terminal has no accelerator display,
+        # so they are recorded (GUI-only) but not rendered.
+        acc = [a.get(k) for k in ("acc1", "acc2", "acc3") if a.get(k)]
+        self._cur_pdc = {"chars": [], "action": "",
+                         "help": self._field_help(a),
+                         "unavail": unavail, "checked": checked,
+                         "acc": acc}
+
+    def _start_action(self, tag, a):
+        # A pull-down choice's command: <pdc>label<action run=cmd>. RUN= names
+        # the command the choice runs. SETVAR/TOGVAR model the variable an action
+        # assigns/toggles (an ISPF "Settings"-style on/off pull-down item): SETVAR
+        # sets VAR to VALUE; TOGVAR flips VAR between VALUE1 and VALUE2. TYPE is
+        # the action kind (CMD | PGM | PANEL | EXIT), defaulting to CMD.
+        if self._cur_pdc is not None:
+            self._cur_pdc["action"] = a.get("run") or self._cur_pdc["action"]
+            if a.get("type"):
+                self._cur_pdc["type"] = str(a["type"]).strip().lower()
+            if a.get("parm"):
+                self._cur_pdc["parm"] = a["parm"]
+            if a.get("setvar"):
+                self._cur_pdc["setvar"] = (a["setvar"], a.get("value", "1"))
+            if a.get("togvar"):
+                self._cur_pdc["togvar"] = (
+                    a["togvar"], a.get("value1", "0"), a.get("value2", "1"))
+            # APPLCMD/NEWAPPL/MODE/LANG and the other ACTION forms are ISPF
+            # SELECT/command-dispatch semantics (how/where the command runs) —
+            # no host-display effect. Recorded so the action model is lossless.
+            for k in ("applcmd", "newappl", "mode", "lang"):
+                if a.get(k):
+                    self._cur_pdc[k] = a[k]
+
+    def _start_pdsep(self, tag, a):
+        # A separator line within an action-bar pull-down: close the choice
+        # above it (DTL omits end tags) and record a divider row between the
+        # pull-down choices. Rendered by _show_pulldown when the menu opens.
+        if self._cur_abc is None:
+            raise DTLError("<pdsep> outside of an <abc>")
+        self._close_pdc()
+        self._cur_abc["pdc"].append({"separator": True})
+
+    def _start_m(self, tag, a):
+        # <M> marks the mnemonic character of an action-bar choice or pull-down
+        # item — the shortcut letter ISPF shows highlighted. Record where it
+        # falls in the label text being captured (offset in the raw chars).
+        if self._cur_pdc is not None:
+            self._cur_pdc["mnemonic"] = len("".join(self._cur_pdc["chars"]))
+        elif self._cur_abc is not None:
+            self._cur_abc["mnemonic"] = len("".join(self._cur_abc["chars"]))
+
+    # ── start handlers: keylists & command tables ────────────────────────────
+    # <keyl>/<keyi> function-key lists and <cmdtbl>/<cmd>/<cmdact>/<t>
+    # application command tables — pure metadata, nothing rendered.
+
+    def _start_keyl(self, tag, a):
+        # NAME identifies the keylist (referenced by <panel keylist=name>);
+        # APPLID is the application it belongs to. Both are metadata recorded
+        # on the Screen so the dialog can name/scope its keylist.
+        self._keylist = {}
+        self._keylist_name = a.get("name")
+        self._keylist_applid = a.get("applid")
+        # HELP names the keylist's help panel; ACTION=UPDATE|DELETE is a
+        # keylist-table maintenance directive (codegen only). Both metadata.
+        self._keylist_help = a.get("help")
+        self._keylist_action = a.get("action")
+
+    def _start_keyi(self, tag, a):
+        self._emit_keyi(a)
+
+    def _start_cmdtbl(self, tag, a):
+        self._in_cmdtbl = True
+        # APPLID scopes the command table to an application (metadata). SORT is
+        # a compile-time ordering of the table with no host-display effect (the
+        # table renders nothing — it only feeds command recognition). #126.
+        if a.get("applid"):
+            self.screen.commands_applid = a.get("applid")
+
+    def _start_cmd(self, tag, a):
+        if not self._in_cmdtbl:
+            raise DTLError("<cmd> outside of a <cmdtbl>")
+        name = a.get("name")
+        if not name:
+            raise DTLError("<cmd> missing required attribute 'name'")
+        self._finalize_cmd_trunc()   # close a previous <cmd> whose end tag was omitted
+        # Truncation comes from a <t> marker in the external name (standard DTL);
+        # ALTDESCR is the command's human description (metadata). trunc starts 0
+        # and a nested <t> sets it (see _finalize_cmd_trunc).
+        self._cur_cmd = {"action": "", "trunc": 0, "descr": a.get("altdescr", "")}
+        self.screen.commands[name.upper()] = self._cur_cmd
+        # Capture the command's external-name text so a nested <t> can mark its
+        # truncation point.
+        self._cmd_chars, self._cmd_tpos = [], None
+
+    def _start_cmdact(self, tag, a):
+        # The command action; read on start, since DTL often omits </cmdact>.
+        if self._cur_cmd is not None:
+            self._cur_cmd["action"] = a.get("action", "")
+
+    def _start_t(self, tag, a):
+        # A truncation point inside a <cmd> external name: the text before it is
+        # the minimum abbreviation the user must type (<cmd>CANC<t>EL → trunc 4).
+        if self._cmd_chars is not None:
+            self._cmd_tpos = len("".join(self._cmd_chars).strip())
+
+    # ── start handlers: variables & validation ───────────────────────────────
+    # <varclass> (+<checkl>/<checki>, <xlatl>/<xlati> translate lists) and
+    # <varlist>/<vardcl> declarations — field-validation metadata.
+
+    def _start_varclass(self, tag, a):
+        self._emit_varclass(a)
+
+    def _start_checkl(self, tag, a):
+        if self._cur_varclass is None:
+            raise DTLError("<checkl> outside of a <varclass>")
+        self._checkl = {"msg": a.get("msg"), "checks": []}
+
+    def _start_checki(self, tag, a):
+        if self._checkl is None:
+            raise DTLError("<checki> outside of a <checkl>")
+        self._tag, self._attrs, self._chars = "checki", a, []
+
+    def _start_xlatl(self, tag, a):
+        if self._cur_varclass is None:
+            raise DTLError("<xlatl> outside of a <varclass>")
+        self._xlatl = {
+            "msg": a.get("msg"),
+            "upper": str(a.get("format", "")).strip().lower() == "upper",
+            "items": [],
+            "pairs": [],     # (internal value, external/displayed) translations
+        }
+
+    def _start_xlati(self, tag, a):
+        if self._xlatl is None:
+            raise DTLError("<xlati> outside of an <xlatl>")
+        self._tag, self._attrs, self._chars = "xlati", a, []
+
+    def _start_varlist(self, tag, a):
+        self._in_varlist = True
+
+    def _start_vardcl(self, tag, a):
+        self._emit_vardcl(a)
+
+    # ── start handlers: messages ─────────────────────────────────────────────
+    # <msgmbr> message members and their <msg> entries (parsed by
+    # load_messages; a <msg>'s text is a captured content element).
+
+    def _start_msgmbr(self, tag, a):
+        self._in_msgmbr = True
+        self._msgmbr_name = a.get("name", "")
+        self._msgmbr_width = self._opt_int(a.get("width"))
+        self._msgmbr_ccsid = self._opt_int(a.get("ccsid"))
+
+    def _start_msg(self, tag, a):
+        if not self._in_msgmbr:
+            raise DTLError("<msg> outside of a <msgmbr>")
+        if "msgid" not in a:
+            # ISPF forms the id from the member name + a per-message suffix
+            # (e.g. <msgmbr name=abcd00><msg suffix=1> → abcd001).
+            if "suffix" in a and self._msgmbr_name:
+                a["msgid"] = self._msgmbr_name + a["suffix"]
+            else:
+                raise DTLError("<msg> missing required attribute 'msgid'")
+        self._tag, self._attrs, self._chars = "msg", a, []
 
     def _close_skip(self):
         """Leave the current non-rendering block. A <source>'s accumulated text is
@@ -1437,246 +1540,426 @@ class _DTLParser(HTMLParser):
             return
         if self._panel_title is not None:
             self._finalize_panel_title()
-        # Closing an inline <hp>/<rp> banks its emphasised run and keeps the
-        # enclosing text element open (it is not a block child).
-        if tag in ("hp", "rp") and self._runs is not None:
-            self._end_hp()
-            return
-        # </assignl>: closes the assignment list (no more <assigni> items) but keeps
-        # it pending for the enclosing <dtafld> to attach; the field it annotates
-        # stays open, so this must return before the implicit container flush below.
-        if tag == "assignl":
-            self._assignl = None
-            return
-        # </ps>, </chofld>, </scrfld>, </assigni>: inline/annotating children handled
-        # on their start tag. They must not close the enclosing content element (the
-        # choice/field/text they sit inside stays open), so a stray end tag is a no-op.
-        if tag in ("ps", "chofld", "scrfld", "assigni"):
-            return
-        # <varsub> is an empty tag: its text was injected on the start tag, so a
-        # (rare) explicit </varsub> is a no-op — return before the implicit flush
-        # below, which would otherwise prematurely close the enclosing <msg>.
-        if tag == "varsub":
+        # Inline/annotating end tags dispatch BEFORE the implicit flush below:
+        # they must not close the enclosing content element. A handler returns
+        # True when it consumed the tag (an </hp>/</rp> with no open runs
+        # declines and falls through to the ordinary block handling).
+        inline = self._END_INLINE.get(tag)
+        if inline is not None and inline(self, tag):
             return
         # A container closing flushes any open content child first (end tags are
         # omitted in DTL), while its context is still intact. The element's own
         # end tag is handled below via the normal `tag == self._tag` path.
         if self._tag is not None and tag != self._tag and tag not in ("dtafldd", "lit"):
             self._emit_current()  # flush at the current list depth, before any pop
-        if tag in ("nt", "note"):
-            # Flush the note's own text if no nested child already did, then end the
-            # hanging indent so a following sibling block flows at the box column (#219).
-            if self._tag == tag:
-                self._emit_current()
-            self._note_hang = None
-            return
-        if tag == "info":
-            # The info's own text (if any) was flushed above; end its indent so a
-            # following sibling flows at the box column again (#123).
-            if self._tag == tag:
-                self._emit_current()
-            self._info_indent = 0
-            return
-        if tag == "textline":
-            self._emit_textline()
-            return
-        if tag == "da":
-            self._emit_da()
-            self._da = None
-            return
-        if tag in ("ul", "ol", "sl", "dl", "parml", "notel") and self._lists:
-            lst = self._lists[-1]
-            # <dl>/<parml DIVEND=YES>: a dashed rule spanning the list as it closes.
-            if lst.get("divend") and self._areas:
-                ctx = self._areas[-1]
-                col = ctx["col"] + lst.get("indent", 0)
-                span = max(1, self.screen.width - col - 1)
-                self.screen.add(Text(ctx["row"], col, "-" * span,
-                                     DisplayIntensity.NORMAL, role="rule"))
-                ctx["row"] += 1
-            self._lists.pop()
-        if tag in ("panel", "help"):
-            if self._da is not None:      # a <da> with an omitted end tag
-                self._emit_da()
-                self._da = None
-            while self._areas and self._areas[-1].get("fig"):
-                self._close_fig()         # a <fig> whose </fig> was omitted
-            self._close_open_grpboxes()   # frame any <region GRPBOX> left open (#125)
-            self._retract_title_if_collision()
-            self._areas.clear()  # drop the panel's implicit flow box
-            self._info_indent = 0
-            return
-        if tag == "selfld":
-            # Advance the enclosing flow past the choices just laid out.
-            sf = self._selfld
-            if sf:
-                self._emit_selfld_prompt(sf)   # a prompt-only selfld still shows it
-            if sf and sf.get("choicecols", 1) > 1 and sf.get("grid_maxrow") is not None:
-                # A multi-column grid tracked its deepest row; resume below it. #128.
-                sf["row"] = sf["grid_maxrow"] + 1
-            if sf and sf.get("field_row0") is not None:
-                # DEPTH reserves a fixed height for the field; EXTEND fills to the
-                # panel foot. Both measured from the field's first row. #128.
-                if sf.get("seldepth"):
-                    sf["row"] = max(sf["row"], sf["field_row0"] + sf["seldepth"])
-                if sf.get("extend") in ("on", "force"):
-                    sf["row"] = max(sf["row"], self.screen.depth - self._bmargin)
-            if sf and sf.get("ctx") is not None:
-                ctx = sf["ctx"]
-                if ctx.get("dir") == "horiz":
-                    self._flow_horiz(ctx, sf.get("start_idx", len(self.screen.items)))
-                else:
-                    ctx["row"] = sf["row"]
-            self._selfld = None
-            return
-        if tag == "dtafldd":
-            if self._in_dtafldd:
-                self._in_dtafldd, self._dtafldd = False, "".join(self._dtafldd)
-            return
-        if tag == "keyi":
-            self._finalize_keyi()
-            return
-        if tag == "keyl":
-            self._finalize_keyi()       # flush the last <keyi> (its end tag is omitted)
-            self.screen.keylist = self._keylist or {}
-            self.screen.keylist_name = self._keylist_name
-            self.screen.keylist_applid = self._keylist_applid
-            self.screen.keylist_help = self._keylist_help
-            self.screen.keylist_action = self._keylist_action
-            self._keylist = self._keylist_name = self._keylist_applid = None
-            self._keylist_help = self._keylist_action = None
-            return
-        if tag == "cmdtbl":
-            self._finalize_cmd_trunc()
-            self._in_cmdtbl = False
-            self._cur_cmd = None
-            self._cmd_chars = self._cmd_tpos = None
-            return
-        if tag == "pdc":
-            self._end_pdc()
-            return
-        if tag == "abc":
-            self._end_abc()
-            return
-        if tag == "ab":
-            self._end_abc()                 # close any open <abc>/<pdc> (implicit)
-            if self._ab is not None:
-                self._emit_action_bar(self._ab)
-            self._ab = None
-            return
-        if tag == "cmd":
-            self._finalize_cmd_trunc()
-            self._cur_cmd = None
-            self._cmd_chars = self._cmd_tpos = None
-            return
-        if tag == "varclass":
-            # An <xlatl format=upper> marks the whole class case-insensitive, even
-            # when it is written after the <xlatl> that lists the translations — so
-            # apply the class's upper flag to every xlati check now that all its
-            # <xlatl>s are closed (order-independent matching).
-            vc = self._varclasses.get(self._cur_varclass)
-            if vc and vc.get("upper"):
-                for c in vc["checks"]:
-                    if c.get("type") == "xlati" and not c["upper"]:
-                        c["upper"] = True
-                        c["values"] = [v.upper() for v in c["values"]]
-            self._cur_varclass = None
-            return
-        if tag == "checkl":
-            if self._checkl is not None and self._cur_varclass in self._varclasses:
-                vc = self._varclasses[self._cur_varclass]
-                vc["checks"].extend(self._checkl["checks"])
-                # The <checkl>'s own MSG names the failure message; fall back to the
-                # class-level <varclass msg=> (which also covers TYPE-derived checks).
-                vc["msg"] = self._checkl["msg"] or vc.get("msg")
-            self._checkl = None
-            return
-        if tag == "xlatl":
-            self._end_xlatl()
-            return
-        if tag == "lstgrp":
-            # Pop back to the enclosing group (nested <lstgrp>); the open <lstcol>,
-            # if any, was flushed above and bound to this group.
-            if self._lstgrp_stack:
-                self._lstgrp_stack.pop()
-            self._lstgrp = self._lstgrp_stack[-1] if self._lstgrp_stack else None
-            return
-        if tag == "lstfld":
-            if self._lstfld is not None:
-                self._emit_lstfld()
-            self._lstfld, self._lstgrp = None, None
-            self._lstgrp_stack = []
-            return
-        if tag == "varlist":
-            self._in_varlist = False
-            return
-        if tag == "msgmbr":
-            self._in_msgmbr = False
-            return
-        if tag == "fig":
-            self._close_fig()
-            return
-        if tag in ("area", "region", "dtacol"):
-            self._info_indent = 0    # an <info> can't outlive its enclosing box
-            if self._areas:
-                ctx = self._areas.pop()
-                # MARGIND (an <area> depth margin) reserves blank rows below the
-                # content as well as above it.
-                if ctx.get("margind"):
-                    ctx["row"] += ctx["margind"]
-                # DEPTH=n reserves a fixed height: pad the box out to n rows so the
-                # parent flow resumes DEPTH rows below the box's start.
-                if ctx.get("depth"):
-                    floor = ctx["row0"] + ctx["depth"]
-                    if ctx["row"] < floor:
-                        ctx["row"] = floor
-                    ctx["maxbottom"] = max(ctx.get("maxbottom", ctx["row"]), ctx["row"])
-                # EXTEND=ON|FORCE grows the box to the last usable panel row (kept
-                # out of the bottom margin), so the flow after it resumes at the foot.
-                if ctx.get("extend") in ("on", "force"):
-                    floor = self.screen.depth - self._bmargin
-                    if ctx["row"] < floor:
-                        ctx["row"] = floor
-                    ctx["maxbottom"] = max(ctx.get("maxbottom", ctx["row"]), ctx["row"])
-                # DIV draws a divider as the box's last line (SOLID/DASH a rule,
-                # BLANK a spacer, TEXT the divider text), advancing the box cursor.
-                # With DEPTH, the box was padded first, so the rule sits at the
-                # reserved bottom edge.
-                if ctx.get("div") not in (None, "none", ""):
-                    self._emit_area_div(ctx)
-                if ctx.get("grpbox"):
-                    # A title-only group box may still be capturing; bank it first,
-                    # then frame the content and drop the flow below the bottom edge.
-                    if self._grpbox_pending is ctx:
-                        self._finalize_grpbox_title()
-                    self._draw_grpbox(ctx)
-                parent = ctx.get("parent")
-                if parent is not None and not ctx.get("explicit"):
-                    # A horizontal child spans down to its tallest column; a
-                    # vertical one down to its row cursor.
-                    child_bottom = (ctx.get("maxbottom", ctx["row"])
-                                    if ctx.get("dir") == "horiz" else ctx["row"])
-                    if parent.get("dir") == "horiz":
-                        # Side-by-side: advance the parent's column past this child
-                        # box and keep the parent on its origin row. A WIDTH-capped
-                        # box advances by its declared width (so its content, e.g. a
-                        # full-width rule, can't shove the next column off-screen);
-                        # otherwise fall back to the box's actual right extent.
-                        if ctx.get("width"):
-                            parent["col"] = ctx["col"] + ctx["width"] + self._HGAP
-                        else:
-                            _, right = self._box_extent(ctx["start_idx"])
-                            if right is not None:
-                                parent["col"] = right + self._HGAP
-                        parent["maxbottom"] = max(parent.get("maxbottom", parent["row0"]),
-                                                  child_bottom)
-                        parent["row"] = parent["row0"]
-                    else:
-                        parent["row"] = child_bottom  # resume flow below the box
+        handler = self._END_HANDLERS.get(tag)
+        if handler is not None:
+            handler(self, tag)
             return
         if tag != self._tag:
             return
         self._emit_current()
+
+    # ── end handlers: inline / annotating tags ───────────────────────────────
+    # Dispatched from handle_endtag via _END_INLINE, BEFORE the implicit flush.
+    # Each returns True when it consumed the tag.
+
+    def _inline_end_hp(self, tag):
+        # Closing an inline <hp>/<rp> banks its emphasised run and keeps the
+        # enclosing text element open (it is not a block child).
+        if self._runs is None:
+            return False
+        self._end_hp()
+        return True
+
+    def _inline_end_assignl(self, tag):
+        # </assignl>: closes the assignment list (no more <assigni> items) but keeps
+        # it pending for the enclosing <dtafld> to attach; the field it annotates
+        # stays open, so this must consume the tag before the implicit flush.
+        self._assignl = None
+        return True
+
+    def _inline_end_noop(self, tag):
+        # </ps>, </chofld>, </scrfld>, </assigni>: inline/annotating children handled
+        # on their start tag. They must not close the enclosing content element (the
+        # choice/field/text they sit inside stays open), so a stray end tag is a no-op.
+        # <varsub> likewise is an empty tag whose text was injected on the start tag —
+        # a (rare) explicit </varsub> must not prematurely close the enclosing <msg>.
+        return True
+
+    # ── end handlers: text flow & lists ──────────────────────────────────────
+
+    def _end_note(self, tag):
+        # Flush the note's own text if no nested child already did, then end the
+        # hanging indent so a following sibling block flows at the box column (#219).
+        if self._tag == tag:
+            self._emit_current()
+        self._note_hang = None
+
+    def _end_info(self, tag):
+        # The info's own text (if any) was flushed above; end its indent so a
+        # following sibling flows at the box column again (#123).
+        if self._tag == tag:
+            self._emit_current()
+        self._info_indent = 0
+
+    def _end_textline(self, tag):
+        self._emit_textline()
+
+    def _end_list(self, tag):
+        # (The former elif chain fell through after the pop; the epilogue was a
+        # guaranteed no-op there — a list container is never the captured
+        # ``self._tag`` — so returning here is equivalent.)
+        if not self._lists:
+            return
+        lst = self._lists[-1]
+        # <dl>/<parml DIVEND=YES>: a dashed rule spanning the list as it closes.
+        if lst.get("divend") and self._areas:
+            ctx = self._areas[-1]
+            col = ctx["col"] + lst.get("indent", 0)
+            span = max(1, self.screen.width - col - 1)
+            self.screen.add(Text(ctx["row"], col, "-" * span,
+                                 DisplayIntensity.NORMAL, role="rule"))
+            ctx["row"] += 1
+        self._lists.pop()
+
+    # ── end handlers: panel & layout structure ───────────────────────────────
+
+    def _end_panel(self, tag):
+        if self._da is not None:      # a <da> with an omitted end tag
+            self._emit_da()
+            self._da = None
+        while self._areas and self._areas[-1].get("fig"):
+            self._close_fig()         # a <fig> whose </fig> was omitted
+        self._close_open_grpboxes()   # frame any <region GRPBOX> left open (#125)
+        self._retract_title_if_collision()
+        self._areas.clear()  # drop the panel's implicit flow box
+        self._info_indent = 0
+
+    def _end_area(self, tag):
+        self._info_indent = 0    # an <info> can't outlive its enclosing box
+        if self._areas:
+            ctx = self._areas.pop()
+            # MARGIND (an <area> depth margin) reserves blank rows below the
+            # content as well as above it.
+            if ctx.get("margind"):
+                ctx["row"] += ctx["margind"]
+            # DEPTH=n reserves a fixed height: pad the box out to n rows so the
+            # parent flow resumes DEPTH rows below the box's start.
+            if ctx.get("depth"):
+                floor = ctx["row0"] + ctx["depth"]
+                if ctx["row"] < floor:
+                    ctx["row"] = floor
+                ctx["maxbottom"] = max(ctx.get("maxbottom", ctx["row"]), ctx["row"])
+            # EXTEND=ON|FORCE grows the box to the last usable panel row (kept
+            # out of the bottom margin), so the flow after it resumes at the foot.
+            if ctx.get("extend") in ("on", "force"):
+                floor = self.screen.depth - self._bmargin
+                if ctx["row"] < floor:
+                    ctx["row"] = floor
+                ctx["maxbottom"] = max(ctx.get("maxbottom", ctx["row"]), ctx["row"])
+            # DIV draws a divider as the box's last line (SOLID/DASH a rule,
+            # BLANK a spacer, TEXT the divider text), advancing the box cursor.
+            # With DEPTH, the box was padded first, so the rule sits at the
+            # reserved bottom edge.
+            if ctx.get("div") not in (None, "none", ""):
+                self._emit_area_div(ctx)
+            if ctx.get("grpbox"):
+                # A title-only group box may still be capturing; bank it first,
+                # then frame the content and drop the flow below the bottom edge.
+                if self._grpbox_pending is ctx:
+                    self._finalize_grpbox_title()
+                self._draw_grpbox(ctx)
+            parent = ctx.get("parent")
+            if parent is not None and not ctx.get("explicit"):
+                # A horizontal child spans down to its tallest column; a
+                # vertical one down to its row cursor.
+                child_bottom = (ctx.get("maxbottom", ctx["row"])
+                                if ctx.get("dir") == "horiz" else ctx["row"])
+                if parent.get("dir") == "horiz":
+                    # Side-by-side: advance the parent's column past this child
+                    # box and keep the parent on its origin row. A WIDTH-capped
+                    # box advances by its declared width (so its content, e.g. a
+                    # full-width rule, can't shove the next column off-screen);
+                    # otherwise fall back to the box's actual right extent.
+                    if ctx.get("width"):
+                        parent["col"] = ctx["col"] + ctx["width"] + self._HGAP
+                    else:
+                        _, right = self._box_extent(ctx["start_idx"])
+                        if right is not None:
+                            parent["col"] = right + self._HGAP
+                    parent["maxbottom"] = max(parent.get("maxbottom", parent["row0"]),
+                                              child_bottom)
+                    parent["row"] = parent["row0"]
+                else:
+                    parent["row"] = child_bottom  # resume flow below the box
+
+    def _end_fig(self, tag):
+        self._close_fig()
+
+    def _end_da(self, tag):
+        self._emit_da()
+        self._da = None
+
+    # ── end handlers: fields, selection & list fields ────────────────────────
+
+    def _end_selfld(self, tag):
+        # Advance the enclosing flow past the choices just laid out.
+        sf = self._selfld
+        if sf:
+            self._emit_selfld_prompt(sf)   # a prompt-only selfld still shows it
+        if sf and sf.get("choicecols", 1) > 1 and sf.get("grid_maxrow") is not None:
+            # A multi-column grid tracked its deepest row; resume below it. #128.
+            sf["row"] = sf["grid_maxrow"] + 1
+        if sf and sf.get("field_row0") is not None:
+            # DEPTH reserves a fixed height for the field; EXTEND fills to the
+            # panel foot. Both measured from the field's first row. #128.
+            if sf.get("seldepth"):
+                sf["row"] = max(sf["row"], sf["field_row0"] + sf["seldepth"])
+            if sf.get("extend") in ("on", "force"):
+                sf["row"] = max(sf["row"], self.screen.depth - self._bmargin)
+        if sf and sf.get("ctx") is not None:
+            ctx = sf["ctx"]
+            if ctx.get("dir") == "horiz":
+                self._flow_horiz(ctx, sf.get("start_idx", len(self.screen.items)))
+            else:
+                ctx["row"] = sf["row"]
+        self._selfld = None
+
+    def _end_dtafldd(self, tag):
+        if self._in_dtafldd:
+            self._in_dtafldd, self._dtafldd = False, "".join(self._dtafldd)
+
+    def _end_lstfld(self, tag):
+        if self._lstfld is not None:
+            self._emit_lstfld()
+        self._lstfld, self._lstgrp = None, None
+        self._lstgrp_stack = []
+
+    def _end_lstgrp(self, tag):
+        # Pop back to the enclosing group (nested <lstgrp>); the open <lstcol>,
+        # if any, was flushed above and bound to this group.
+        if self._lstgrp_stack:
+            self._lstgrp_stack.pop()
+        self._lstgrp = self._lstgrp_stack[-1] if self._lstgrp_stack else None
+
+    # ── end handlers: action bar & pull-down menus ───────────────────────────
+
+    def _end_pdc(self, tag):
+        self._close_pdc()
+
+    def _end_abc(self, tag):
+        self._close_abc()
+
+    def _end_ab(self, tag):
+        self._close_abc()                 # close any open <abc>/<pdc> (implicit)
+        if self._ab is not None:
+            self._emit_action_bar(self._ab)
+        self._ab = None
+
+    # ── end handlers: keylists & command tables ──────────────────────────────
+
+    def _end_keyi(self, tag):
+        self._finalize_keyi()
+
+    def _end_keyl(self, tag):
+        self._finalize_keyi()       # flush the last <keyi> (its end tag is omitted)
+        self.screen.keylist = self._keylist or {}
+        self.screen.keylist_name = self._keylist_name
+        self.screen.keylist_applid = self._keylist_applid
+        self.screen.keylist_help = self._keylist_help
+        self.screen.keylist_action = self._keylist_action
+        self._keylist = self._keylist_name = self._keylist_applid = None
+        self._keylist_help = self._keylist_action = None
+
+    def _end_cmdtbl(self, tag):
+        self._finalize_cmd_trunc()
+        self._in_cmdtbl = False
+        self._cur_cmd = None
+        self._cmd_chars = self._cmd_tpos = None
+
+    def _end_cmd(self, tag):
+        self._finalize_cmd_trunc()
+        self._cur_cmd = None
+        self._cmd_chars = self._cmd_tpos = None
+
+    # ── end handlers: variables & validation ─────────────────────────────────
+
+    def _end_varclass(self, tag):
+        # An <xlatl format=upper> marks the whole class case-insensitive, even
+        # when it is written after the <xlatl> that lists the translations — so
+        # apply the class's upper flag to every xlati check now that all its
+        # <xlatl>s are closed (order-independent matching).
+        vc = self._varclasses.get(self._cur_varclass)
+        if vc and vc.get("upper"):
+            for c in vc["checks"]:
+                if c.get("type") == "xlati" and not c["upper"]:
+                    c["upper"] = True
+                    c["values"] = [v.upper() for v in c["values"]]
+        self._cur_varclass = None
+
+    def _end_checkl(self, tag):
+        if self._checkl is not None and self._cur_varclass in self._varclasses:
+            vc = self._varclasses[self._cur_varclass]
+            vc["checks"].extend(self._checkl["checks"])
+            # The <checkl>'s own MSG names the failure message; fall back to the
+            # class-level <varclass msg=> (which also covers TYPE-derived checks).
+            vc["msg"] = self._checkl["msg"] or vc.get("msg")
+        self._checkl = None
+
+    def _end_xlatl(self, tag):
+        self._close_xlatl()
+
+    def _end_varlist(self, tag):
+        self._in_varlist = False
+
+    # ── end handlers: messages ───────────────────────────────────────────────
+
+    def _end_msgmbr(self, tag):
+        self._in_msgmbr = False
+
+    # ── tag-handler registries ───────────────────────────────────────────────
+    # {tag -> handler} dispatch tables for handle_starttag / handle_endtag.
+    # The *_INLINE registries hold the inline/annotating tags dispatched before
+    # the implicit flush (handlers return True when they consume the tag).
+    # Values are plain functions (class-body references), called with an
+    # explicit ``self`` — the same registry pattern as server._SELECTION_HANDLERS.
+
+    _START_INLINE = {
+        "comment": _inline_start_skip,
+        "copyr": _inline_start_skip,
+        "compopt": _inline_start_skip,
+        "generate": _inline_start_skip,
+        "source": _inline_start_skip,
+        "hp": _inline_start_hp,
+        "rp": _inline_start_hp,
+        "varsub": _inline_start_varsub,
+        "ps": _inline_start_ps,
+        "chofld": _inline_start_chofld,
+        "scrfld": _inline_start_scrfld,
+        "assignl": _inline_start_assignl,
+        "assigni": _inline_start_assigni,
+    }
+
+    _END_INLINE = {
+        "hp": _inline_end_hp,
+        "rp": _inline_end_hp,
+        "assignl": _inline_end_assignl,
+        "ps": _inline_end_noop,
+        "chofld": _inline_end_noop,
+        "scrfld": _inline_end_noop,
+        "assigni": _inline_end_noop,
+        "varsub": _inline_end_noop,
+    }
+
+    # Block-level start handlers, dispatched after the implicit flush. An
+    # unregistered tag renders nothing (the flush above still closed the open
+    # element). _CONTENT_TAGS all share _start_content (capture + emit-on-close).
+    _START_HANDLERS = {
+        # panel & layout structure
+        "panel": _start_panel,
+        "help": _start_panel,
+        "pandef": _start_pandef,
+        "helpdef": _start_helpdef,
+        "area": _start_area,
+        "region": _start_area,
+        "dtacol": _start_dtacol,
+        "fig": _start_fig,
+        "divider": _start_divider,
+        "da": _start_da,
+        "attr": _start_attr,
+        "ga": _start_ga,
+        # fields, selection & list fields
+        "selfld": _start_selfld,
+        "dtafldd": _start_dtafldd,
+        "lstfld": _start_lstfld,
+        "lstgrp": _start_lstgrp,
+        "lstcol": _start_lstcol,
+        # action bar & pull-down menus
+        "ab": _start_ab,
+        "abc": _start_abc,
+        "pdc": _start_pdc,
+        "action": _start_action,
+        "pdsep": _start_pdsep,
+        "m": _start_m,
+        # keylists & command tables
+        "keyl": _start_keyl,
+        "keyi": _start_keyi,
+        "cmdtbl": _start_cmdtbl,
+        "cmd": _start_cmd,
+        "cmdact": _start_cmdact,
+        "t": _start_t,
+        # variables & validation
+        "varclass": _start_varclass,
+        "checkl": _start_checkl,
+        "checki": _start_checki,
+        "xlatl": _start_xlatl,
+        "xlati": _start_xlati,
+        "varlist": _start_varlist,
+        "vardcl": _start_vardcl,
+        # messages
+        "msgmbr": _start_msgmbr,
+        "msg": _start_msg,
+        # text flow & lists
+        "ul": _start_list,
+        "ol": _start_list,
+        "sl": _start_list,
+        "notel": _start_notel,
+        "dl": _start_deflist,
+        "parml": _start_deflist,
+        "textline": _start_textline,
+        "dtdiv": _start_defdiv,
+        "dthdiv": _start_defdiv,
+        "ptdiv": _start_defdiv,
+        **dict.fromkeys(_CONTENT_TAGS, _start_content),
+    }
+
+    # Block-level end handlers, dispatched after the implicit flush. An
+    # unregistered end tag falls to the dispatcher's default: it closes the
+    # matching captured content element (tag == self._tag → _emit_current),
+    # else it is ignored.
+    _END_HANDLERS = {
+        # panel & layout structure
+        "panel": _end_panel,
+        "help": _end_panel,
+        "area": _end_area,
+        "region": _end_area,
+        "dtacol": _end_area,
+        "fig": _end_fig,
+        "da": _end_da,
+        # fields, selection & list fields
+        "selfld": _end_selfld,
+        "dtafldd": _end_dtafldd,
+        "lstfld": _end_lstfld,
+        "lstgrp": _end_lstgrp,
+        # action bar & pull-down menus
+        "ab": _end_ab,
+        "abc": _end_abc,
+        "pdc": _end_pdc,
+        # keylists & command tables
+        "keyl": _end_keyl,
+        "keyi": _end_keyi,
+        "cmdtbl": _end_cmdtbl,
+        "cmd": _end_cmd,
+        # variables & validation
+        "varclass": _end_varclass,
+        "checkl": _end_checkl,
+        "xlatl": _end_xlatl,
+        "varlist": _end_varlist,
+        # messages
+        "msgmbr": _end_msgmbr,
+        # text flow & lists
+        "nt": _end_note,
+        "note": _end_note,
+        "info": _end_info,
+        "textline": _end_textline,
+        "ul": _end_list,
+        "ol": _end_list,
+        "sl": _end_list,
+        "dl": _end_list,
+        "parml": _end_list,
+        "notel": _end_list,
+    }
 
     def close(self):
         """Flush at end-of-input. DTL routinely omits end tags, so a panel can
@@ -4053,7 +4336,7 @@ class _DTLParser(HTMLParser):
             if a.get("value") is not None:
                 self._xlatl["pairs"].append((a.get("value"), external))
 
-    def _end_xlatl(self):
+    def _close_xlatl(self):
         """Close an ``<xlatl>`` translate list. ``FORMAT=upper`` marks the class as
         uppercased. An ``<xlatl>`` that lists ``<xlati>`` translations restricts
         valid input to those external values (a typed value must translate) — added
@@ -4504,7 +4787,7 @@ class _DTLParser(HTMLParser):
             return 1
         return 0
 
-    def _end_pdc(self):
+    def _close_pdc(self):
         """Finalise the open <pdc> onto its <abc>. DTL omits most end tags, so a
         pull-down is also closed by the next <pdc> or by </abc> (not only </pdc>)."""
         if self._cur_pdc is not None and self._cur_abc is not None:
@@ -4528,10 +4811,10 @@ class _DTLParser(HTMLParser):
             self._cur_abc["pdc"].append(item)
         self._cur_pdc = None
 
-    def _end_abc(self):
+    def _close_abc(self):
         """Finalise the open <abc> (and its last <pdc>) onto the action bar —
         closed by the next <abc> or by </ab>, not only </abc>."""
-        self._end_pdc()
+        self._close_pdc()
         if self._cur_abc is not None and self._ab is not None:
             raw = "".join(self._cur_abc["chars"])
             label = raw.strip()
