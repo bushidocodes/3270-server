@@ -397,12 +397,40 @@ def test_parse_multiple_fields():
     assert fields[addr2] == "SYS1"
 
 
-def test_parse_whitespace_only_field_excluded():
-    """A field containing only spaces is stripped and omitted from the result."""
+def test_parse_whitespace_only_field_recorded_as_cleared():
+    """A field containing only spaces is a *cleared* field — its MDT is set, or
+    it wouldn't be in the reply at all — so it is recorded as "" rather than
+    dropped (#346). Dropping it made a blanked field indistinguishable from an
+    untouched one, resurrecting the old value in Screen.read_table_rows."""
     addr = 5 * 80 + 17
     payload = bytes([AID_ENTER]) + _sba_bytes(addr) + "        ".encode("cp037")
     _, fields, _ = read_client_input(_sock(payload))
-    assert fields == {}
+    assert fields == {addr: ""}
+
+
+def test_parse_erase_eof_cleared_field_recorded():
+    """Erase EOF fills the field with nulls, which Read Modified suppresses: the
+    reply carries just SBA + address with no data bytes. That is still a
+    modified (cleared) field and must be recorded as "" (#346)."""
+    addr = 5 * 80 + 17
+    payload = (bytes([AID_ENTER]) + encode_pack_addr(0, 9)   # cursor
+               + _sba_bytes(addr))                           # SBA, no data
+    _, fields, _ = read_client_input(_sock(payload))
+    assert fields == {addr: ""}
+
+
+def test_parse_cleared_field_alongside_typed_field():
+    """A cleared field and a typed field in the same reply both come through:
+    "" for the blanked one, stripped text for the other (#346)."""
+    addr1 = 5 * 80 + 17   # blanked with spaces
+    addr2 = 6 * 80 + 17   # typed
+    payload = (
+        bytes([AID_ENTER])
+        + _sba_bytes(addr1) + "   ".encode("cp037")
+        + _sba_bytes(addr2) + "SYS1".encode("cp037")
+    )
+    _, fields, _ = read_client_input(_sock(payload))
+    assert fields == {addr1: "", addr2: "SYS1"}
 
 
 def test_parse_truncated_sba_at_buffer_end_skipped():

@@ -273,6 +273,51 @@ def test_ws3270_table_input_required_column_validates():
     assert "Read 1 row(s): MYKEY=justval" in out, out[-1800:]
 
 
+def test_ws3270_table_input_cleared_cell_stays_blank():
+    """A real emulator *clears* a previously entered table cell with Erase EOF:
+    the blanked cell must stay blank on the next read-back, and blanking the
+    REQUIRED Key cell must surface KEYREQ (#346). Before the fix,
+    _parse_3270_reply dropped a field whose text stripped to "", so the cleared
+    cell was indistinguishable from an untouched one — read_table_rows
+    resurrected the old value and the required error could never fire on a cell
+    the user actually blanked."""
+    _require_emulator()
+    port = _serve_one_client()
+    out = _drive(port, [
+        "Wait(20,InputField)",
+        "String(IBMUSER)", "Tab()", "String(SYS1)", "Enter()",
+        "Wait(20,Output)",       # ISPF menu
+        "String(7)", "Enter()",  # option 7 → Dialog Test
+        "Wait(10,Output)",
+        "PF(5)",                 # → Table Input scratch panel
+        "Wait(10,InputField)",   # cursor on the first Key cell
+        "String(ABC)", "Tab()", "String(XYZ)", "Enter()",
+        "Wait(10,Output)",
+        "Ascii()",               # echo: Read 1 row(s): ABC=XYZ
+        "Tab()",                 # cursor re-landed on Key; Tab to the Value cell
+        "EraseEOF()",            # blank the Value the previous pass committed
+        "Enter()",
+        "Wait(10,Output)",
+        "Ascii()",               # echo: Read 1 row(s): ABC=   (XYZ stays gone)
+        "EraseEOF()",            # cursor back on Key; blank the REQUIRED cell
+        "Enter()",
+        "Wait(10,Output)",
+        "Ascii()",               # KEYREQ on the row whose Key was just blanked
+        "PF(3)", "Wait(5,Output)",
+        "PF(3)", "Wait(5,Output)",
+        "Quit()",
+    ])
+
+    # First pass committed the row...
+    assert "Read 1 row(s): ABC=XYZ" in out, out[-1800:]
+    # ...then the blanked Value stayed blank: the last read-back echo carries no
+    # XYZ (pre-#346 the dropped blank field resurrected it as ABC=XYZ again).
+    last_echo = out[out.rindex("Read 1 row(s):"):].splitlines()[0]
+    assert last_echo.strip() == "Read 1 row(s): ABC=", last_echo
+    # ...and clearing the REQUIRED Key fired the column MSG on that row.
+    assert "KEYREQ: enter a Key on row 1" in out, out[-1800:]
+
+
 def test_ws3270_member_list_pages_with_correct_scroll_status():
     """A real emulator pages the member list (Utilities → Library) with PF8: the
     panel's "ROW x TO y OF z" scroll status reflects the true window over the full

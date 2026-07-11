@@ -1156,7 +1156,9 @@ class Screen:
         A cell the client did not modify is absent from ``fields_by_addr`` (only
         modified fields are returned in an inbound reply); its originally rendered
         value (the field's ``default``) is used, so the result reflects the full
-        table as it now stands, not just the edits. Rows with no input cells at all
+        table as it now stands, not just the edits. A cell the client *cleared*
+        arrives as ``""`` (see ``_parse_3270_reply``, #346) and overrides the
+        default, so blanking a cell sticks. Rows with no input cells at all
         (a fully display-only table) yield an empty list.
         """
         cells = [f for f in self.items
@@ -1183,19 +1185,32 @@ class Screen:
         """Validate the ``<lstcol REQUIRED=YES>`` cells of a rendered table.
 
         Mirrors ISPF's ``VER(var, NONBLANK, MSG=id)`` on a table display: for each
-        **modified** model row (a row the client returned any cell for), a required
-        input cell that is left blank is an error. Returns
-        ``[(row_index, datavar, msg), …]`` — one per offending cell, in row order —
-        so the caller can redisplay with the column's ``MSG`` and reposition. An
-        unmodified row is not validated (the user never touched it), matching how
-        ISPF only verifies rows processed on this pass.
+        **modified** model row, a required input cell that is left blank is an
+        error. Returns ``[(row_index, datavar, msg), …]`` — one per offending
+        cell, in row order — so the caller can redisplay with the column's
+        ``MSG`` and reposition. An unmodified row is not validated (the user
+        never touched it), matching how ISPF only verifies rows processed on
+        this pass.
+
+        The table's cells are rendered with their MDT pre-set, so a real
+        terminal returns *every* cell on every AID — blank ones as ``""``
+        (#346). Mere presence in ``fields_by_addr`` therefore can't mean
+        "modified"; a row counts as modified when some returned cell *differs*
+        from the value the server rendered (the field ``default``). That still
+        catches the case the pre-#346 heuristic never could: clearing a
+        previously filled required cell now differs from its rendered value,
+        so the NONBLANK error fires on it.
         """
         cells = [f for f in self.items
                  if isinstance(f, Field) and f.row_index is not None]
         if not cells:
             return []
-        modified_rows = {f.row_index for f in cells
-                         if f.data_addr(self.width) in fields_by_addr}
+        modified_rows = set()
+        for f in cells:
+            returned = fields_by_addr.get(f.data_addr(self.width))
+            if returned is not None and \
+                    returned.strip() != (f.default or "").strip():
+                modified_rows.add(f.row_index)
         errors: List[Tuple[int, Optional[str], Optional[str]]] = []
         for f in sorted(cells, key=lambda c: c.row_index):
             if not f.required or f.row_index not in modified_rows:
