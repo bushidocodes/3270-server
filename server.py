@@ -2006,6 +2006,11 @@ def _parse_3270_reply(buffer):
     cursor address, followed by SBA-addressed modified fields; short reads
     (CLEAR/PA) and synthetic test payloads start straight into an SBA/SF order.
 
+    Every SBA-addressed field is recorded, including one whose text strips to
+    ``""``: only MDT-set fields ride in the reply, so an empty entry means the
+    user *cleared* that field (#346) — distinct from an untouched field, which
+    is absent from the dict altogether.
+
     Under Extended-Field / Character reply mode (#112) each modified field's data
     is preceded (Character mode: also interleaved) by its extended attributes as
     ``SA`` orders (``0x28 <type> <value>``). Those triples are consumed as
@@ -2042,9 +2047,14 @@ def _parse_3270_reply(buffer):
                 else:
                     field_bytes.append(buffer[i])
                     i += 1
-            field_text = from_ebcdic(field_bytes).strip()
-            if field_text:
-                results[addr] = field_text
+            # Record the field even when it stripped to "" (#346): a field is
+            # only in a Read Modified reply because its MDT is set, so a blank
+            # one means the user *cleared* it (Erase EOF suppresses the nulls
+            # entirely — just SBA + address arrives). Dropping it made a cleared
+            # value indistinguishable from an untouched field, so consumers that
+            # fall back to the rendered default (Screen.read_table_rows) would
+            # resurrect the old value and a cleared cell could never stay blank.
+            results[addr] = from_ebcdic(field_bytes).strip()
             if attrs:
                 field_attrs[addr] = attrs
         else:

@@ -2006,6 +2006,23 @@ def test_read_table_rows_empty_for_display_only_table():
     assert s.read_table_rows({}) == []
 
 
+def test_read_table_rows_cleared_cell_stays_blank():
+    # A cell the user *cleared* arrives as "" in the parsed reply (#346); it must
+    # override the rendered default, not resurrect it — blanking a cell sticks.
+    src = (
+        '<panel name="t">T'
+        '<lstfld><lstcol datavar="k" usage="in" colwidth="6">Key'
+        '<lstcol datavar="v" usage="in" colwidth="10">Val</lstfld></panel>'
+    )
+    # the panel re-seeded from a prior pass: the cell shows the earlier value
+    s = load_dtl(src, rows=[{"k": "OLD", "v": "1"}])
+    cells = {f.name: f for f in s.items
+             if isinstance(f, Field) and f.row_index is not None}
+    # user blanks Key (parsed reply records it as ""); Val is untouched
+    out = s.read_table_rows({cells["k"].data_addr(s.width): ""})
+    assert out == [{"k": "", "v": "1"}]
+
+
 def test_lstcol_caps_on_folds_typed_value_to_uppercase_on_readback():
     # <lstcol CAPS=ON>: the input cell is marked caps, and read_table_rows folds
     # the typed value to uppercase (as ISPF's CAPS(ON) does); a plain column does
@@ -2079,6 +2096,17 @@ def test_required_satisfied_when_cell_filled():
     modified = {f.data_addr(s.width): ("KEY1" if f.name == "k" else "val")
                 for f in cells if f.row_index == 0}
     assert s.table_required_errors(modified) == []
+
+
+def test_required_fires_when_user_blanks_the_required_cell():
+    # The user *clears* a previously filled required cell: the parsed reply now
+    # carries it as "" (#346), which both marks the row modified and fails the
+    # NONBLANK check — previously the blanked cell never reached the dict, so
+    # this error could not fire.
+    s = _required_table([{"k": "OLD", "v": "1"}])
+    cells = [f for f in s.items if isinstance(f, Field) and f.row_index is not None]
+    key = next(f for f in cells if f.name == "k")
+    assert s.table_required_errors({key.data_addr(s.width): ""}) == [(0, "k", "KEYREQ")]
 
 
 def test_required_ignored_on_display_only_table():
