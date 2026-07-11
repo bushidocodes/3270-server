@@ -1635,7 +1635,6 @@ class _DTLParser(HTMLParser):
         self._retract_title_if_collision()
         self._areas.clear()  # drop the panel's implicit flow box
         self._info_indent = 0
-        return
 
     def _end_area(self, tag):
         self._info_indent = 0    # an <info> can't outlive its enclosing box
@@ -1694,16 +1693,13 @@ class _DTLParser(HTMLParser):
                     parent["row"] = parent["row0"]
                 else:
                     parent["row"] = child_bottom  # resume flow below the box
-        return
 
     def _end_fig(self, tag):
         self._close_fig()
-        return
 
     def _end_da(self, tag):
         self._emit_da()
         self._da = None
-        return
 
     # ── end handlers: fields, selection & list fields ────────────────────────
 
@@ -1729,19 +1725,16 @@ class _DTLParser(HTMLParser):
             else:
                 ctx["row"] = sf["row"]
         self._selfld = None
-        return
 
     def _end_dtafldd(self, tag):
         if self._in_dtafldd:
             self._in_dtafldd, self._dtafldd = False, "".join(self._dtafldd)
-        return
 
     def _end_lstfld(self, tag):
         if self._lstfld is not None:
             self._emit_lstfld()
         self._lstfld, self._lstgrp = None, None
         self._lstgrp_stack = []
-        return
 
     def _end_lstgrp(self, tag):
         # Pop back to the enclosing group (nested <lstgrp>); the open <lstcol>,
@@ -1749,30 +1742,25 @@ class _DTLParser(HTMLParser):
         if self._lstgrp_stack:
             self._lstgrp_stack.pop()
         self._lstgrp = self._lstgrp_stack[-1] if self._lstgrp_stack else None
-        return
 
     # ── end handlers: action bar & pull-down menus ───────────────────────────
 
     def _end_pdc(self, tag):
         self._close_pdc()
-        return
 
     def _end_abc(self, tag):
         self._close_abc()
-        return
 
     def _end_ab(self, tag):
         self._close_abc()                 # close any open <abc>/<pdc> (implicit)
         if self._ab is not None:
             self._emit_action_bar(self._ab)
         self._ab = None
-        return
 
     # ── end handlers: keylists & command tables ──────────────────────────────
 
     def _end_keyi(self, tag):
         self._finalize_keyi()
-        return
 
     def _end_keyl(self, tag):
         self._finalize_keyi()       # flush the last <keyi> (its end tag is omitted)
@@ -1783,20 +1771,17 @@ class _DTLParser(HTMLParser):
         self.screen.keylist_action = self._keylist_action
         self._keylist = self._keylist_name = self._keylist_applid = None
         self._keylist_help = self._keylist_action = None
-        return
 
     def _end_cmdtbl(self, tag):
         self._finalize_cmd_trunc()
         self._in_cmdtbl = False
         self._cur_cmd = None
         self._cmd_chars = self._cmd_tpos = None
-        return
 
     def _end_cmd(self, tag):
         self._finalize_cmd_trunc()
         self._cur_cmd = None
         self._cmd_chars = self._cmd_tpos = None
-        return
 
     # ── end handlers: variables & validation ─────────────────────────────────
 
@@ -1812,7 +1797,6 @@ class _DTLParser(HTMLParser):
                     c["upper"] = True
                     c["values"] = [v.upper() for v in c["values"]]
         self._cur_varclass = None
-        return
 
     def _end_checkl(self, tag):
         if self._checkl is not None and self._cur_varclass in self._varclasses:
@@ -1822,21 +1806,17 @@ class _DTLParser(HTMLParser):
             # class-level <varclass msg=> (which also covers TYPE-derived checks).
             vc["msg"] = self._checkl["msg"] or vc.get("msg")
         self._checkl = None
-        return
 
     def _end_xlatl(self, tag):
         self._close_xlatl()
-        return
 
     def _end_varlist(self, tag):
         self._in_varlist = False
-        return
 
     # ── end handlers: messages ───────────────────────────────────────────────
 
     def _end_msgmbr(self, tag):
         self._in_msgmbr = False
-        return
 
     # ── tag-handler registries ───────────────────────────────────────────────
     # {tag -> handler} dispatch tables for handle_starttag / handle_endtag.
