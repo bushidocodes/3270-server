@@ -608,94 +608,7 @@ class _DTLParser(HTMLParser):
         if handler is not None:
             handler(self, tag, a)
             return
-        if tag == "pandef":
-            # <pandef id=…> defines reusable panel defaults (HELP/DEPTH/WIDTH/
-            # KEYLIST/…) applied to any <panel PANDEF=id>. It renders nothing.
-            pid = str(a.get("id", "")).strip().lower()
-            if pid:
-                self._pandefs[pid] = {k: v for k, v in a.items() if k != "id"}
-        elif tag == "helpdef":
-            # <helpdef id=…> is the help-panel analogue of <pandef>: shared help
-            # defaults (HELP/DEPTH/WIDTH/KEYLIST/…) inherited by any <help HELPDEF=id>.
-            # It renders nothing (#54).
-            hid = str(a.get("id", "")).strip().lower()
-            if hid:
-                self._helpdefs[hid] = {k: v for k, v in a.items() if k != "id"}
-        if tag in ("panel", "help"):
-            # A <panel PANDEF=id> / <help HELPDEF=id> inherits the named default
-            # block's attributes — the panel's own attributes win (setdefault fills
-            # only what it omits). A panel carries PANDEF, a help panel HELPDEF (#54);
-            # in practice only one is present, so applying both is harmless.
-            for defaults in (self._pandefs.get(str(a.get("pandef", "")).strip().lower()),
-                             self._helpdefs.get(str(a.get("helpdef", "")).strip().lower())):
-                if defaults:
-                    for k, v in defaults.items():
-                        a.setdefault(k, v)
-            # A top-level <help> is itself a (help) panel — same flow root. The
-            # title is the panel's content text (panel-title-text), captured into
-            # screen.title by _finalize_panel_title — not an attribute.
-            self.screen.help = a.get("help")
-            # TITLINE=NO keeps the title as metadata but suppresses its on-screen
-            # line (default YES); see _finalize_panel_title.
-            self._titline = _bool_attr(a, "titline", default=True)
-            # PANEL CURSOR=field-name names the field the cursor starts in; the
-            # replacement for the non-standard field-level cursor= (resolved in
-            # close(), once every field has been emitted).
-            self._panel_cursor = a.get("cursor")
-            # Window/key-list metadata (#125). KEYLIST names the panel's key-list;
-            # WINDOW=YES marks it a pop-up; WINTITLE is the pop-up's title; CURSOR is
-            # the start field. None of these change the rendered field stream — they
-            # are recorded on the Screen so the server/dialog can act on them (frame a
-            # window, activate a key-list, …). Reached both directly and via
-            # <pandef>/<helpdef> inheritance (the setdefault above), so honouring them
-            # here covers both paths.
-            if "keylist" in a:
-                self.screen.keylist_ref = a.get("keylist")
-            if "window" in a:
-                self.screen.window = _bool_attr(a, "window", default=False)
-            if "wintitle" in a:
-                self.screen.window_title = a.get("wintitle")
-            if a.get("cursor"):
-                self.screen.cursor_field = a.get("cursor")
-            # Panel classification / codepage metadata (#125, #117). MENU (a
-            # selection menu), ACTBAR (force an action-bar area), CCSID (codepage)
-            # and EXPAND=xy (the two field-expansion characters) have no host-display
-            # effect on this single-byte text server — recorded so the dialog/
-            # compiler can act on them. IMAP (image map) is GUI-only (dropped).
-            if "menu" in a:
-                self.screen.menu = _bool_attr(a, "menu", default=True)
-            if "actbar" in a:
-                self.screen.actbar = _bool_attr(a, "actbar", default=True)
-            if a.get("ccsid"):
-                self.screen.ccsid = a.get("ccsid")
-            if a.get("expand"):
-                self.screen.expand = a.get("expand")
-            if self._override_cols is not None:
-                self.screen.width = self._override_cols
-            elif "width" in a:
-                w = self._panel_dim(a["width"], self._WIDTH_MIN, self._WIDTH_MAX)
-                if w is not None:
-                    self.screen.width = w
-            if self._override_rows is not None:
-                self.screen.depth = self._override_rows
-            elif "depth" in a:
-                d = self._panel_dim(a["depth"], self._DEPTH_MIN, self._DEPTH_MAX)
-                if d is not None:
-                    self.screen.depth = d
-            # TMARGIN/BMARGIN reserve rows at the top/bottom of the panel: the whole
-            # panel (title + body) starts TMARGIN rows down, and content is kept out
-            # of the last BMARGIN rows. Both default to 0, so an unmarked panel is
-            # byte-for-byte unchanged. #125.
-            self._tmargin = self._opt_int(a.get("tmargin"), 0) or 0
-            self._bmargin = self._opt_int(a.get("bmargin"), 0) or 0
-            # The panel itself is the root flow box: every element flows down
-            # from the top (or from the top margin).
-            self._areas.append(
-                {"row": self._tmargin, "col": 1, "fldgap": 1, "explicit": True,
-                 "parent": None}
-            )
-            self._panel_title = []  # capture the title text that follows
-        elif tag == "selfld":
+        if tag == "selfld":
             ctx = self._areas[-1] if self._areas else None
             # ISPDTLC block spacing: a flowed selection field gets a leading blank
             # line (like a paragraph), then counts as content for the next block.
@@ -994,230 +907,6 @@ class _DTLParser(HTMLParser):
             if self._lstfld is None:
                 raise DTLError("<lstcol> outside of a <lstfld>")
             self._tag, self._attrs, self._chars = "lstcol", a, []  # capture heading
-        elif tag == "da":
-            # A data area: a free-form region whose body text carries inline
-            # attribute characters (defined by nested <attr>) that start colour/
-            # type fields, like the classic ISPF )ATTR + )BODY model.
-            ctx = self._areas[-1] if self._areas else None
-            self._da = {
-                "row": ctx["row"] if ctx else 0,
-                "col": ctx["col"] if ctx else 1,
-                "attrs": {}, "body": [],
-                "ctx": ctx,
-                # DEPTH reserves a fixed height (the flow resumes DEPTH rows below
-                # the area's top); WIDTH constrains the DIV span; DIV draws a closing
-                # divider (SOLID/DASH rule, BLANK spacer, TEXT caption, FORMAT-placed).
-                # DEPTH=* / absent → the body's own height. #125.
-                "depth": (self._opt_int(a["depth"])
-                          if "depth" in a and str(a["depth"]).strip() != "*" else None),
-                "width": self._opt_int(a.get("width")),
-                "div": str(a.get("div", "none")).strip().lower(),
-                "divtext": " ".join(str(a.get("text", "")).split()),
-                "divformat": str(a.get("format", "start")).strip().lower(),
-                # EXTEND=ON|FORCE fills the remaining panel depth (like DEPTH=*).
-                "extend": str(a.get("extend", "off")).strip().lower(),
-            }
-            # SCROLL/SCROLLVAR record the dynamic area's scroll intent (the body is
-            # rendered statically here; LVLINE/USERMOD/DATAMOD/SHADOW are dynamic-
-            # area / GDDM concerns with no static-render effect). #125.
-            self.screen.dynamic_areas.append({
-                "name": a.get("name"),
-                "scroll": str(a.get("scroll", "off")).strip().lower(),
-                "scrollvar": a.get("scrollvar"),
-            })
-        elif tag == "attr":
-            self._emit_attr(a)
-        elif tag == "dtacol":
-            # A data-column flow box: like <area>, but it also carries default
-            # prompt/entry widths (PMTWIDTH/ENTWIDTH) that its <dtafld>s inherit
-            # so their captions and entries line up in a column.
-            parent = self._areas[-1] if self._areas else None
-            row = parent["row"] if parent else 0
-            self._areas.append({
-                "row": row, "row0": row, "maxbottom": row,
-                "col": parent["col"] if parent else 1,
-                # FLDSPACE sets the gap between a child field's prompt and its entry
-                # (the flow's fldgap); absent → inherit the parent box's gap (#122).
-                "fldgap": (int(a["fldspace"]) if "fldspace" in a
-                           else (parent["fldgap"] if parent else 1)),
-                "dir": str(a.get("dir", "vert")).strip().lower(),
-                "start_idx": len(self.screen.items),
-                "explicit": False,
-                "parent": parent,
-                "pmtwidth": (self._opt_int(a["pmtwidth"]) if "pmtwidth" in a
-                             else (parent.get("pmtwidth") if parent else None)),
-                "entwidth": (self._opt_int(a["entwidth"]) if "entwidth" in a
-                             else (parent.get("entwidth") if parent else None)),
-                # SELWIDTH defaults the selection-entry width of nested <selfld>s;
-                # PMTLOC (BEFORE/ABOVE), REQUIRED, VARCLASS and CAPS default the
-                # matching attribute of each child <dtafld>/<selfld>, the child's own
-                # value overriding. All inherit through nested columns (#122).
-                "selwidth": (self._opt_int(a["selwidth"]) if "selwidth" in a
-                             else (parent.get("selwidth") if parent else None)),
-                "pmtloc": (str(a["pmtloc"]).strip().lower() if "pmtloc" in a
-                           else (parent.get("pmtloc") if parent else None)),
-                "required": (str(a["required"]).strip().lower() if "required" in a
-                             else (parent.get("required") if parent else None)),
-                "varclass": (str(a["varclass"]) if "varclass" in a
-                             else (parent.get("varclass") if parent else None)),
-                "caps": (str(a["caps"]).strip().lower() if "caps" in a
-                         else (parent.get("caps") if parent else None)),
-                # PAD/PADC default the column's <dtafld> fill character; a field's
-                # own PAD/PADC overrides it (see _add_field).
-                "pad": self._pad_char(a) or (parent.get("pad") if parent else None),
-                # OUTLINE (box lines) and DESWIDTH (description width) also default
-                # the column's <dtafld>s, each field's own value overriding (#122).
-                "outline": self._outline(a) or (parent.get("outline") if parent else None),
-                "deswidth": (str(a["deswidth"]).strip() if "deswidth" in a
-                             else (parent.get("deswidth") if parent else None)),
-                # PMTFMT (CUA leader dots / ISPF / NONE / END) defaults the column's
-                # <dtafld> prompt formatting; a field's own PMTFMT overrides it.
-                "pmtfmt": (a["pmtfmt"] if "pmtfmt" in a
-                           else (parent.get("pmtfmt") if parent else None)),
-            })
-        elif tag == "divider":
-            ctx = self._areas[-1] if self._areas else None
-            if ctx is not None and ctx.get("dir") == "horiz" and "row" not in a:
-                # Inside a horizontal flow box a divider is a vertical gutter
-                # between the columns either side of it: advance the column cursor
-                # (by GUTTER, else the default gap) and draw no rule.
-                ctx["col"] += int(a["gutter"]) if "gutter" in a else self._HGAP
-            elif ctx is not None:
-                # A horizontal rule spanning the rest of the flow box's width.
-                row = ctx["row"]
-                col = ctx["col"] if ctx else 1
-                ctx["row"] = row + 1
-                # TYPE=NONE/BLANK is a blank spacer (consumes the row but draws no
-                # rule). Any other TYPE draws a rule; DASH/SOLID/TEXT differ in look,
-                # and TEXT lays out the divider's own text — which follows the start
-                # tag — so the rule is *deferred*: we fix its position now and emit it
-                # at the flush (like a captured content element, see _emit_divider).
-                if str(a.get("type", "dash")).strip().lower() not in ("none", "blank"):
-                    if ctx.get("width"):
-                        width = ctx["width"]          # span the box's fixed width
-                    else:
-                        width = max(1, self.screen.width - col - 1)
-                    a["_row"], a["_col"], a["_width"] = row, col, width
-                    self._tag, self._attrs, self._chars = "divider", a, []
-                    self._in_dtafldd, self._dtafldd = False, None
-        elif tag == "ga":
-            self._emit_ga(a)
-        elif tag in ("area", "region"):
-            # A flow box that transparently continues the enclosing flow: its
-            # content flows after the parent's, and the parent resumes after it.
-            # DIR=HORIZ lays the box's children left-to-right instead of stacking
-            # them top-to-bottom (side-by-side region columns).
-            parent = self._areas[-1] if self._areas else None
-            explicit = False
-            # INDENT shifts the box's content that many columns to the right of its
-            # origin (a <region indent=n>), nesting cumulatively.
-            base_col = parent["col"] if parent else 1
-            # MARGINW insets an <area>'s content horizontally (an AREA-only margin;
-            # measured from the borderless origin, so the CUA default collapses to 0
-            # — this text server draws no area border for the margin to sit inside).
-            marginw = int(a["marginw"]) if (tag == "area" and "marginw" in a) else 0
-            indent = base_col + (int(a["indent"]) if "indent" in a else 0) + marginw
-            # MARGIND reserves blank rows above (and, at close, below) an <area>'s
-            # content — again 0 by default with no border.
-            margind = int(a["margind"]) if (tag == "area" and "margind" in a) else 0
-            row = (parent["row"] if parent else 0) + margind
-            # <region GRPBOX=YES> frames its content in a group box: a GE box border
-            # (like the pull-down / other borders) with an optional title on the top
-            # edge (#125). The border is drawn at the box's close (once its content
-            # extent is known); here we just reserve the top-border row and inset the
-            # content one column past the left border. Only regions (not areas) can be
-            # group boxes, and only when GRPBOX is on — a plain box is unchanged.
-            grpbox = tag == "region" and _bool_attr(a, "grpbox", default=False)
-            box = {
-                "row": row, "row0": row, "maxbottom": row,
-                "col": indent,
-                "fldgap": parent["fldgap"] if parent else 1,
-                "dir": str(a.get("dir", "vert")).strip().lower(),
-                "start_idx": len(self.screen.items),
-                "explicit": explicit,
-                "parent": parent,
-                # WIDTH=n fixes the box's column width: a rule inside it spans
-                # exactly WIDTH, and a horiz sibling starts WIDTH+gap to its right
-                # regardless of the box's actual content (so a full-width divider
-                # inside a left column doesn't shove the right column off-screen).
-                "width": self._opt_int(a.get("width")) if "width" in a else None,
-                # DIV draws a divider as the box's last line when it closes: SOLID/
-                # DASH a dashed rule, BLANK a spacer, TEXT the divider text (FORMAT
-                # positioned). NONE (default) draws nothing. #125.
-                "div": str(a.get("div", "none")).strip().lower(),
-                "divtext": " ".join(str(a.get("text", "")).split()),
-                "divformat": str(a.get("format", "start")).strip().lower(),
-                # DEPTH=n reserves a fixed height: the box occupies at least n rows
-                # (the parent resumes DEPTH rows below its start), padding with blank
-                # rows when the content is shorter. DEPTH=* / absent → the content's
-                # own height (unchanged). #125.
-                "depth": (self._opt_int(a["depth"])
-                          if "depth" in a and str(a["depth"]).strip() != "*"
-                          else None),
-                # EXTEND=ON|FORCE grows the box to fill the remaining panel depth
-                # (its bottom edge reaches the last usable row); OFF (default) uses
-                # the content's own height. #125.
-                "extend": str(a.get("extend", "off")).strip().lower(),
-                # MARGIND also reserves blank rows below the content (see close).
-                "margind": margind,
-                # A box that transparently continues the parent's flow inherits its
-                # content state, so the first paragraph below a panel title still
-                # gets the CUA title/body separator. An explicitly-positioned box
-                # starts fresh.
-                "had_content": bool(parent and not explicit
-                                    and parent.get("had_content")),
-            }
-            if grpbox:
-                box["grpbox"] = True
-                box["gb_row0"] = row                     # the top-border row
-                box["gb_col"] = indent                   # border's left column
-                box["gb_width"] = self._opt_int(a.get("grpwidth"))  # GRPWIDTH, or None
-                # GRPBXVAR/GRPBXMAT conditionally draw the box: the border shows only
-                # when the named dialog variable's value matches GRPBXMAT (default
-                # "1"), exactly like CHOICE's CHECKVAR/MATCH. When the value is known
-                # (a substitution is supplied) and does not match, the box is not
-                # framed — the content flows as a plain region. LOCATION=TITLE routes
-                # the group heading to the panel-title line instead of the box edge.
-                box["gb_var"] = a.get("grpbxvar")
-                box["gb_match"] = str(a.get("grpbxmat", "1"))
-                box["gb_location"] = str(a.get("location", "default")).strip().lower()
-                box["gb_title_chars"] = []
-                box["gb_title"] = ""
-                box["row"] = box["row0"] = box["maxbottom"] = row + 1  # content below top
-                box["col"] = indent + 2                  # inset past │ + a pad column
-                self._grpbox_pending = box               # capture the group-box title
-            self._areas.append(box)
-        elif tag == "fig":
-            # A figure: a flow sub-box, optionally framed by a horizontal rule
-            # (FRAME=RULE, the default) above and below its content, with a
-            # <figcap> caption line beneath. Its children (<p>, lists, <xmp>, …)
-            # flow through the box like an <area>.
-            # ISPDTLC inserts a leading blank line before the figure (COMPACT/
-            # NOSKIP suppress it — #210); it advances the parent flow cursor before
-            # we snapshot the figure's origin row below.
-            self._skip_blank_before(a)
-            parent = self._areas[-1] if self._areas else None
-            col = parent["col"] if parent else 1
-            row = parent["row"] if parent else 0
-            frame = str(a.get("frame", "rule")).strip().lower() != "none"
-            # WIDTH=PAGE (default) frames to the page width; WIDTH=COL frames only
-            # the enclosing column's width (a figure inside a width-constrained
-            # <region>), so the rule doesn't overrun the column.
-            pw = parent.get("width") if parent else None
-            if str(a.get("width", "page")).strip().lower() == "col" and pw:
-                width = max(1, pw)
-            else:
-                width = max(1, self.screen.width - col - 1)
-            if frame:                                  # top rule
-                self.screen.add(Text(row, col, "-" * width))
-                row += 1
-            self._areas.append({
-                "row": row, "row0": row, "maxbottom": row, "col": col,
-                "fldgap": parent["fldgap"] if parent else 1, "dir": "vert",
-                "start_idx": len(self.screen.items), "explicit": False,
-                "parent": parent, "fig": True, "frame": frame,
-                "fig_col": col, "fig_width": width, "caption": None,
-            })
         elif tag == "msgmbr":
             self._in_msgmbr = True
             self._msgmbr_name = a.get("name", "")
@@ -1430,6 +1119,332 @@ class _DTLParser(HTMLParser):
         # end tag), so the dtafldd capture state must not leak into it.
         self._in_dtafldd, self._dtafldd = False, None
 
+    # ── start handlers: panel & layout structure ─────────────────────────────
+    # The flow-box roots and containers: <panel>/<help> (and their <pandef>/
+    # <helpdef> defaults), <area>/<region>, <dtacol>, <fig>, plus the directly
+    # emitted layout elements <divider>, <da>+<attr> and <ga>.
+
+    def _start_pandef(self, tag, a):
+        # <pandef id=…> defines reusable panel defaults (HELP/DEPTH/WIDTH/
+        # KEYLIST/…) applied to any <panel PANDEF=id>. It renders nothing.
+        pid = str(a.get("id", "")).strip().lower()
+        if pid:
+            self._pandefs[pid] = {k: v for k, v in a.items() if k != "id"}
+
+    def _start_helpdef(self, tag, a):
+        # <helpdef id=…> is the help-panel analogue of <pandef>: shared help
+        # defaults (HELP/DEPTH/WIDTH/KEYLIST/…) inherited by any <help HELPDEF=id>.
+        # It renders nothing (#54).
+        hid = str(a.get("id", "")).strip().lower()
+        if hid:
+            self._helpdefs[hid] = {k: v for k, v in a.items() if k != "id"}
+
+    def _start_panel(self, tag, a):
+        # A <panel PANDEF=id> / <help HELPDEF=id> inherits the named default
+        # block's attributes — the panel's own attributes win (setdefault fills
+        # only what it omits). A panel carries PANDEF, a help panel HELPDEF (#54);
+        # in practice only one is present, so applying both is harmless.
+        for defaults in (self._pandefs.get(str(a.get("pandef", "")).strip().lower()),
+                         self._helpdefs.get(str(a.get("helpdef", "")).strip().lower())):
+            if defaults:
+                for k, v in defaults.items():
+                    a.setdefault(k, v)
+        # A top-level <help> is itself a (help) panel — same flow root. The
+        # title is the panel's content text (panel-title-text), captured into
+        # screen.title by _finalize_panel_title — not an attribute.
+        self.screen.help = a.get("help")
+        # TITLINE=NO keeps the title as metadata but suppresses its on-screen
+        # line (default YES); see _finalize_panel_title.
+        self._titline = _bool_attr(a, "titline", default=True)
+        # PANEL CURSOR=field-name names the field the cursor starts in; the
+        # replacement for the non-standard field-level cursor= (resolved in
+        # close(), once every field has been emitted).
+        self._panel_cursor = a.get("cursor")
+        # Window/key-list metadata (#125). KEYLIST names the panel's key-list;
+        # WINDOW=YES marks it a pop-up; WINTITLE is the pop-up's title; CURSOR is
+        # the start field. None of these change the rendered field stream — they
+        # are recorded on the Screen so the server/dialog can act on them (frame a
+        # window, activate a key-list, …). Reached both directly and via
+        # <pandef>/<helpdef> inheritance (the setdefault above), so honouring them
+        # here covers both paths.
+        if "keylist" in a:
+            self.screen.keylist_ref = a.get("keylist")
+        if "window" in a:
+            self.screen.window = _bool_attr(a, "window", default=False)
+        if "wintitle" in a:
+            self.screen.window_title = a.get("wintitle")
+        if a.get("cursor"):
+            self.screen.cursor_field = a.get("cursor")
+        # Panel classification / codepage metadata (#125, #117). MENU (a
+        # selection menu), ACTBAR (force an action-bar area), CCSID (codepage)
+        # and EXPAND=xy (the two field-expansion characters) have no host-display
+        # effect on this single-byte text server — recorded so the dialog/
+        # compiler can act on them. IMAP (image map) is GUI-only (dropped).
+        if "menu" in a:
+            self.screen.menu = _bool_attr(a, "menu", default=True)
+        if "actbar" in a:
+            self.screen.actbar = _bool_attr(a, "actbar", default=True)
+        if a.get("ccsid"):
+            self.screen.ccsid = a.get("ccsid")
+        if a.get("expand"):
+            self.screen.expand = a.get("expand")
+        if self._override_cols is not None:
+            self.screen.width = self._override_cols
+        elif "width" in a:
+            w = self._panel_dim(a["width"], self._WIDTH_MIN, self._WIDTH_MAX)
+            if w is not None:
+                self.screen.width = w
+        if self._override_rows is not None:
+            self.screen.depth = self._override_rows
+        elif "depth" in a:
+            d = self._panel_dim(a["depth"], self._DEPTH_MIN, self._DEPTH_MAX)
+            if d is not None:
+                self.screen.depth = d
+        # TMARGIN/BMARGIN reserve rows at the top/bottom of the panel: the whole
+        # panel (title + body) starts TMARGIN rows down, and content is kept out
+        # of the last BMARGIN rows. Both default to 0, so an unmarked panel is
+        # byte-for-byte unchanged. #125.
+        self._tmargin = self._opt_int(a.get("tmargin"), 0) or 0
+        self._bmargin = self._opt_int(a.get("bmargin"), 0) or 0
+        # The panel itself is the root flow box: every element flows down
+        # from the top (or from the top margin).
+        self._areas.append(
+            {"row": self._tmargin, "col": 1, "fldgap": 1, "explicit": True,
+             "parent": None}
+        )
+        self._panel_title = []  # capture the title text that follows
+
+    def _start_area(self, tag, a):
+        # A flow box that transparently continues the enclosing flow: its
+        # content flows after the parent's, and the parent resumes after it.
+        # DIR=HORIZ lays the box's children left-to-right instead of stacking
+        # them top-to-bottom (side-by-side region columns).
+        parent = self._areas[-1] if self._areas else None
+        explicit = False
+        # INDENT shifts the box's content that many columns to the right of its
+        # origin (a <region indent=n>), nesting cumulatively.
+        base_col = parent["col"] if parent else 1
+        # MARGINW insets an <area>'s content horizontally (an AREA-only margin;
+        # measured from the borderless origin, so the CUA default collapses to 0
+        # — this text server draws no area border for the margin to sit inside).
+        marginw = int(a["marginw"]) if (tag == "area" and "marginw" in a) else 0
+        indent = base_col + (int(a["indent"]) if "indent" in a else 0) + marginw
+        # MARGIND reserves blank rows above (and, at close, below) an <area>'s
+        # content — again 0 by default with no border.
+        margind = int(a["margind"]) if (tag == "area" and "margind" in a) else 0
+        row = (parent["row"] if parent else 0) + margind
+        # <region GRPBOX=YES> frames its content in a group box: a GE box border
+        # (like the pull-down / other borders) with an optional title on the top
+        # edge (#125). The border is drawn at the box's close (once its content
+        # extent is known); here we just reserve the top-border row and inset the
+        # content one column past the left border. Only regions (not areas) can be
+        # group boxes, and only when GRPBOX is on — a plain box is unchanged.
+        grpbox = tag == "region" and _bool_attr(a, "grpbox", default=False)
+        box = {
+            "row": row, "row0": row, "maxbottom": row,
+            "col": indent,
+            "fldgap": parent["fldgap"] if parent else 1,
+            "dir": str(a.get("dir", "vert")).strip().lower(),
+            "start_idx": len(self.screen.items),
+            "explicit": explicit,
+            "parent": parent,
+            # WIDTH=n fixes the box's column width: a rule inside it spans
+            # exactly WIDTH, and a horiz sibling starts WIDTH+gap to its right
+            # regardless of the box's actual content (so a full-width divider
+            # inside a left column doesn't shove the right column off-screen).
+            "width": self._opt_int(a.get("width")) if "width" in a else None,
+            # DIV draws a divider as the box's last line when it closes: SOLID/
+            # DASH a dashed rule, BLANK a spacer, TEXT the divider text (FORMAT
+            # positioned). NONE (default) draws nothing. #125.
+            "div": str(a.get("div", "none")).strip().lower(),
+            "divtext": " ".join(str(a.get("text", "")).split()),
+            "divformat": str(a.get("format", "start")).strip().lower(),
+            # DEPTH=n reserves a fixed height: the box occupies at least n rows
+            # (the parent resumes DEPTH rows below its start), padding with blank
+            # rows when the content is shorter. DEPTH=* / absent → the content's
+            # own height (unchanged). #125.
+            "depth": (self._opt_int(a["depth"])
+                      if "depth" in a and str(a["depth"]).strip() != "*"
+                      else None),
+            # EXTEND=ON|FORCE grows the box to fill the remaining panel depth
+            # (its bottom edge reaches the last usable row); OFF (default) uses
+            # the content's own height. #125.
+            "extend": str(a.get("extend", "off")).strip().lower(),
+            # MARGIND also reserves blank rows below the content (see close).
+            "margind": margind,
+            # A box that transparently continues the parent's flow inherits its
+            # content state, so the first paragraph below a panel title still
+            # gets the CUA title/body separator. An explicitly-positioned box
+            # starts fresh.
+            "had_content": bool(parent and not explicit
+                                and parent.get("had_content")),
+        }
+        if grpbox:
+            box["grpbox"] = True
+            box["gb_row0"] = row                     # the top-border row
+            box["gb_col"] = indent                   # border's left column
+            box["gb_width"] = self._opt_int(a.get("grpwidth"))  # GRPWIDTH, or None
+            # GRPBXVAR/GRPBXMAT conditionally draw the box: the border shows only
+            # when the named dialog variable's value matches GRPBXMAT (default
+            # "1"), exactly like CHOICE's CHECKVAR/MATCH. When the value is known
+            # (a substitution is supplied) and does not match, the box is not
+            # framed — the content flows as a plain region. LOCATION=TITLE routes
+            # the group heading to the panel-title line instead of the box edge.
+            box["gb_var"] = a.get("grpbxvar")
+            box["gb_match"] = str(a.get("grpbxmat", "1"))
+            box["gb_location"] = str(a.get("location", "default")).strip().lower()
+            box["gb_title_chars"] = []
+            box["gb_title"] = ""
+            box["row"] = box["row0"] = box["maxbottom"] = row + 1  # content below top
+            box["col"] = indent + 2                  # inset past │ + a pad column
+            self._grpbox_pending = box               # capture the group-box title
+        self._areas.append(box)
+
+    def _start_dtacol(self, tag, a):
+        # A data-column flow box: like <area>, but it also carries default
+        # prompt/entry widths (PMTWIDTH/ENTWIDTH) that its <dtafld>s inherit
+        # so their captions and entries line up in a column.
+        parent = self._areas[-1] if self._areas else None
+        row = parent["row"] if parent else 0
+        self._areas.append({
+            "row": row, "row0": row, "maxbottom": row,
+            "col": parent["col"] if parent else 1,
+            # FLDSPACE sets the gap between a child field's prompt and its entry
+            # (the flow's fldgap); absent → inherit the parent box's gap (#122).
+            "fldgap": (int(a["fldspace"]) if "fldspace" in a
+                       else (parent["fldgap"] if parent else 1)),
+            "dir": str(a.get("dir", "vert")).strip().lower(),
+            "start_idx": len(self.screen.items),
+            "explicit": False,
+            "parent": parent,
+            "pmtwidth": (self._opt_int(a["pmtwidth"]) if "pmtwidth" in a
+                         else (parent.get("pmtwidth") if parent else None)),
+            "entwidth": (self._opt_int(a["entwidth"]) if "entwidth" in a
+                         else (parent.get("entwidth") if parent else None)),
+            # SELWIDTH defaults the selection-entry width of nested <selfld>s;
+            # PMTLOC (BEFORE/ABOVE), REQUIRED, VARCLASS and CAPS default the
+            # matching attribute of each child <dtafld>/<selfld>, the child's own
+            # value overriding. All inherit through nested columns (#122).
+            "selwidth": (self._opt_int(a["selwidth"]) if "selwidth" in a
+                         else (parent.get("selwidth") if parent else None)),
+            "pmtloc": (str(a["pmtloc"]).strip().lower() if "pmtloc" in a
+                       else (parent.get("pmtloc") if parent else None)),
+            "required": (str(a["required"]).strip().lower() if "required" in a
+                         else (parent.get("required") if parent else None)),
+            "varclass": (str(a["varclass"]) if "varclass" in a
+                         else (parent.get("varclass") if parent else None)),
+            "caps": (str(a["caps"]).strip().lower() if "caps" in a
+                     else (parent.get("caps") if parent else None)),
+            # PAD/PADC default the column's <dtafld> fill character; a field's
+            # own PAD/PADC overrides it (see _add_field).
+            "pad": self._pad_char(a) or (parent.get("pad") if parent else None),
+            # OUTLINE (box lines) and DESWIDTH (description width) also default
+            # the column's <dtafld>s, each field's own value overriding (#122).
+            "outline": self._outline(a) or (parent.get("outline") if parent else None),
+            "deswidth": (str(a["deswidth"]).strip() if "deswidth" in a
+                         else (parent.get("deswidth") if parent else None)),
+            # PMTFMT (CUA leader dots / ISPF / NONE / END) defaults the column's
+            # <dtafld> prompt formatting; a field's own PMTFMT overrides it.
+            "pmtfmt": (a["pmtfmt"] if "pmtfmt" in a
+                       else (parent.get("pmtfmt") if parent else None)),
+        })
+
+    def _start_fig(self, tag, a):
+        # A figure: a flow sub-box, optionally framed by a horizontal rule
+        # (FRAME=RULE, the default) above and below its content, with a
+        # <figcap> caption line beneath. Its children (<p>, lists, <xmp>, …)
+        # flow through the box like an <area>.
+        # ISPDTLC inserts a leading blank line before the figure (COMPACT/
+        # NOSKIP suppress it — #210); it advances the parent flow cursor before
+        # we snapshot the figure's origin row below.
+        self._skip_blank_before(a)
+        parent = self._areas[-1] if self._areas else None
+        col = parent["col"] if parent else 1
+        row = parent["row"] if parent else 0
+        frame = str(a.get("frame", "rule")).strip().lower() != "none"
+        # WIDTH=PAGE (default) frames to the page width; WIDTH=COL frames only
+        # the enclosing column's width (a figure inside a width-constrained
+        # <region>), so the rule doesn't overrun the column.
+        pw = parent.get("width") if parent else None
+        if str(a.get("width", "page")).strip().lower() == "col" and pw:
+            width = max(1, pw)
+        else:
+            width = max(1, self.screen.width - col - 1)
+        if frame:                                  # top rule
+            self.screen.add(Text(row, col, "-" * width))
+            row += 1
+        self._areas.append({
+            "row": row, "row0": row, "maxbottom": row, "col": col,
+            "fldgap": parent["fldgap"] if parent else 1, "dir": "vert",
+            "start_idx": len(self.screen.items), "explicit": False,
+            "parent": parent, "fig": True, "frame": frame,
+            "fig_col": col, "fig_width": width, "caption": None,
+        })
+
+    def _start_divider(self, tag, a):
+        ctx = self._areas[-1] if self._areas else None
+        if ctx is not None and ctx.get("dir") == "horiz" and "row" not in a:
+            # Inside a horizontal flow box a divider is a vertical gutter
+            # between the columns either side of it: advance the column cursor
+            # (by GUTTER, else the default gap) and draw no rule.
+            ctx["col"] += int(a["gutter"]) if "gutter" in a else self._HGAP
+        elif ctx is not None:
+            # A horizontal rule spanning the rest of the flow box's width.
+            row = ctx["row"]
+            col = ctx["col"] if ctx else 1
+            ctx["row"] = row + 1
+            # TYPE=NONE/BLANK is a blank spacer (consumes the row but draws no
+            # rule). Any other TYPE draws a rule; DASH/SOLID/TEXT differ in look,
+            # and TEXT lays out the divider's own text — which follows the start
+            # tag — so the rule is *deferred*: we fix its position now and emit it
+            # at the flush (like a captured content element, see _emit_divider).
+            if str(a.get("type", "dash")).strip().lower() not in ("none", "blank"):
+                if ctx.get("width"):
+                    width = ctx["width"]          # span the box's fixed width
+                else:
+                    width = max(1, self.screen.width - col - 1)
+                a["_row"], a["_col"], a["_width"] = row, col, width
+                self._tag, self._attrs, self._chars = "divider", a, []
+                self._in_dtafldd, self._dtafldd = False, None
+
+    def _start_da(self, tag, a):
+        # A data area: a free-form region whose body text carries inline
+        # attribute characters (defined by nested <attr>) that start colour/
+        # type fields, like the classic ISPF )ATTR + )BODY model.
+        ctx = self._areas[-1] if self._areas else None
+        self._da = {
+            "row": ctx["row"] if ctx else 0,
+            "col": ctx["col"] if ctx else 1,
+            "attrs": {}, "body": [],
+            "ctx": ctx,
+            # DEPTH reserves a fixed height (the flow resumes DEPTH rows below
+            # the area's top); WIDTH constrains the DIV span; DIV draws a closing
+            # divider (SOLID/DASH rule, BLANK spacer, TEXT caption, FORMAT-placed).
+            # DEPTH=* / absent → the body's own height. #125.
+            "depth": (self._opt_int(a["depth"])
+                      if "depth" in a and str(a["depth"]).strip() != "*" else None),
+            "width": self._opt_int(a.get("width")),
+            "div": str(a.get("div", "none")).strip().lower(),
+            "divtext": " ".join(str(a.get("text", "")).split()),
+            "divformat": str(a.get("format", "start")).strip().lower(),
+            # EXTEND=ON|FORCE fills the remaining panel depth (like DEPTH=*).
+            "extend": str(a.get("extend", "off")).strip().lower(),
+        }
+        # SCROLL/SCROLLVAR record the dynamic area's scroll intent (the body is
+        # rendered statically here; LVLINE/USERMOD/DATAMOD/SHADOW are dynamic-
+        # area / GDDM concerns with no static-render effect). #125.
+        self.screen.dynamic_areas.append({
+            "name": a.get("name"),
+            "scroll": str(a.get("scroll", "off")).strip().lower(),
+            "scrollvar": a.get("scrollvar"),
+        })
+
+    def _start_attr(self, tag, a):
+        self._emit_attr(a)
+
+    def _start_ga(self, tag, a):
+        self._emit_ga(a)
+
     def _close_skip(self):
         """Leave the current non-rendering block. A <source>'s accumulated text is
         handed to _emit_source (ZSEL routing); the rest is discarded."""
@@ -1492,21 +1507,6 @@ class _DTLParser(HTMLParser):
         handler = self._END_HANDLERS.get(tag)
         if handler is not None:
             handler(self, tag)
-            return
-        if tag == "da":
-            self._emit_da()
-            self._da = None
-            return
-        if tag in ("panel", "help"):
-            if self._da is not None:      # a <da> with an omitted end tag
-                self._emit_da()
-                self._da = None
-            while self._areas and self._areas[-1].get("fig"):
-                self._close_fig()         # a <fig> whose </fig> was omitted
-            self._close_open_grpboxes()   # frame any <region GRPBOX> left open (#125)
-            self._retract_title_if_collision()
-            self._areas.clear()  # drop the panel's implicit flow box
-            self._info_indent = 0
             return
         if tag == "selfld":
             # Advance the enclosing flow past the choices just laid out.
@@ -1615,67 +1615,6 @@ class _DTLParser(HTMLParser):
         if tag == "msgmbr":
             self._in_msgmbr = False
             return
-        if tag == "fig":
-            self._close_fig()
-            return
-        if tag in ("area", "region", "dtacol"):
-            self._info_indent = 0    # an <info> can't outlive its enclosing box
-            if self._areas:
-                ctx = self._areas.pop()
-                # MARGIND (an <area> depth margin) reserves blank rows below the
-                # content as well as above it.
-                if ctx.get("margind"):
-                    ctx["row"] += ctx["margind"]
-                # DEPTH=n reserves a fixed height: pad the box out to n rows so the
-                # parent flow resumes DEPTH rows below the box's start.
-                if ctx.get("depth"):
-                    floor = ctx["row0"] + ctx["depth"]
-                    if ctx["row"] < floor:
-                        ctx["row"] = floor
-                    ctx["maxbottom"] = max(ctx.get("maxbottom", ctx["row"]), ctx["row"])
-                # EXTEND=ON|FORCE grows the box to the last usable panel row (kept
-                # out of the bottom margin), so the flow after it resumes at the foot.
-                if ctx.get("extend") in ("on", "force"):
-                    floor = self.screen.depth - self._bmargin
-                    if ctx["row"] < floor:
-                        ctx["row"] = floor
-                    ctx["maxbottom"] = max(ctx.get("maxbottom", ctx["row"]), ctx["row"])
-                # DIV draws a divider as the box's last line (SOLID/DASH a rule,
-                # BLANK a spacer, TEXT the divider text), advancing the box cursor.
-                # With DEPTH, the box was padded first, so the rule sits at the
-                # reserved bottom edge.
-                if ctx.get("div") not in (None, "none", ""):
-                    self._emit_area_div(ctx)
-                if ctx.get("grpbox"):
-                    # A title-only group box may still be capturing; bank it first,
-                    # then frame the content and drop the flow below the bottom edge.
-                    if self._grpbox_pending is ctx:
-                        self._finalize_grpbox_title()
-                    self._draw_grpbox(ctx)
-                parent = ctx.get("parent")
-                if parent is not None and not ctx.get("explicit"):
-                    # A horizontal child spans down to its tallest column; a
-                    # vertical one down to its row cursor.
-                    child_bottom = (ctx.get("maxbottom", ctx["row"])
-                                    if ctx.get("dir") == "horiz" else ctx["row"])
-                    if parent.get("dir") == "horiz":
-                        # Side-by-side: advance the parent's column past this child
-                        # box and keep the parent on its origin row. A WIDTH-capped
-                        # box advances by its declared width (so its content, e.g. a
-                        # full-width rule, can't shove the next column off-screen);
-                        # otherwise fall back to the box's actual right extent.
-                        if ctx.get("width"):
-                            parent["col"] = ctx["col"] + ctx["width"] + self._HGAP
-                        else:
-                            _, right = self._box_extent(ctx["start_idx"])
-                            if right is not None:
-                                parent["col"] = right + self._HGAP
-                        parent["maxbottom"] = max(parent.get("maxbottom", parent["row0"]),
-                                                  child_bottom)
-                        parent["row"] = parent["row0"]
-                    else:
-                        parent["row"] = child_bottom  # resume flow below the box
-            return
         if tag != self._tag:
             return
         self._emit_current()
@@ -1743,6 +1682,88 @@ class _DTLParser(HTMLParser):
             ctx["row"] += 1
         self._lists.pop()
 
+    # ── end handlers: panel & layout structure ───────────────────────────────
+
+    def _end_panel(self, tag):
+        if self._da is not None:      # a <da> with an omitted end tag
+            self._emit_da()
+            self._da = None
+        while self._areas and self._areas[-1].get("fig"):
+            self._close_fig()         # a <fig> whose </fig> was omitted
+        self._close_open_grpboxes()   # frame any <region GRPBOX> left open (#125)
+        self._retract_title_if_collision()
+        self._areas.clear()  # drop the panel's implicit flow box
+        self._info_indent = 0
+        return
+
+    def _end_area(self, tag):
+        self._info_indent = 0    # an <info> can't outlive its enclosing box
+        if self._areas:
+            ctx = self._areas.pop()
+            # MARGIND (an <area> depth margin) reserves blank rows below the
+            # content as well as above it.
+            if ctx.get("margind"):
+                ctx["row"] += ctx["margind"]
+            # DEPTH=n reserves a fixed height: pad the box out to n rows so the
+            # parent flow resumes DEPTH rows below the box's start.
+            if ctx.get("depth"):
+                floor = ctx["row0"] + ctx["depth"]
+                if ctx["row"] < floor:
+                    ctx["row"] = floor
+                ctx["maxbottom"] = max(ctx.get("maxbottom", ctx["row"]), ctx["row"])
+            # EXTEND=ON|FORCE grows the box to the last usable panel row (kept
+            # out of the bottom margin), so the flow after it resumes at the foot.
+            if ctx.get("extend") in ("on", "force"):
+                floor = self.screen.depth - self._bmargin
+                if ctx["row"] < floor:
+                    ctx["row"] = floor
+                ctx["maxbottom"] = max(ctx.get("maxbottom", ctx["row"]), ctx["row"])
+            # DIV draws a divider as the box's last line (SOLID/DASH a rule,
+            # BLANK a spacer, TEXT the divider text), advancing the box cursor.
+            # With DEPTH, the box was padded first, so the rule sits at the
+            # reserved bottom edge.
+            if ctx.get("div") not in (None, "none", ""):
+                self._emit_area_div(ctx)
+            if ctx.get("grpbox"):
+                # A title-only group box may still be capturing; bank it first,
+                # then frame the content and drop the flow below the bottom edge.
+                if self._grpbox_pending is ctx:
+                    self._finalize_grpbox_title()
+                self._draw_grpbox(ctx)
+            parent = ctx.get("parent")
+            if parent is not None and not ctx.get("explicit"):
+                # A horizontal child spans down to its tallest column; a
+                # vertical one down to its row cursor.
+                child_bottom = (ctx.get("maxbottom", ctx["row"])
+                                if ctx.get("dir") == "horiz" else ctx["row"])
+                if parent.get("dir") == "horiz":
+                    # Side-by-side: advance the parent's column past this child
+                    # box and keep the parent on its origin row. A WIDTH-capped
+                    # box advances by its declared width (so its content, e.g. a
+                    # full-width rule, can't shove the next column off-screen);
+                    # otherwise fall back to the box's actual right extent.
+                    if ctx.get("width"):
+                        parent["col"] = ctx["col"] + ctx["width"] + self._HGAP
+                    else:
+                        _, right = self._box_extent(ctx["start_idx"])
+                        if right is not None:
+                            parent["col"] = right + self._HGAP
+                    parent["maxbottom"] = max(parent.get("maxbottom", parent["row0"]),
+                                              child_bottom)
+                    parent["row"] = parent["row0"]
+                else:
+                    parent["row"] = child_bottom  # resume flow below the box
+        return
+
+    def _end_fig(self, tag):
+        self._close_fig()
+        return
+
+    def _end_da(self, tag):
+        self._emit_da()
+        self._da = None
+        return
+
     # ── tag-handler registries ───────────────────────────────────────────────
     # {tag -> handler} dispatch tables for handle_starttag / handle_endtag.
     # The *_INLINE registries hold the inline/annotating tags dispatched before
@@ -1781,6 +1802,19 @@ class _DTLParser(HTMLParser):
     # unregistered tag renders nothing (the flush above still closed the open
     # element). _CONTENT_TAGS all share _start_content (capture + emit-on-close).
     _START_HANDLERS = {
+        # panel & layout structure
+        "panel": _start_panel,
+        "help": _start_panel,
+        "pandef": _start_pandef,
+        "helpdef": _start_helpdef,
+        "area": _start_area,
+        "region": _start_area,
+        "dtacol": _start_dtacol,
+        "fig": _start_fig,
+        "divider": _start_divider,
+        "da": _start_da,
+        "attr": _start_attr,
+        "ga": _start_ga,
         # text flow & lists
         "ul": _start_list,
         "ol": _start_list,
@@ -1800,6 +1834,14 @@ class _DTLParser(HTMLParser):
     # matching captured content element (tag == self._tag → _emit_current),
     # else it is ignored.
     _END_HANDLERS = {
+        # panel & layout structure
+        "panel": _end_panel,
+        "help": _end_panel,
+        "area": _end_area,
+        "region": _end_area,
+        "dtacol": _end_area,
+        "fig": _end_fig,
+        "da": _end_da,
         # text flow & lists
         "nt": _end_note,
         "note": _end_note,
