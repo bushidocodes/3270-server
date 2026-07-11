@@ -608,51 +608,7 @@ class _DTLParser(HTMLParser):
         if handler is not None:
             handler(self, tag, a)
             return
-        if tag == "keyl":
-            # NAME identifies the keylist (referenced by <panel keylist=name>);
-            # APPLID is the application it belongs to. Both are metadata recorded
-            # on the Screen so the dialog can name/scope its keylist.
-            self._keylist = {}
-            self._keylist_name = a.get("name")
-            self._keylist_applid = a.get("applid")
-            # HELP names the keylist's help panel; ACTION=UPDATE|DELETE is a
-            # keylist-table maintenance directive (codegen only). Both metadata.
-            self._keylist_help = a.get("help")
-            self._keylist_action = a.get("action")
-        elif tag == "keyi":
-            self._emit_keyi(a)
-        elif tag == "cmdtbl":
-            self._in_cmdtbl = True
-            # APPLID scopes the command table to an application (metadata). SORT is
-            # a compile-time ordering of the table with no host-display effect (the
-            # table renders nothing — it only feeds command recognition). #126.
-            if a.get("applid"):
-                self.screen.commands_applid = a.get("applid")
-        elif tag == "cmd":
-            if not self._in_cmdtbl:
-                raise DTLError("<cmd> outside of a <cmdtbl>")
-            name = a.get("name")
-            if not name:
-                raise DTLError("<cmd> missing required attribute 'name'")
-            self._finalize_cmd_trunc()   # close a previous <cmd> whose end tag was omitted
-            # Truncation comes from a <t> marker in the external name (standard DTL);
-            # ALTDESCR is the command's human description (metadata). trunc starts 0
-            # and a nested <t> sets it (see _finalize_cmd_trunc).
-            self._cur_cmd = {"action": "", "trunc": 0, "descr": a.get("altdescr", "")}
-            self.screen.commands[name.upper()] = self._cur_cmd
-            # Capture the command's external-name text so a nested <t> can mark its
-            # truncation point.
-            self._cmd_chars, self._cmd_tpos = [], None
-        elif tag == "cmdact":
-            # The command action; read on start, since DTL often omits </cmdact>.
-            if self._cur_cmd is not None:
-                self._cur_cmd["action"] = a.get("action", "")
-        elif tag == "t":
-            # A truncation point inside a <cmd> external name: the text before it is
-            # the minimum abbreviation the user must type (<cmd>CANC<t>EL → trunc 4).
-            if self._cmd_chars is not None:
-                self._cmd_tpos = len("".join(self._cmd_chars).strip())
-        elif tag == "varclass":
+        if tag == "varclass":
             self._emit_varclass(a)
         elif tag == "checkl":
             if self._cur_varclass is None:
@@ -1465,6 +1421,60 @@ class _DTLParser(HTMLParser):
         elif self._cur_abc is not None:
             self._cur_abc["mnemonic"] = len("".join(self._cur_abc["chars"]))
 
+    # ── start handlers: keylists & command tables ────────────────────────────
+    # <keyl>/<keyi> function-key lists and <cmdtbl>/<cmd>/<cmdact>/<t>
+    # application command tables — pure metadata, nothing rendered.
+
+    def _start_keyl(self, tag, a):
+        # NAME identifies the keylist (referenced by <panel keylist=name>);
+        # APPLID is the application it belongs to. Both are metadata recorded
+        # on the Screen so the dialog can name/scope its keylist.
+        self._keylist = {}
+        self._keylist_name = a.get("name")
+        self._keylist_applid = a.get("applid")
+        # HELP names the keylist's help panel; ACTION=UPDATE|DELETE is a
+        # keylist-table maintenance directive (codegen only). Both metadata.
+        self._keylist_help = a.get("help")
+        self._keylist_action = a.get("action")
+
+    def _start_keyi(self, tag, a):
+        self._emit_keyi(a)
+
+    def _start_cmdtbl(self, tag, a):
+        self._in_cmdtbl = True
+        # APPLID scopes the command table to an application (metadata). SORT is
+        # a compile-time ordering of the table with no host-display effect (the
+        # table renders nothing — it only feeds command recognition). #126.
+        if a.get("applid"):
+            self.screen.commands_applid = a.get("applid")
+
+    def _start_cmd(self, tag, a):
+        if not self._in_cmdtbl:
+            raise DTLError("<cmd> outside of a <cmdtbl>")
+        name = a.get("name")
+        if not name:
+            raise DTLError("<cmd> missing required attribute 'name'")
+        self._finalize_cmd_trunc()   # close a previous <cmd> whose end tag was omitted
+        # Truncation comes from a <t> marker in the external name (standard DTL);
+        # ALTDESCR is the command's human description (metadata). trunc starts 0
+        # and a nested <t> sets it (see _finalize_cmd_trunc).
+        self._cur_cmd = {"action": "", "trunc": 0, "descr": a.get("altdescr", "")}
+        self.screen.commands[name.upper()] = self._cur_cmd
+        # Capture the command's external-name text so a nested <t> can mark its
+        # truncation point.
+        self._cmd_chars, self._cmd_tpos = [], None
+
+    def _start_cmdact(self, tag, a):
+        # The command action; read on start, since DTL often omits </cmdact>.
+        if self._cur_cmd is not None:
+            self._cur_cmd["action"] = a.get("action", "")
+
+    def _start_t(self, tag, a):
+        # A truncation point inside a <cmd> external name: the text before it is
+        # the minimum abbreviation the user must type (<cmd>CANC<t>EL → trunc 4).
+        if self._cmd_chars is not None:
+            self._cmd_tpos = len("".join(self._cmd_chars).strip())
+
     def _close_skip(self):
         """Leave the current non-rendering block. A <source>'s accumulated text is
         handed to _emit_source (ZSEL routing); the rest is discarded."""
@@ -1527,30 +1537,6 @@ class _DTLParser(HTMLParser):
         handler = self._END_HANDLERS.get(tag)
         if handler is not None:
             handler(self, tag)
-            return
-        if tag == "keyi":
-            self._finalize_keyi()
-            return
-        if tag == "keyl":
-            self._finalize_keyi()       # flush the last <keyi> (its end tag is omitted)
-            self.screen.keylist = self._keylist or {}
-            self.screen.keylist_name = self._keylist_name
-            self.screen.keylist_applid = self._keylist_applid
-            self.screen.keylist_help = self._keylist_help
-            self.screen.keylist_action = self._keylist_action
-            self._keylist = self._keylist_name = self._keylist_applid = None
-            self._keylist_help = self._keylist_action = None
-            return
-        if tag == "cmdtbl":
-            self._finalize_cmd_trunc()
-            self._in_cmdtbl = False
-            self._cur_cmd = None
-            self._cmd_chars = self._cmd_tpos = None
-            return
-        if tag == "cmd":
-            self._finalize_cmd_trunc()
-            self._cur_cmd = None
-            self._cmd_chars = self._cmd_tpos = None
             return
         if tag == "varclass":
             # An <xlatl format=upper> marks the whole class case-insensitive, even
@@ -1795,6 +1781,36 @@ class _DTLParser(HTMLParser):
         self._ab = None
         return
 
+    # ── end handlers: keylists & command tables ──────────────────────────────
+
+    def _end_keyi(self, tag):
+        self._finalize_keyi()
+        return
+
+    def _end_keyl(self, tag):
+        self._finalize_keyi()       # flush the last <keyi> (its end tag is omitted)
+        self.screen.keylist = self._keylist or {}
+        self.screen.keylist_name = self._keylist_name
+        self.screen.keylist_applid = self._keylist_applid
+        self.screen.keylist_help = self._keylist_help
+        self.screen.keylist_action = self._keylist_action
+        self._keylist = self._keylist_name = self._keylist_applid = None
+        self._keylist_help = self._keylist_action = None
+        return
+
+    def _end_cmdtbl(self, tag):
+        self._finalize_cmd_trunc()
+        self._in_cmdtbl = False
+        self._cur_cmd = None
+        self._cmd_chars = self._cmd_tpos = None
+        return
+
+    def _end_cmd(self, tag):
+        self._finalize_cmd_trunc()
+        self._cur_cmd = None
+        self._cmd_chars = self._cmd_tpos = None
+        return
+
     # ── tag-handler registries ───────────────────────────────────────────────
     # {tag -> handler} dispatch tables for handle_starttag / handle_endtag.
     # The *_INLINE registries hold the inline/annotating tags dispatched before
@@ -1859,6 +1875,13 @@ class _DTLParser(HTMLParser):
         "action": _start_action,
         "pdsep": _start_pdsep,
         "m": _start_m,
+        # keylists & command tables
+        "keyl": _start_keyl,
+        "keyi": _start_keyi,
+        "cmdtbl": _start_cmdtbl,
+        "cmd": _start_cmd,
+        "cmdact": _start_cmdact,
+        "t": _start_t,
         # text flow & lists
         "ul": _start_list,
         "ol": _start_list,
@@ -1895,6 +1918,11 @@ class _DTLParser(HTMLParser):
         "ab": _end_ab,
         "abc": _end_abc,
         "pdc": _end_pdc,
+        # keylists & command tables
+        "keyl": _end_keyl,
+        "keyi": _end_keyi,
+        "cmdtbl": _end_cmdtbl,
+        "cmd": _end_cmd,
         # text flow & lists
         "nt": _end_note,
         "note": _end_note,
