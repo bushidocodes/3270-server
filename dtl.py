@@ -652,92 +652,6 @@ class _DTLParser(HTMLParser):
             # the minimum abbreviation the user must type (<cmd>CANC<t>EL → trunc 4).
             if self._cmd_chars is not None:
                 self._cmd_tpos = len("".join(self._cmd_chars).strip())
-        elif tag == "ab":
-            # The action bar sits on the top row; its choices are separated by a
-            # fixed gap (the non-standard per-bar gap= attribute has been removed).
-            # ABSEPSTR is the string drawn between the choices (IBM's default is two
-            # blanks; we keep the wider gap when it is absent so bundled panels stay
-            # byte-identical). ABSEPCHAR is the character of the separator *line*
-            # ISPF draws on the row below the bar — both default to nothing shown.
-            self._ab = {"row": 0, "col": 1, "gap": 3, "choices": [],
-                        "absepstr": a.get("absepstr"),
-                        "absepchar": a.get("absepchar"),
-                        # MNEMGEN=YES auto-assigns the first letter of a choice as
-                        # its mnemonic when it carries no explicit <M>. Treated as
-                        # opt-in (absent → off) so existing bare-label action bars
-                        # stay byte-identical; MNEMGEN=NO is also off. #126.
-                        "mnemgen": str(a.get("mnemgen", "")).strip().lower()
-                        == "yes"}
-        elif tag == "abc":
-            if self._ab is None:
-                raise DTLError("<abc> outside of an <ab>")
-            self._end_abc()                     # implicit end of a previous <abc>
-            # PDCVAR names the )PROC variable that receives the selected pull-down
-            # choice number — a dialog-variable concern with no host-display effect;
-            # recorded on the choice model.
-            self._cur_abc = {"chars": [], "pdc": [], "help": self._field_help(a),
-                             "pdcvar": a.get("pdcvar")}
-        elif tag == "pdc":
-            if self._cur_abc is None:
-                raise DTLError("<pdc> outside of an <abc>")
-            self._end_pdc()                     # implicit end of a previous <pdc>
-            # A pull-down item can be conditionally unavailable (shown but not
-            # selectable), mirroring <choice unavail>: UNAVAIL=var greys it when the
-            # variable is true. CHECKVAR=var MATCH=x marks it the *current* setting
-            # (a "> " current-choice indicator) when the variable equals MATCH — the
-            # pull-down analogue of <choice checkvar> landing on the current choice.
-            unavail = "unavail" in a and self._var_truthy(a.get("unavail"))
-            checkvar = a.get("checkvar")
-            match = str(a.get("match", "")).strip().upper()
-            checked = bool(checkvar) and \
-                self._subs.get(str(checkvar).strip().upper(), "").strip().upper() == match
-            # ACC1-3 are GUI keyboard accelerators (e.g. Ctrl+key) shown beside the
-            # item in a GUI client; a text 3270 terminal has no accelerator display,
-            # so they are recorded (GUI-only) but not rendered.
-            acc = [a.get(k) for k in ("acc1", "acc2", "acc3") if a.get(k)]
-            self._cur_pdc = {"chars": [], "action": "",
-                             "help": self._field_help(a),
-                             "unavail": unavail, "checked": checked,
-                             "acc": acc}
-        elif tag == "action":
-            # A pull-down choice's command: <pdc>label<action run=cmd>. RUN= names
-            # the command the choice runs. SETVAR/TOGVAR model the variable an action
-            # assigns/toggles (an ISPF "Settings"-style on/off pull-down item): SETVAR
-            # sets VAR to VALUE; TOGVAR flips VAR between VALUE1 and VALUE2. TYPE is
-            # the action kind (CMD | PGM | PANEL | EXIT), defaulting to CMD.
-            if self._cur_pdc is not None:
-                self._cur_pdc["action"] = a.get("run") or self._cur_pdc["action"]
-                if a.get("type"):
-                    self._cur_pdc["type"] = str(a["type"]).strip().lower()
-                if a.get("parm"):
-                    self._cur_pdc["parm"] = a["parm"]
-                if a.get("setvar"):
-                    self._cur_pdc["setvar"] = (a["setvar"], a.get("value", "1"))
-                if a.get("togvar"):
-                    self._cur_pdc["togvar"] = (
-                        a["togvar"], a.get("value1", "0"), a.get("value2", "1"))
-                # APPLCMD/NEWAPPL/MODE/LANG and the other ACTION forms are ISPF
-                # SELECT/command-dispatch semantics (how/where the command runs) —
-                # no host-display effect. Recorded so the action model is lossless.
-                for k in ("applcmd", "newappl", "mode", "lang"):
-                    if a.get(k):
-                        self._cur_pdc[k] = a[k]
-        elif tag == "pdsep":
-            # A separator line within an action-bar pull-down: close the choice
-            # above it (DTL omits end tags) and record a divider row between the
-            # pull-down choices. Rendered by _show_pulldown when the menu opens.
-            if self._cur_abc is None:
-                raise DTLError("<pdsep> outside of an <abc>")
-            self._end_pdc()
-            self._cur_abc["pdc"].append({"separator": True})
-        elif tag == "m":
-            # <M> marks the mnemonic character of an action-bar choice or pull-down
-            # item — the shortcut letter ISPF shows highlighted. Record where it
-            # falls in the label text being captured (offset in the raw chars).
-            if self._cur_pdc is not None:
-                self._cur_pdc["mnemonic"] = len("".join(self._cur_pdc["chars"]))
-            elif self._cur_abc is not None:
-                self._cur_abc["mnemonic"] = len("".join(self._cur_abc["chars"]))
         elif tag == "varclass":
             self._emit_varclass(a)
         elif tag == "checkl":
@@ -1455,6 +1369,102 @@ class _DTLParser(HTMLParser):
             raise DTLError("<lstcol> outside of a <lstfld>")
         self._tag, self._attrs, self._chars = "lstcol", a, []  # capture heading
 
+    # ── start handlers: action bar & pull-down menus ─────────────────────────
+    # <ab> and its <abc> choices, each holding <pdc> pull-down items with
+    # <action>/<pdsep>/<m> (mnemonic) children.
+
+    def _start_ab(self, tag, a):
+        # The action bar sits on the top row; its choices are separated by a
+        # fixed gap (the non-standard per-bar gap= attribute has been removed).
+        # ABSEPSTR is the string drawn between the choices (IBM's default is two
+        # blanks; we keep the wider gap when it is absent so bundled panels stay
+        # byte-identical). ABSEPCHAR is the character of the separator *line*
+        # ISPF draws on the row below the bar — both default to nothing shown.
+        self._ab = {"row": 0, "col": 1, "gap": 3, "choices": [],
+                    "absepstr": a.get("absepstr"),
+                    "absepchar": a.get("absepchar"),
+                    # MNEMGEN=YES auto-assigns the first letter of a choice as
+                    # its mnemonic when it carries no explicit <M>. Treated as
+                    # opt-in (absent → off) so existing bare-label action bars
+                    # stay byte-identical; MNEMGEN=NO is also off. #126.
+                    "mnemgen": str(a.get("mnemgen", "")).strip().lower()
+                    == "yes"}
+
+    def _start_abc(self, tag, a):
+        if self._ab is None:
+            raise DTLError("<abc> outside of an <ab>")
+        self._close_abc()                     # implicit end of a previous <abc>
+        # PDCVAR names the )PROC variable that receives the selected pull-down
+        # choice number — a dialog-variable concern with no host-display effect;
+        # recorded on the choice model.
+        self._cur_abc = {"chars": [], "pdc": [], "help": self._field_help(a),
+                         "pdcvar": a.get("pdcvar")}
+
+    def _start_pdc(self, tag, a):
+        if self._cur_abc is None:
+            raise DTLError("<pdc> outside of an <abc>")
+        self._close_pdc()                     # implicit end of a previous <pdc>
+        # A pull-down item can be conditionally unavailable (shown but not
+        # selectable), mirroring <choice unavail>: UNAVAIL=var greys it when the
+        # variable is true. CHECKVAR=var MATCH=x marks it the *current* setting
+        # (a "> " current-choice indicator) when the variable equals MATCH — the
+        # pull-down analogue of <choice checkvar> landing on the current choice.
+        unavail = "unavail" in a and self._var_truthy(a.get("unavail"))
+        checkvar = a.get("checkvar")
+        match = str(a.get("match", "")).strip().upper()
+        checked = bool(checkvar) and \
+            self._subs.get(str(checkvar).strip().upper(), "").strip().upper() == match
+        # ACC1-3 are GUI keyboard accelerators (e.g. Ctrl+key) shown beside the
+        # item in a GUI client; a text 3270 terminal has no accelerator display,
+        # so they are recorded (GUI-only) but not rendered.
+        acc = [a.get(k) for k in ("acc1", "acc2", "acc3") if a.get(k)]
+        self._cur_pdc = {"chars": [], "action": "",
+                         "help": self._field_help(a),
+                         "unavail": unavail, "checked": checked,
+                         "acc": acc}
+
+    def _start_action(self, tag, a):
+        # A pull-down choice's command: <pdc>label<action run=cmd>. RUN= names
+        # the command the choice runs. SETVAR/TOGVAR model the variable an action
+        # assigns/toggles (an ISPF "Settings"-style on/off pull-down item): SETVAR
+        # sets VAR to VALUE; TOGVAR flips VAR between VALUE1 and VALUE2. TYPE is
+        # the action kind (CMD | PGM | PANEL | EXIT), defaulting to CMD.
+        if self._cur_pdc is not None:
+            self._cur_pdc["action"] = a.get("run") or self._cur_pdc["action"]
+            if a.get("type"):
+                self._cur_pdc["type"] = str(a["type"]).strip().lower()
+            if a.get("parm"):
+                self._cur_pdc["parm"] = a["parm"]
+            if a.get("setvar"):
+                self._cur_pdc["setvar"] = (a["setvar"], a.get("value", "1"))
+            if a.get("togvar"):
+                self._cur_pdc["togvar"] = (
+                    a["togvar"], a.get("value1", "0"), a.get("value2", "1"))
+            # APPLCMD/NEWAPPL/MODE/LANG and the other ACTION forms are ISPF
+            # SELECT/command-dispatch semantics (how/where the command runs) —
+            # no host-display effect. Recorded so the action model is lossless.
+            for k in ("applcmd", "newappl", "mode", "lang"):
+                if a.get(k):
+                    self._cur_pdc[k] = a[k]
+
+    def _start_pdsep(self, tag, a):
+        # A separator line within an action-bar pull-down: close the choice
+        # above it (DTL omits end tags) and record a divider row between the
+        # pull-down choices. Rendered by _show_pulldown when the menu opens.
+        if self._cur_abc is None:
+            raise DTLError("<pdsep> outside of an <abc>")
+        self._close_pdc()
+        self._cur_abc["pdc"].append({"separator": True})
+
+    def _start_m(self, tag, a):
+        # <M> marks the mnemonic character of an action-bar choice or pull-down
+        # item — the shortcut letter ISPF shows highlighted. Record where it
+        # falls in the label text being captured (offset in the raw chars).
+        if self._cur_pdc is not None:
+            self._cur_pdc["mnemonic"] = len("".join(self._cur_pdc["chars"]))
+        elif self._cur_abc is not None:
+            self._cur_abc["mnemonic"] = len("".join(self._cur_abc["chars"]))
+
     def _close_skip(self):
         """Leave the current non-rendering block. A <source>'s accumulated text is
         handed to _emit_source (ZSEL routing); the rest is discarded."""
@@ -1537,18 +1547,6 @@ class _DTLParser(HTMLParser):
             self._cur_cmd = None
             self._cmd_chars = self._cmd_tpos = None
             return
-        if tag == "pdc":
-            self._end_pdc()
-            return
-        if tag == "abc":
-            self._end_abc()
-            return
-        if tag == "ab":
-            self._end_abc()                 # close any open <abc>/<pdc> (implicit)
-            if self._ab is not None:
-                self._emit_action_bar(self._ab)
-            self._ab = None
-            return
         if tag == "cmd":
             self._finalize_cmd_trunc()
             self._cur_cmd = None
@@ -1577,7 +1575,7 @@ class _DTLParser(HTMLParser):
             self._checkl = None
             return
         if tag == "xlatl":
-            self._end_xlatl()
+            self._close_xlatl()
             return
         if tag == "varlist":
             self._in_varlist = False
@@ -1780,6 +1778,23 @@ class _DTLParser(HTMLParser):
         self._lstgrp = self._lstgrp_stack[-1] if self._lstgrp_stack else None
         return
 
+    # ── end handlers: action bar & pull-down menus ───────────────────────────
+
+    def _end_pdc(self, tag):
+        self._close_pdc()
+        return
+
+    def _end_abc(self, tag):
+        self._close_abc()
+        return
+
+    def _end_ab(self, tag):
+        self._close_abc()                 # close any open <abc>/<pdc> (implicit)
+        if self._ab is not None:
+            self._emit_action_bar(self._ab)
+        self._ab = None
+        return
+
     # ── tag-handler registries ───────────────────────────────────────────────
     # {tag -> handler} dispatch tables for handle_starttag / handle_endtag.
     # The *_INLINE registries hold the inline/annotating tags dispatched before
@@ -1837,6 +1852,13 @@ class _DTLParser(HTMLParser):
         "lstfld": _start_lstfld,
         "lstgrp": _start_lstgrp,
         "lstcol": _start_lstcol,
+        # action bar & pull-down menus
+        "ab": _start_ab,
+        "abc": _start_abc,
+        "pdc": _start_pdc,
+        "action": _start_action,
+        "pdsep": _start_pdsep,
+        "m": _start_m,
         # text flow & lists
         "ul": _start_list,
         "ol": _start_list,
@@ -1869,6 +1891,10 @@ class _DTLParser(HTMLParser):
         "dtafldd": _end_dtafldd,
         "lstfld": _end_lstfld,
         "lstgrp": _end_lstgrp,
+        # action bar & pull-down menus
+        "ab": _end_ab,
+        "abc": _end_abc,
+        "pdc": _end_pdc,
         # text flow & lists
         "nt": _end_note,
         "note": _end_note,
@@ -4257,7 +4283,7 @@ class _DTLParser(HTMLParser):
             if a.get("value") is not None:
                 self._xlatl["pairs"].append((a.get("value"), external))
 
-    def _end_xlatl(self):
+    def _close_xlatl(self):
         """Close an ``<xlatl>`` translate list. ``FORMAT=upper`` marks the class as
         uppercased. An ``<xlatl>`` that lists ``<xlati>`` translations restricts
         valid input to those external values (a typed value must translate) — added
@@ -4708,7 +4734,7 @@ class _DTLParser(HTMLParser):
             return 1
         return 0
 
-    def _end_pdc(self):
+    def _close_pdc(self):
         """Finalise the open <pdc> onto its <abc>. DTL omits most end tags, so a
         pull-down is also closed by the next <pdc> or by </abc> (not only </pdc>)."""
         if self._cur_pdc is not None and self._cur_abc is not None:
@@ -4732,10 +4758,10 @@ class _DTLParser(HTMLParser):
             self._cur_abc["pdc"].append(item)
         self._cur_pdc = None
 
-    def _end_abc(self):
+    def _close_abc(self):
         """Finalise the open <abc> (and its last <pdc>) onto the action bar —
         closed by the next <abc> or by </ab>, not only </abc>."""
-        self._end_pdc()
+        self._close_pdc()
         if self._cur_abc is not None and self._ab is not None:
             raw = "".join(self._cur_abc["chars"])
             label = raw.strip()
