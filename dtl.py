@@ -607,50 +607,8 @@ class _DTLParser(HTMLParser):
         handler = self._START_HANDLERS.get(tag)
         if handler is not None:
             handler(self, tag, a)
-            return
-        if tag == "varclass":
-            self._emit_varclass(a)
-        elif tag == "checkl":
-            if self._cur_varclass is None:
-                raise DTLError("<checkl> outside of a <varclass>")
-            self._checkl = {"msg": a.get("msg"), "checks": []}
-        elif tag == "checki":
-            if self._checkl is None:
-                raise DTLError("<checki> outside of a <checkl>")
-            self._tag, self._attrs, self._chars = "checki", a, []
-        elif tag == "xlatl":
-            if self._cur_varclass is None:
-                raise DTLError("<xlatl> outside of a <varclass>")
-            self._xlatl = {
-                "msg": a.get("msg"),
-                "upper": str(a.get("format", "")).strip().lower() == "upper",
-                "items": [],
-                "pairs": [],     # (internal value, external/displayed) translations
-            }
-        elif tag == "xlati":
-            if self._xlatl is None:
-                raise DTLError("<xlati> outside of an <xlatl>")
-            self._tag, self._attrs, self._chars = "xlati", a, []
-        elif tag == "varlist":
-            self._in_varlist = True
-        elif tag == "vardcl":
-            self._emit_vardcl(a)
-        elif tag == "msgmbr":
-            self._in_msgmbr = True
-            self._msgmbr_name = a.get("name", "")
-            self._msgmbr_width = self._opt_int(a.get("width"))
-            self._msgmbr_ccsid = self._opt_int(a.get("ccsid"))
-        elif tag == "msg":
-            if not self._in_msgmbr:
-                raise DTLError("<msg> outside of a <msgmbr>")
-            if "msgid" not in a:
-                # ISPF forms the id from the member name + a per-message suffix
-                # (e.g. <msgmbr name=abcd00><msg suffix=1> → abcd001).
-                if "suffix" in a and self._msgmbr_name:
-                    a["msgid"] = self._msgmbr_name + a["suffix"]
-                else:
-                    raise DTLError("<msg> missing required attribute 'msgid'")
-            self._tag, self._attrs, self._chars = "msg", a, []
+        # An unregistered tag renders nothing (the implicit flush above still
+        # closed the open content element, as a new block element does).
 
     # ── start handlers: inline / annotating tags ─────────────────────────────
     # Dispatched from handle_starttag via _START_INLINE, BEFORE the implicit
@@ -1475,6 +1433,66 @@ class _DTLParser(HTMLParser):
         if self._cmd_chars is not None:
             self._cmd_tpos = len("".join(self._cmd_chars).strip())
 
+    # ── start handlers: variables & validation ───────────────────────────────
+    # <varclass> (+<checkl>/<checki>, <xlatl>/<xlati> translate lists) and
+    # <varlist>/<vardcl> declarations — field-validation metadata.
+
+    def _start_varclass(self, tag, a):
+        self._emit_varclass(a)
+
+    def _start_checkl(self, tag, a):
+        if self._cur_varclass is None:
+            raise DTLError("<checkl> outside of a <varclass>")
+        self._checkl = {"msg": a.get("msg"), "checks": []}
+
+    def _start_checki(self, tag, a):
+        if self._checkl is None:
+            raise DTLError("<checki> outside of a <checkl>")
+        self._tag, self._attrs, self._chars = "checki", a, []
+
+    def _start_xlatl(self, tag, a):
+        if self._cur_varclass is None:
+            raise DTLError("<xlatl> outside of a <varclass>")
+        self._xlatl = {
+            "msg": a.get("msg"),
+            "upper": str(a.get("format", "")).strip().lower() == "upper",
+            "items": [],
+            "pairs": [],     # (internal value, external/displayed) translations
+        }
+
+    def _start_xlati(self, tag, a):
+        if self._xlatl is None:
+            raise DTLError("<xlati> outside of an <xlatl>")
+        self._tag, self._attrs, self._chars = "xlati", a, []
+
+    def _start_varlist(self, tag, a):
+        self._in_varlist = True
+
+    def _start_vardcl(self, tag, a):
+        self._emit_vardcl(a)
+
+    # ── start handlers: messages ─────────────────────────────────────────────
+    # <msgmbr> message members and their <msg> entries (parsed by
+    # load_messages; a <msg>'s text is a captured content element).
+
+    def _start_msgmbr(self, tag, a):
+        self._in_msgmbr = True
+        self._msgmbr_name = a.get("name", "")
+        self._msgmbr_width = self._opt_int(a.get("width"))
+        self._msgmbr_ccsid = self._opt_int(a.get("ccsid"))
+
+    def _start_msg(self, tag, a):
+        if not self._in_msgmbr:
+            raise DTLError("<msg> outside of a <msgmbr>")
+        if "msgid" not in a:
+            # ISPF forms the id from the member name + a per-message suffix
+            # (e.g. <msgmbr name=abcd00><msg suffix=1> → abcd001).
+            if "suffix" in a and self._msgmbr_name:
+                a["msgid"] = self._msgmbr_name + a["suffix"]
+            else:
+                raise DTLError("<msg> missing required attribute 'msgid'")
+        self._tag, self._attrs, self._chars = "msg", a, []
+
     def _close_skip(self):
         """Leave the current non-rendering block. A <source>'s accumulated text is
         handed to _emit_source (ZSEL routing); the rest is discarded."""
@@ -1537,37 +1555,6 @@ class _DTLParser(HTMLParser):
         handler = self._END_HANDLERS.get(tag)
         if handler is not None:
             handler(self, tag)
-            return
-        if tag == "varclass":
-            # An <xlatl format=upper> marks the whole class case-insensitive, even
-            # when it is written after the <xlatl> that lists the translations — so
-            # apply the class's upper flag to every xlati check now that all its
-            # <xlatl>s are closed (order-independent matching).
-            vc = self._varclasses.get(self._cur_varclass)
-            if vc and vc.get("upper"):
-                for c in vc["checks"]:
-                    if c.get("type") == "xlati" and not c["upper"]:
-                        c["upper"] = True
-                        c["values"] = [v.upper() for v in c["values"]]
-            self._cur_varclass = None
-            return
-        if tag == "checkl":
-            if self._checkl is not None and self._cur_varclass in self._varclasses:
-                vc = self._varclasses[self._cur_varclass]
-                vc["checks"].extend(self._checkl["checks"])
-                # The <checkl>'s own MSG names the failure message; fall back to the
-                # class-level <varclass msg=> (which also covers TYPE-derived checks).
-                vc["msg"] = self._checkl["msg"] or vc.get("msg")
-            self._checkl = None
-            return
-        if tag == "xlatl":
-            self._close_xlatl()
-            return
-        if tag == "varlist":
-            self._in_varlist = False
-            return
-        if tag == "msgmbr":
-            self._in_msgmbr = False
             return
         if tag != self._tag:
             return
@@ -1811,6 +1798,46 @@ class _DTLParser(HTMLParser):
         self._cmd_chars = self._cmd_tpos = None
         return
 
+    # ── end handlers: variables & validation ─────────────────────────────────
+
+    def _end_varclass(self, tag):
+        # An <xlatl format=upper> marks the whole class case-insensitive, even
+        # when it is written after the <xlatl> that lists the translations — so
+        # apply the class's upper flag to every xlati check now that all its
+        # <xlatl>s are closed (order-independent matching).
+        vc = self._varclasses.get(self._cur_varclass)
+        if vc and vc.get("upper"):
+            for c in vc["checks"]:
+                if c.get("type") == "xlati" and not c["upper"]:
+                    c["upper"] = True
+                    c["values"] = [v.upper() for v in c["values"]]
+        self._cur_varclass = None
+        return
+
+    def _end_checkl(self, tag):
+        if self._checkl is not None and self._cur_varclass in self._varclasses:
+            vc = self._varclasses[self._cur_varclass]
+            vc["checks"].extend(self._checkl["checks"])
+            # The <checkl>'s own MSG names the failure message; fall back to the
+            # class-level <varclass msg=> (which also covers TYPE-derived checks).
+            vc["msg"] = self._checkl["msg"] or vc.get("msg")
+        self._checkl = None
+        return
+
+    def _end_xlatl(self, tag):
+        self._close_xlatl()
+        return
+
+    def _end_varlist(self, tag):
+        self._in_varlist = False
+        return
+
+    # ── end handlers: messages ───────────────────────────────────────────────
+
+    def _end_msgmbr(self, tag):
+        self._in_msgmbr = False
+        return
+
     # ── tag-handler registries ───────────────────────────────────────────────
     # {tag -> handler} dispatch tables for handle_starttag / handle_endtag.
     # The *_INLINE registries hold the inline/annotating tags dispatched before
@@ -1882,6 +1909,17 @@ class _DTLParser(HTMLParser):
         "cmd": _start_cmd,
         "cmdact": _start_cmdact,
         "t": _start_t,
+        # variables & validation
+        "varclass": _start_varclass,
+        "checkl": _start_checkl,
+        "checki": _start_checki,
+        "xlatl": _start_xlatl,
+        "xlati": _start_xlati,
+        "varlist": _start_varlist,
+        "vardcl": _start_vardcl,
+        # messages
+        "msgmbr": _start_msgmbr,
+        "msg": _start_msg,
         # text flow & lists
         "ul": _start_list,
         "ol": _start_list,
@@ -1923,6 +1961,13 @@ class _DTLParser(HTMLParser):
         "keyi": _end_keyi,
         "cmdtbl": _end_cmdtbl,
         "cmd": _end_cmd,
+        # variables & validation
+        "varclass": _end_varclass,
+        "checkl": _end_checkl,
+        "xlatl": _end_xlatl,
+        "varlist": _end_varlist,
+        # messages
+        "msgmbr": _end_msgmbr,
         # text flow & lists
         "nt": _end_note,
         "note": _end_note,
