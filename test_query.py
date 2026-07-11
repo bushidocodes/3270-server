@@ -511,6 +511,71 @@ def test_query_terminal_folds_in_reply():
     assert m.color                                 # Color Query Reply seen
 
 
+def test_query_terminal_clamps_oversize_usable_area():
+    """#348: an -oversize terminal legitimately reports a usable area beyond
+    12-bit coded addressing (132x60 = 7920 > 0x0FC0 cells). Folding it in
+    unchecked made the first full-screen render raise ValueError deep in
+    encode_pack_addr (silent session death). The oversize report is ignored:
+    the model keeps its type-string alternate geometry — the largest size we
+    know we can address — and the session's screens still render."""
+    srv, cli = socket.socketpair()
+    result = {}
+
+    def run():
+        model = server.parse_terminal_type("IBM-3278-4-E")   # 43x80 alternate
+        result["model"] = server.query_terminal(srv, model)
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    try:
+        cli.settimeout(5)
+        cli.recv(64)                                  # the outbound query
+        cli.sendall(_reply_record(cols=132, rows=60) + bytes([IAC, EOR]))
+        t.join(timeout=5)
+    finally:
+        srv.close()
+        cli.close()
+
+    m = result["model"]
+    assert (m.alt_rows, m.alt_cols) == (43, 80)   # type-string geometry kept
+    assert m.alt_rows * m.alt_cols <= server.MAX_ADDRESSABLE_CELLS
+    assert m.color                                 # the rest of the reply still folds in
+    assert server.QR_USABLE_AREA in m.query_caps
+    # The session's full-screen renders must now work end to end.
+    rows, cols = server._screen_size(m)
+    from dtl import load_panel
+    screen = load_panel("browse")
+    screen.width, screen.depth, screen.alternate = cols, rows, True
+    data = screen.render()                         # raised ValueError before #348
+    assert data.endswith(bytes([IAC, EOR]))
+
+
+def test_query_terminal_accepts_large_addressable_area():
+    """A big-but-addressable usable area (50x80 = 4000 <= 0x0FC0 cells) is still
+    folded in unchanged — the clamp only rejects what 12-bit addressing can't
+    reach."""
+    srv, cli = socket.socketpair()
+    result = {}
+
+    def run():
+        model = server.parse_terminal_type("IBM-3278-2-E")
+        result["model"] = server.query_terminal(srv, model)
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    try:
+        cli.settimeout(5)
+        cli.recv(64)
+        cli.sendall(_reply_record(cols=80, rows=50) + bytes([IAC, EOR]))
+        t.join(timeout=5)
+    finally:
+        srv.close()
+        cli.close()
+
+    m = result["model"]
+    assert (m.alt_rows, m.alt_cols) == (50, 80)
+
+
 def test_query_terminal_folds_in_charsets():
     """A terminal's Character Sets reply is decoded onto the model: Graphic Escape
     support, the base CGCSGID, and the descriptor list — so the send path can gate

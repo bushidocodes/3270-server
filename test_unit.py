@@ -102,6 +102,25 @@ def test_pack_addr_raises_on_overflow():
         encode_pack_addr(100, 0)
 
 
+def test_pack_addr_raises_in_iac_range():
+    """#348: addresses 4032-4095 would encode a high byte of 0xFF — a raw Telnet
+    IAC the unescaped outbound screen would mis-frame — so they must raise too.
+    4031 (the last representable address) still encodes, IAC-free."""
+    assert encode_pack_addr(50, 31) == bytes([0xFE, 0x7F])   # addr 4031: fine
+    for addr in (4032, 4095):                                # high chunk 0x3F
+        with pytest.raises(ValueError):
+            encode_pack_addr(*divmod(addr, 80))
+
+
+def test_pack_addr_never_emits_iac():
+    """#348: no representable address may put a 0xFF byte on the wire — the
+    render path does not IAC-escape screen bytes."""
+    from server import MAX_ADDRESSABLE_CELLS
+    assert MAX_ADDRESSABLE_CELLS == 0x0FC0
+    for addr in range(MAX_ADDRESSABLE_CELLS):
+        assert 0xFF not in encode_pack_addr(*divmod(addr, 80))
+
+
 # ── write_control_character ────────────────────────────────────────────────────
 
 def test_wcc_default():
@@ -329,6 +348,30 @@ def test_parse_cursor_address():
     aid, fields, cursor = read_client_input(_sock(payload))
     assert cursor == cur
     assert fields == {addr: "IBMUSER"}
+
+
+def test_parse_14bit_cursor_address():
+    """#348: a terminal with more than 4096 cells (x3270 -oversize) sends
+    positions beyond coded range as 14-bit binary addresses (top two bits 00).
+    They must decode as-is, not be mangled through the 12-bit 6+6 masks."""
+    cur = 5000                    # beyond 12-bit coded range
+    addr = 5 * 80 + 17
+    payload = (bytes([AID_ENTER]) + bytes([(cur >> 8) & 0x3F, cur & 0xFF])
+               + _sba_bytes(addr) + "IBMUSER".encode("cp037"))
+    aid, fields, cursor = read_client_input(_sock(payload))
+    assert cursor == cur
+    assert fields == {addr: "IBMUSER"}
+
+
+def test_parse_14bit_sba_address():
+    """#348: an SBA whose address rides in 14-bit binary form decodes to the
+    real linear address."""
+    addr = 6000                   # beyond 12-bit coded range
+    payload = (bytes([AID_ENTER]) + encode_pack_addr(0, 0)
+               + bytes([SBA, (addr >> 8) & 0x3F, addr & 0xFF])
+               + "HELLO".encode("cp037"))
+    aid, fields, _ = read_client_input(_sock(payload))
+    assert fields == {addr: "HELLO"}
 
 
 def test_parse_single_field():
