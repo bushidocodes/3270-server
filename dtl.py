@@ -604,72 +604,11 @@ class _DTLParser(HTMLParser):
         # they are inline children that must not close their parent.
         if tag not in ("dtafldd", "lit") and self._tag is not None:
             self._emit_current()
-        if tag in ("ul", "ol", "sl"):
-            # <ul>/<ol> mark each item with a bullet/number; <sl> (simple list)
-            # indents its items with no marker (see _emit_listitem). TEXT= gives
-            # the list a heading line above its items; INDENT shifts the whole list
-            # right; SPACE sets the item-text indentation (YES → 3 cols, else 4),
-            # inherited by every <li> that does not carry its own SPACE (#123).
-            # ISPDTLC also inserts a leading blank line before the list, ahead of any
-            # heading (COMPACT/NOSKIP suppress it — #210).
-            self._skip_blank_before(a)
-            ctx = self._areas[-1] if self._areas else None
-            indent = self._opt_int(a.get("indent"), 0)
-            heading = str(a.get("text", "")).strip()
-            if ctx is not None and heading:
-                self.screen.add(Text(ctx["row"], ctx["col"] + indent, heading,
-                                     role="text"))
-                ctx["row"] += 2               # heading + a blank line before the items
-            self._lists.append({"type": tag, "n": 0,
-                                "indent": indent,
-                                "space": self._space_indent(a)})
-        elif tag == "notel":
-            # A note list: a "Notes:" heading (TEXT= override, INTENS/COLOR/HILITE
-            # style it), a blank line, then NUMBERED <li> items (1. 2. …).
-            # ISPDTLC inserts a leading blank line before the heading (COMPACT/
-            # NOSKIP suppress it — #210).
-            self._skip_blank_before(a)
-            ctx = self._areas[-1] if self._areas else None
-            if ctx is not None:
-                heading = (a.get("text") or "Notes:").strip()
-                indent = self._opt_int(a.get("indent"), 0)
-                self.screen.add(Text(ctx["row"], ctx["col"] + indent, heading,
-                                     _intensity(a, "intens"), color=self._text_colour(a),
-                                     highlight=self._hilite(a), role="text"))
-                ctx["row"] += 2               # heading + blank line before the items
-            # SPACE sets the item-text indentation: YES → 3 columns, else 4.
-            self._lists.append({"type": "ol", "n": 0,
-                                "space": self._space_indent(a)})
-        elif tag in ("dl", "parml"):
-            # A definition/parameter list carries its term-column width (tsize)
-            # and break style; <dt>/<dd> (<pt>/<pd>) entries lay out against it.
-            # ISPDTLC inserts a blank line before the list (COMPACT/NOSKIP suppress).
-            self._skip_blank_before(a)
-            # TSIZE='n' | 's1 s2 … sn' → one width per definition-term COLUMN; a
-            # multi-column list codes one <dt> per width (see _emit_defitem).
-            tsizes = [int(p) for p in str(a.get("tsize", "")).split() if p.isdigit()] \
-                or [self._DL_TSIZE]
-            self._lists.append({
-                "type": tag, "n": 0,
-                "tsizes": tsizes,
-                "tsize": tsizes[0],           # first-column width (single-column paths)
-                "col": 0,                     # current term-column index in the entry
-                "seg_row": None,              # next <dtseg> stacking row for this column
-                "break": a.get("break", "none").lower(),
-                "compact": _bool_attr(a, "compact"),  # no blank after a <ddhd> header
-                "indent": self._opt_int(a.get("indent"), 0),  # shift the list right
-                # FORMAT positions the DT term within its TSIZE column.
-                "format": str(a.get("format", "start")).strip().lower(),
-                # DIVEND=YES draws a dashed rule across the list when it closes.
-                "divend": _bool_attr(a, "divend"),
-                "pending": None,
-            })
-        elif tag == "textline":
-            # <textline> builds the panel/help title from its <textseg> segments,
-            # replacing the tag's own title text (see _emit_textline). The empty
-            # title captured before it was just flushed to nothing above.
-            self._textline = []
-        elif tag == "pandef":
+        handler = self._START_HANDLERS.get(tag)
+        if handler is not None:
+            handler(self, tag, a)
+            return
+        if tag == "pandef":
             # <pandef id=…> defines reusable panel defaults (HELP/DEPTH/WIDTH/
             # KEYLIST/…) applied to any <panel PANDEF=id>. It renders nothing.
             pid = str(a.get("id", "")).strip().lower()
@@ -682,10 +621,6 @@ class _DTLParser(HTMLParser):
             hid = str(a.get("id", "")).strip().lower()
             if hid:
                 self._helpdefs[hid] = {k: v for k, v in a.items() if k != "id"}
-        elif tag in ("dtdiv", "dthdiv", "ptdiv"):
-            # A vertical `|` between definition-term (or -heading) columns; the
-            # preceding <dt>/<dthd> was flushed just above, so its column state is set.
-            self._emit_defdiv(tag)
         if tag in ("panel", "help"):
             # A <panel PANDEF=id> / <help HELPDEF=id> inherits the named default
             # block's attributes — the panel's own attributes win (setdefault fills
@@ -1299,15 +1234,6 @@ class _DTLParser(HTMLParser):
                 else:
                     raise DTLError("<msg> missing required attribute 'msgid'")
             self._tag, self._attrs, self._chars = "msg", a, []
-        elif tag in _CONTENT_TAGS:
-            if tag == "info":
-                # <info indent=n> shifts its whole content right; the flow picks
-                # this up in _resolve_pos until the matching </info> (or box end).
-                self._info_indent = self._opt_int(a.get("indent"), 0)
-            self._tag, self._attrs, self._chars = tag, a, []
-            # A new content tag closes any still-open <dtafldd> (SGML omits the
-            # end tag), so the dtafldd capture state must not leak into it.
-            self._in_dtafldd, self._dtafldd = False, None
 
     # ── start handlers: inline / annotating tags ─────────────────────────────
     # Dispatched from handle_starttag via _START_INLINE, BEFORE the implicit
@@ -1412,6 +1338,98 @@ class _DTLParser(HTMLParser):
             self._assignl["pairs"].append((a.get("value"), a.get("result", "")))
         return True
 
+    # ── start handlers: text flow & lists ────────────────────────────────────
+    # Block-level text: captured content elements (paragraphs, list items,
+    # headings, instructions, …), the list containers that shape them, and the
+    # <textline>/<textseg> title builder.
+
+    def _start_list(self, tag, a):
+        # <ul>/<ol> mark each item with a bullet/number; <sl> (simple list)
+        # indents its items with no marker (see _emit_listitem). TEXT= gives
+        # the list a heading line above its items; INDENT shifts the whole list
+        # right; SPACE sets the item-text indentation (YES → 3 cols, else 4),
+        # inherited by every <li> that does not carry its own SPACE (#123).
+        # ISPDTLC also inserts a leading blank line before the list, ahead of any
+        # heading (COMPACT/NOSKIP suppress it — #210).
+        self._skip_blank_before(a)
+        ctx = self._areas[-1] if self._areas else None
+        indent = self._opt_int(a.get("indent"), 0)
+        heading = str(a.get("text", "")).strip()
+        if ctx is not None and heading:
+            self.screen.add(Text(ctx["row"], ctx["col"] + indent, heading,
+                                 role="text"))
+            ctx["row"] += 2               # heading + a blank line before the items
+        self._lists.append({"type": tag, "n": 0,
+                            "indent": indent,
+                            "space": self._space_indent(a)})
+
+    def _start_notel(self, tag, a):
+        # A note list: a "Notes:" heading (TEXT= override, INTENS/COLOR/HILITE
+        # style it), a blank line, then NUMBERED <li> items (1. 2. …).
+        # ISPDTLC inserts a leading blank line before the heading (COMPACT/
+        # NOSKIP suppress it — #210).
+        self._skip_blank_before(a)
+        ctx = self._areas[-1] if self._areas else None
+        if ctx is not None:
+            heading = (a.get("text") or "Notes:").strip()
+            indent = self._opt_int(a.get("indent"), 0)
+            self.screen.add(Text(ctx["row"], ctx["col"] + indent, heading,
+                                 _intensity(a, "intens"), color=self._text_colour(a),
+                                 highlight=self._hilite(a), role="text"))
+            ctx["row"] += 2               # heading + blank line before the items
+        # SPACE sets the item-text indentation: YES → 3 columns, else 4.
+        self._lists.append({"type": "ol", "n": 0,
+                            "space": self._space_indent(a)})
+
+    def _start_deflist(self, tag, a):
+        # A definition/parameter list carries its term-column width (tsize)
+        # and break style; <dt>/<dd> (<pt>/<pd>) entries lay out against it.
+        # ISPDTLC inserts a blank line before the list (COMPACT/NOSKIP suppress).
+        self._skip_blank_before(a)
+        # TSIZE='n' | 's1 s2 … sn' → one width per definition-term COLUMN; a
+        # multi-column list codes one <dt> per width (see _emit_defitem).
+        tsizes = [int(p) for p in str(a.get("tsize", "")).split() if p.isdigit()] \
+            or [self._DL_TSIZE]
+        self._lists.append({
+            "type": tag, "n": 0,
+            "tsizes": tsizes,
+            "tsize": tsizes[0],           # first-column width (single-column paths)
+            "col": 0,                     # current term-column index in the entry
+            "seg_row": None,              # next <dtseg> stacking row for this column
+            "break": a.get("break", "none").lower(),
+            "compact": _bool_attr(a, "compact"),  # no blank after a <ddhd> header
+            "indent": self._opt_int(a.get("indent"), 0),  # shift the list right
+            # FORMAT positions the DT term within its TSIZE column.
+            "format": str(a.get("format", "start")).strip().lower(),
+            # DIVEND=YES draws a dashed rule across the list when it closes.
+            "divend": _bool_attr(a, "divend"),
+            "pending": None,
+        })
+
+    def _start_textline(self, tag, a):
+        # <textline> builds the panel/help title from its <textseg> segments,
+        # replacing the tag's own title text (see _emit_textline). The empty
+        # title captured before it was just flushed to nothing above.
+        self._textline = []
+
+    def _start_defdiv(self, tag, a):
+        # A vertical `|` between definition-term (or -heading) columns; the
+        # preceding <dt>/<dthd> was flushed just above, so its column state is set.
+        self._emit_defdiv(tag)
+
+    def _start_content(self, tag, a):
+        # A captured content element (paragraph, list item, instruction, field,
+        # choice, …): bank the tag and start capturing its text; the element is
+        # emitted when the next block tag (or its end tag) closes it.
+        if tag == "info":
+            # <info indent=n> shifts its whole content right; the flow picks
+            # this up in _resolve_pos until the matching </info> (or box end).
+            self._info_indent = self._opt_int(a.get("indent"), 0)
+        self._tag, self._attrs, self._chars = tag, a, []
+        # A new content tag closes any still-open <dtafldd> (SGML omits the
+        # end tag), so the dtafldd capture state must not leak into it.
+        self._in_dtafldd, self._dtafldd = False, None
+
     def _close_skip(self):
         """Leave the current non-rendering block. A <source>'s accumulated text is
         handed to _emit_source (ZSEL routing); the rest is discarded."""
@@ -1471,38 +1489,14 @@ class _DTLParser(HTMLParser):
         # end tag is handled below via the normal `tag == self._tag` path.
         if self._tag is not None and tag != self._tag and tag not in ("dtafldd", "lit"):
             self._emit_current()  # flush at the current list depth, before any pop
-        if tag in ("nt", "note"):
-            # Flush the note's own text if no nested child already did, then end the
-            # hanging indent so a following sibling block flows at the box column (#219).
-            if self._tag == tag:
-                self._emit_current()
-            self._note_hang = None
-            return
-        if tag == "info":
-            # The info's own text (if any) was flushed above; end its indent so a
-            # following sibling flows at the box column again (#123).
-            if self._tag == tag:
-                self._emit_current()
-            self._info_indent = 0
-            return
-        if tag == "textline":
-            self._emit_textline()
+        handler = self._END_HANDLERS.get(tag)
+        if handler is not None:
+            handler(self, tag)
             return
         if tag == "da":
             self._emit_da()
             self._da = None
             return
-        if tag in ("ul", "ol", "sl", "dl", "parml", "notel") and self._lists:
-            lst = self._lists[-1]
-            # <dl>/<parml DIVEND=YES>: a dashed rule spanning the list as it closes.
-            if lst.get("divend") and self._areas:
-                ctx = self._areas[-1]
-                col = ctx["col"] + lst.get("indent", 0)
-                span = max(1, self.screen.width - col - 1)
-                self.screen.add(Text(ctx["row"], col, "-" * span,
-                                     DisplayIntensity.NORMAL, role="rule"))
-                ctx["row"] += 1
-            self._lists.pop()
         if tag in ("panel", "help"):
             if self._da is not None:      # a <da> with an omitted end tag
                 self._emit_da()
@@ -1713,6 +1707,42 @@ class _DTLParser(HTMLParser):
         # a (rare) explicit </varsub> must not prematurely close the enclosing <msg>.
         return True
 
+    # ── end handlers: text flow & lists ──────────────────────────────────────
+
+    def _end_note(self, tag):
+        # Flush the note's own text if no nested child already did, then end the
+        # hanging indent so a following sibling block flows at the box column (#219).
+        if self._tag == tag:
+            self._emit_current()
+        self._note_hang = None
+
+    def _end_info(self, tag):
+        # The info's own text (if any) was flushed above; end its indent so a
+        # following sibling flows at the box column again (#123).
+        if self._tag == tag:
+            self._emit_current()
+        self._info_indent = 0
+
+    def _end_textline(self, tag):
+        self._emit_textline()
+
+    def _end_list(self, tag):
+        # (The former elif chain fell through after the pop; the epilogue was a
+        # guaranteed no-op there — a list container is never the captured
+        # ``self._tag`` — so returning here is equivalent.)
+        if not self._lists:
+            return
+        lst = self._lists[-1]
+        # <dl>/<parml DIVEND=YES>: a dashed rule spanning the list as it closes.
+        if lst.get("divend") and self._areas:
+            ctx = self._areas[-1]
+            col = ctx["col"] + lst.get("indent", 0)
+            span = max(1, self.screen.width - col - 1)
+            self.screen.add(Text(ctx["row"], col, "-" * span,
+                                 DisplayIntensity.NORMAL, role="rule"))
+            ctx["row"] += 1
+        self._lists.pop()
+
     # ── tag-handler registries ───────────────────────────────────────────────
     # {tag -> handler} dispatch tables for handle_starttag / handle_endtag.
     # The *_INLINE registries hold the inline/annotating tags dispatched before
@@ -1745,6 +1775,42 @@ class _DTLParser(HTMLParser):
         "scrfld": _inline_end_noop,
         "assigni": _inline_end_noop,
         "varsub": _inline_end_noop,
+    }
+
+    # Block-level start handlers, dispatched after the implicit flush. An
+    # unregistered tag renders nothing (the flush above still closed the open
+    # element). _CONTENT_TAGS all share _start_content (capture + emit-on-close).
+    _START_HANDLERS = {
+        # text flow & lists
+        "ul": _start_list,
+        "ol": _start_list,
+        "sl": _start_list,
+        "notel": _start_notel,
+        "dl": _start_deflist,
+        "parml": _start_deflist,
+        "textline": _start_textline,
+        "dtdiv": _start_defdiv,
+        "dthdiv": _start_defdiv,
+        "ptdiv": _start_defdiv,
+        **dict.fromkeys(_CONTENT_TAGS, _start_content),
+    }
+
+    # Block-level end handlers, dispatched after the implicit flush. An
+    # unregistered end tag falls to the dispatcher's default: it closes the
+    # matching captured content element (tag == self._tag → _emit_current),
+    # else it is ignored.
+    _END_HANDLERS = {
+        # text flow & lists
+        "nt": _end_note,
+        "note": _end_note,
+        "info": _end_info,
+        "textline": _end_textline,
+        "ul": _end_list,
+        "ol": _end_list,
+        "sl": _end_list,
+        "dl": _end_list,
+        "parml": _end_list,
+        "notel": _end_list,
     }
 
     def close(self):
