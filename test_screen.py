@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import server
+import session
 from screen import Screen, Text, Field, DisplayIntensity
 from dtl import load_panel
 
@@ -32,7 +33,8 @@ def frozen_clock(monkeypatch):
         @staticmethod
         def now():
             return FROZEN
-    monkeypatch.setattr(server, "datetime", _DT)
+    # The clock consumer (send_ispf_menu) lives in session.py (#351).
+    monkeypatch.setattr(session, "datetime", _DT)
     yield
 
 
