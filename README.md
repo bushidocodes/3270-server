@@ -223,7 +223,8 @@ Two further #102 follow-ups round out the outbound structured-field surface, bot
 ## Project structure
 
 ```
-server.py       — TN3270 protocol: negotiation, session loop, the 3270 primitives
+ds3270.py       — pure 3270 codec primitives: order constants, coded addresses, field attributes, EBCDIC
+server.py       — TN3270 protocol: negotiation, session loop
 screen.py       — Screen/Field model: renders to a 3270 data stream, parses responses
 screens.py      — the two panels built as Screen objects (the in-code reference)
 dtl.py          — Dialog Tag Language parser: load_panel() → Screen, load_message_member() → MessageCatalog
