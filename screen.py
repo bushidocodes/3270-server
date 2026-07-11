@@ -209,17 +209,34 @@ def _emit_attr_runs(buf: bytearray, runs, base_color: Optional[Color],
     ``SA`` orders setting the foreground colour and highlight for the characters
     that follow. A run whose colour/highlight is ``None`` falls back to the
     field's base attribute, so a plain run re-asserts the base — that is how the
-    text returns to normal after an emphasised phrase."""
+    text returns to normal after an emphasised phrase.
+
+    An SA order sets the *current character attribute* for every character
+    stored after it in the whole write — SBA/SF/SFE do not clear it — so after
+    the last run each attribute that was left non-default is reset to 0x00
+    ("use the field attribute"), as ISPF does. Otherwise the last run's colour
+    would bleed into every item rendered after this one (#345)."""
+    last_fg = last_hl = 0x00
     for text, run_color, run_highlight in runs:
         color = run_color if run_color is not None else base_color
         highlight = run_highlight if run_highlight is not None else base_highlight
+        last_fg = color.value if color not in (None, Color.DEFAULT) else 0x00
+        last_hl = highlight.value if highlight not in (None, Highlight.DEFAULT) else 0x00
         buf.append(SA)
         buf.append(XA_FOREGROUND)
-        buf.append(color.value if color not in (None, Color.DEFAULT) else 0x00)
+        buf.append(last_fg)
         buf.append(SA)
         buf.append(XA_HIGHLIGHT)
-        buf.append(highlight.value if highlight not in (None, Highlight.DEFAULT) else 0x00)
+        buf.append(last_hl)
         buf.extend(_display(text))
+    if last_fg != 0x00:
+        buf.append(SA)
+        buf.append(XA_FOREGROUND)
+        buf.append(0x00)
+    if last_hl != 0x00:
+        buf.append(SA)
+        buf.append(XA_HIGHLIGHT)
+        buf.append(0x00)
 
 
 # A valid symbol name (DTL <checki type="name">): a letter or one of @ # $,
