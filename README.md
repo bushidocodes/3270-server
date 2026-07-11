@@ -225,6 +225,8 @@ Two further #102 follow-ups round out the outbound structured-field surface, bot
 ```
 ds3270.py       — pure 3270 codec primitives: order constants, coded addresses, field attributes, EBCDIC
 server.py       — TN3270 protocol: negotiation, session loop
+structured_fields.py — outbound Write-Structured-Field builders (Query, Set Reply Mode, Erase/Reset,
+                  partitions, Load PS), each a one-liner over the wsf() framing primitive (#353)
 screen.py       — Screen/Field model: renders to a 3270 data stream, parses responses
 screens.py      — the two panels built as Screen objects (the in-code reference)
 dtl.py          — Dialog Tag Language parser: load_panel() → Screen, load_message_member() → MessageCatalog
