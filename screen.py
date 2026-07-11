@@ -457,11 +457,11 @@ class Text:
     detectable: bool = False
     designator: Optional[str] = None
 
-    @property
-    def data_addr(self) -> int:
-        """Linear buffer address (row*80 + col+1) where this text's data starts;
-        the field-attribute byte occupies ``col``."""
-        return self.row * 80 + (self.col + 1)
+    def data_addr(self, cols: int) -> int:
+        """Linear buffer address (``row*cols + col+1``) where this text's data
+        starts on a ``cols``-wide screen (``Screen.width``); the field-attribute
+        byte occupies ``col``."""
+        return self.row * cols + (self.col + 1)
 
     @classmethod
     def rich(cls, row, col, runs, *, intensity=DisplayIntensity.NORMAL,
@@ -652,10 +652,11 @@ class Field:
     # not rendered, not part of field identity.
     cmdloc: Optional[str] = _dc_field(default=None, compare=False)
 
-    @property
-    def data_addr(self) -> int:
-        """Linear buffer address (row*80 + col) where this field's data starts."""
-        return self.row * 80 + (self.col + 1)
+    def data_addr(self, cols: int) -> int:
+        """Linear buffer address (``row*cols + col+1``) where this field's data
+        starts on a ``cols``-wide screen (``Screen.width``); the field-attribute
+        byte occupies ``col``."""
+        return self.row * cols + (self.col + 1)
 
     def render(self, buf: bytearray, color: bool = False, cols: int = 80,
                rows: int = 24) -> None:
@@ -835,7 +836,7 @@ class Screen:
         """
         if cursor_addr is None:
             return None
-        row, col = divmod(cursor_addr, 80)
+        row, col = divmod(cursor_addr, self.width)
         for choice in self.action_bar:
             if choice.get("row") == row and \
                     choice["col"] < col <= choice["col"] + len(choice["label"]):
@@ -848,7 +849,7 @@ class Screen:
         """
         if cursor_addr is None:
             return None
-        return self.selection_rows.get(cursor_addr // 80)
+        return self.selection_rows.get(cursor_addr // self.width)
 
     def point_and_shoot_at(self, cursor_addr: Optional[int]) -> Optional[Tuple[str, str]]:
         """The ``(variable, value)`` of the DTL ``<ps>`` point-and-shoot phrase the
@@ -857,7 +858,7 @@ class Screen:
         """
         if cursor_addr is None:
             return None
-        return self.ps_rows.get(cursor_addr // 80)
+        return self.ps_rows.get(cursor_addr // self.width)
 
     def command_point_and_shoot(self, cursor_addr: Optional[int]) -> Optional[str]:
         """The command-line value a DTL ``<ps>`` phrase under the cursor sets, or
@@ -892,7 +893,7 @@ class Screen:
         selected = []
         for it in self.items:
             if getattr(it, "designator", None) in ("?", ">"):
-                returned = fields_by_addr.get(it.data_addr, "") or ""
+                returned = fields_by_addr.get(it.data_addr(self.width), "") or ""
                 if returned[:1] == ">":
                     selected.append(it)
         return selected
@@ -949,7 +950,7 @@ class Screen:
         REQUIRED (DTL ``<dtafld required=yes>``); otherwise it is not checked.
         """
         addr_by_name = {
-            f.name.upper(): f.data_addr
+            f.name.upper(): f.data_addr(self.width)
             for f in self.items
             if isinstance(f, Field) and f.name
         }
@@ -980,7 +981,7 @@ class Screen:
         """
         if self.command_field is None:
             return None
-        return fields_by_addr.get(self.command_field.data_addr)
+        return fields_by_addr.get(self.command_field.data_addr(self.width))
 
     def command_for(self, key: Optional[str]) -> Optional[str]:
         """The command bound to a function key (e.g. ``"PF3"``) by the keylist.
@@ -1006,16 +1007,18 @@ class Screen:
         if cursor_addr is None:
             return None
         for f in self.items:
-            if isinstance(f, Field) and f.help and \
-                    f.data_addr <= cursor_addr < f.data_addr + f.length:
-                return f.help
+            if isinstance(f, Field) and f.help:
+                start = f.data_addr(self.width)
+                if start <= cursor_addr < start + f.length:
+                    return f.help
             # A display cell (e.g. an output <lstcol help=...>) can also carry
             # field-level help; its data spans data_addr .. +len(text).
-            if isinstance(f, Text) and f.help and \
-                    f.data_addr <= cursor_addr < f.data_addr + len(f.text):
-                return f.help
+            if isinstance(f, Text) and f.help:
+                start = f.data_addr(self.width)
+                if start <= cursor_addr < start + len(f.text):
+                    return f.help
         for choice in self.action_bar:
-            start = choice["row"] * 80 + choice["col"]
+            start = choice["row"] * self.width + choice["col"]
             if choice.get("help") and start <= cursor_addr < start + len(choice["label"]):
                 return choice["help"]
         return None
@@ -1114,7 +1117,7 @@ class Screen:
 
     def _addr_to_name(self) -> Dict[int, str]:
         return {
-            f.data_addr: f.name
+            f.data_addr(self.width): f.name
             for f in self.items
             if isinstance(f, Field) and f.name is not None
         }
@@ -1123,7 +1126,7 @@ class Screen:
         """The linear data address of the named input field, or ``None``."""
         for f in self.items:
             if isinstance(f, Field) and f.name == name:
-                return f.data_addr
+                return f.data_addr(self.width)
         return None
 
     def parse(self, aid: int, fields_by_addr: Dict[int, str]) -> Tuple[int, Dict[str, str]]:
@@ -1164,7 +1167,7 @@ class Screen:
             {} for _ in range(max(f.row_index for f in cells) + 1)
         ]
         for f in cells:
-            text = fields_by_addr.get(f.data_addr)
+            text = fields_by_addr.get(f.data_addr(self.width))
             value = text if text is not None else f.default
             # <lstcol CAPS=ON>: ISPF folds the field to uppercase; do the same on
             # read-back so the dialog sees the uppercased value it would on z/OS.
@@ -1191,12 +1194,13 @@ class Screen:
                  if isinstance(f, Field) and f.row_index is not None]
         if not cells:
             return []
-        modified_rows = {f.row_index for f in cells if f.data_addr in fields_by_addr}
+        modified_rows = {f.row_index for f in cells
+                         if f.data_addr(self.width) in fields_by_addr}
         errors: List[Tuple[int, Optional[str], Optional[str]]] = []
         for f in sorted(cells, key=lambda c: c.row_index):
             if not f.required or f.row_index not in modified_rows:
                 continue
-            value = fields_by_addr.get(f.data_addr, f.default)
+            value = fields_by_addr.get(f.data_addr(self.width), f.default)
             if not value.strip():
                 errors.append((f.row_index, f.name, f.msg))
         return errors

@@ -7,7 +7,7 @@ Screen renders there when ``alternate`` is set, sizing buffer addresses by its
 """
 import server
 from screen import (
-    Screen, Text, DisplayIntensity,
+    Screen, Text, Field, DisplayIntensity,
     ERASE_WRITE, ERASE_WRITE_ALTERNATE, encode_pack_addr,
 )
 
@@ -30,6 +30,32 @@ def test_wide_screen_addresses_by_width():
     data = s.render()
     assert bytes([0x11]) + encode_pack_addr(5, 100, 132) in data
     assert bytes([0x11]) + encode_pack_addr(5, 100, 80) not in data
+
+
+def test_wide_screen_field_read_back_keys_by_width():
+    # #347: a field below row 0 on the 27x132 alternate screen must key its
+    # read-back address by the real width. Field(5, 10, 8) renders its data at
+    # 5*132 + 11 = 671, not the fixed-width 5*80 + 11 = 411.
+    s = Screen(width=132, depth=27, alternate=True).add(
+        Field(5, 10, 8, name="member"))
+    addr = 5 * 132 + 11
+    assert bytes([0x11]) + encode_pack_addr(5, 10, 132) in s.render()
+    assert s.field_addr("member") == addr
+    aid, named = s.parse(0x7D, {addr: "PAYROLL"})
+    assert (aid, named) == (0x7D, {"member": "PAYROLL"})
+    # the stale 80-column key must NOT resolve to the field
+    assert s.parse(0x7D, {5 * 80 + 11: "PAYROLL"})[1] == {}
+
+
+def test_wide_screen_help_for_keys_by_width():
+    # #347: HELP with the cursor on a help= field of a 132-col screen must find
+    # the field at its real (width-sized) address span.
+    s = Screen(width=132, depth=27, alternate=True).add(
+        Field(5, 10, 8, name="member", help="memhelp"))
+    assert s.help_for(5 * 132 + 11) == "memhelp"        # first data byte
+    assert s.help_for(5 * 132 + 11 + 7) == "memhelp"    # last data byte
+    assert s.help_for(5 * 132 + 11 + 8) is None         # just past the field
+    assert s.help_for(5 * 80 + 11) is None              # the stale 80-col address
 
 
 def test_default_width_render_is_unchanged():
