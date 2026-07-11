@@ -590,94 +590,13 @@ class _DTLParser(HTMLParser):
         # ends at that first child tag — bank it and stop capturing (#125).
         if self._grpbox_pending is not None:
             self._finalize_grpbox_title()
-        if tag in ("comment", "copyr", "compopt", "generate", "source"):
-            # Non-rendering blocks. <comment> (a comment), <copyr> (copyright),
-            # <compopt> (ISPDTLC compiler options) and <generate> (a build-time
-            # directive that generates panels/messages from a model) have no
-            # host-display effect in this display server, so their content is
-            # dropped. <source> ()INIT/)PROC logic also renders nothing, but its raw
-            # text is kept for the ZSEL selection routing (see _close_skip). #119.
-            self._skip = [tag, [], a]
-            return
-        # An inline <hp> (highlighted phrase) inside a text element does NOT close
-        # it — it emphasises a phrase *within* one field. Bank the runs and return
-        # before the implicit-flush below (see _begin_hp / _finalize_runs). A <rp>
-        # (reference phrase — a hypertext link to another help panel) is the same
-        # kind of inline emphasis; with no explicit emphasis it renders underlined,
-        # the CUA point-and-shoot link style.
-        if tag in ("hp", "rp") and (self._tag in _TEXT_TAGS
-                                    or self._tag == "divider"):
-            self._begin_hp(a)
-            if tag == "rp" and self._hp == (None, None, None):
-                self._hp = (None, Highlight.UNDERSCORE, None)
-            return
-        # <varsub var=NAME> substitutes a dialog variable inside message text: emit
-        # an ISPF ``&NAME.`` reference into the text being captured, resolved at
-        # display time (MessageCatalog.format) exactly like a literal &NAME would be.
-        if tag == "varsub":
-            var = a.get("var")
-            if var:
-                self.handle_data(f"&{var}.")
-            return
-        # <ps> (point-and-shoot): an inline phrase whose text the user can select by
-        # cursor — placing the cursor on it and pressing Enter sets VAR to VALUE
-        # (before )PROC). Like <hp>/<rp> it does NOT close its parent and its text
-        # stays part of the parent's content; the (var, value) is banked here and
-        # mapped to the parent's row when the parent is emitted (_emit_current).
-        # VALUE=* on a <ps> in a <choice> means "the choice's number" (resolved in
-        # _emit_choice). The point-and-shoot text is color-emphasised on real ISPF
-        # colour terminals; in host/mono it renders like the surrounding text.
-        if tag == "ps":
-            var = a.get("var")
-            if var:
-                self._pending_ps = (var, str(a.get("value", "")))
-                # CSRGRP (cursor group) and DEPTH (rows the phrase spans) have no
-                # host-display effect on a text terminal; record them as metadata.
-                if "csrgrp" in a or "depth" in a:
-                    self.screen.ps_meta.append(
-                        {"var": var, "csrgrp": a.get("csrgrp"),
-                         "depth": self._opt_int(a.get("depth"))})
-            return
-        # <chofld> (choice data field): an input field within a <choice> row. The
-        # text captured before it is the choice description; the text after it is the
-        # field's own description. Both are banked and laid out when the choice is
-        # emitted (_emit_choice); like <dtafldd> it does not close its parent.
-        if tag == "chofld":
-            if self._tag == "choice":
-                self._chofld_choicetext = "".join(self._chars)
-                self._chars = []
-                self._pending_chofld = a
-            return
-        # <scrfld> (scrollable field): annotates the enclosing <dtafld>/<lstcol>,
-        # making it horizontally scrollable — DISPLEN is the field's logical data
-        # length (wider than the on-screen window, which stays the field's
-        # entwidth/colwidth), and the indicator attributes name scroll-status
-        # variables. It does not close its parent (attached when the field/column is
-        # emitted); finalise an open <dtafldd> capture first so a description isn't
-        # swallowed.
-        if tag == "scrfld":
-            if self._in_dtafldd and isinstance(self._dtafldd, list):
-                self._in_dtafldd, self._dtafldd = False, "".join(self._dtafldd)
-            self._pending_scrfld = a
-            return
-        # <assignl>/<assigni> (assignment list): a value→result table attached to
-        # the enclosing <dtafld>. Like <scrfld> it annotates the field without
-        # closing it — each <assigni value=v result=r> adds a mapping; the finished
-        # list is attached when the <dtafld> is emitted (_attach_assignl). It is the
-        # surface syntax for an ISPF )PROC `&destvar = TRANS(&field v,'r' …)`
-        # assignment (see #55, docs/dtl-action-routing-plan.md Phase 2 PR B).
-        # Finalise an open <dtafldd> capture first so a description isn't swallowed.
-        if tag == "assignl":
-            if self._in_dtafldd and isinstance(self._dtafldd, list):
-                self._in_dtafldd, self._dtafldd = False, "".join(self._dtafldd)
-            self._assignl = {"destvar": a.get("destvar"), "pairs": []}
-            self._pending_assignl = self._assignl
-            return
-        if tag == "assigni":
-            # A VALUE with no RESULT assigns the empty string (ISPF's TRANS default);
-            # a stray <assigni> outside an <assignl> carries nowhere, so drop it.
-            if self._assignl is not None and a.get("value") is not None:
-                self._assignl["pairs"].append((a.get("value"), a.get("result", "")))
+        # Inline/annotating tags (<hp>/<ps>/<scrfld>/…) and non-rendering
+        # directive blocks dispatch BEFORE the implicit flush below: they do not
+        # close the open content element. A handler returns True when it consumed
+        # the tag (an <hp>/<rp> outside a text element declines and falls through
+        # to the ordinary block handling).
+        inline = self._START_INLINE.get(tag)
+        if inline is not None and inline(self, tag, a):
             return
         # Implicit end tags: a new block element closes the open content element
         # (DTL omits most end tags). <dtafldd> (a field's prompt/description) and
@@ -1390,6 +1309,109 @@ class _DTLParser(HTMLParser):
             # end tag), so the dtafldd capture state must not leak into it.
             self._in_dtafldd, self._dtafldd = False, None
 
+    # ── start handlers: inline / annotating tags ─────────────────────────────
+    # Dispatched from handle_starttag via _START_INLINE, BEFORE the implicit
+    # flush — these tags do not close the open content element. Each returns
+    # True when it consumed the tag; False falls through to block handling.
+
+    def _inline_start_skip(self, tag, a):
+        # Non-rendering blocks. <comment> (a comment), <copyr> (copyright),
+        # <compopt> (ISPDTLC compiler options) and <generate> (a build-time
+        # directive that generates panels/messages from a model) have no
+        # host-display effect in this display server, so their content is
+        # dropped. <source> ()INIT/)PROC logic also renders nothing, but its raw
+        # text is kept for the ZSEL selection routing (see _close_skip). #119.
+        self._skip = [tag, [], a]
+        return True
+
+    def _inline_start_hp(self, tag, a):
+        # An inline <hp> (highlighted phrase) inside a text element does NOT close
+        # it — it emphasises a phrase *within* one field. Bank the runs and return
+        # before the implicit flush (see _begin_hp / _finalize_runs). A <rp>
+        # (reference phrase — a hypertext link to another help panel) is the same
+        # kind of inline emphasis; with no explicit emphasis it renders underlined,
+        # the CUA point-and-shoot link style.
+        if not (self._tag in _TEXT_TAGS or self._tag == "divider"):
+            return False
+        self._begin_hp(a)
+        if tag == "rp" and self._hp == (None, None, None):
+            self._hp = (None, Highlight.UNDERSCORE, None)
+        return True
+
+    def _inline_start_varsub(self, tag, a):
+        # <varsub var=NAME> substitutes a dialog variable inside message text: emit
+        # an ISPF ``&NAME.`` reference into the text being captured, resolved at
+        # display time (MessageCatalog.format) exactly like a literal &NAME would be.
+        var = a.get("var")
+        if var:
+            self.handle_data(f"&{var}.")
+        return True
+
+    def _inline_start_ps(self, tag, a):
+        # <ps> (point-and-shoot): an inline phrase whose text the user can select by
+        # cursor — placing the cursor on it and pressing Enter sets VAR to VALUE
+        # (before )PROC). Like <hp>/<rp> it does NOT close its parent and its text
+        # stays part of the parent's content; the (var, value) is banked here and
+        # mapped to the parent's row when the parent is emitted (_emit_current).
+        # VALUE=* on a <ps> in a <choice> means "the choice's number" (resolved in
+        # _emit_choice). The point-and-shoot text is color-emphasised on real ISPF
+        # colour terminals; in host/mono it renders like the surrounding text.
+        var = a.get("var")
+        if var:
+            self._pending_ps = (var, str(a.get("value", "")))
+            # CSRGRP (cursor group) and DEPTH (rows the phrase spans) have no
+            # host-display effect on a text terminal; record them as metadata.
+            if "csrgrp" in a or "depth" in a:
+                self.screen.ps_meta.append(
+                    {"var": var, "csrgrp": a.get("csrgrp"),
+                     "depth": self._opt_int(a.get("depth"))})
+        return True
+
+    def _inline_start_chofld(self, tag, a):
+        # <chofld> (choice data field): an input field within a <choice> row. The
+        # text captured before it is the choice description; the text after it is the
+        # field's own description. Both are banked and laid out when the choice is
+        # emitted (_emit_choice); like <dtafldd> it does not close its parent.
+        if self._tag == "choice":
+            self._chofld_choicetext = "".join(self._chars)
+            self._chars = []
+            self._pending_chofld = a
+        return True
+
+    def _inline_start_scrfld(self, tag, a):
+        # <scrfld> (scrollable field): annotates the enclosing <dtafld>/<lstcol>,
+        # making it horizontally scrollable — DISPLEN is the field's logical data
+        # length (wider than the on-screen window, which stays the field's
+        # entwidth/colwidth), and the indicator attributes name scroll-status
+        # variables. It does not close its parent (attached when the field/column is
+        # emitted); finalise an open <dtafldd> capture first so a description isn't
+        # swallowed.
+        if self._in_dtafldd and isinstance(self._dtafldd, list):
+            self._in_dtafldd, self._dtafldd = False, "".join(self._dtafldd)
+        self._pending_scrfld = a
+        return True
+
+    def _inline_start_assignl(self, tag, a):
+        # <assignl>/<assigni> (assignment list): a value→result table attached to
+        # the enclosing <dtafld>. Like <scrfld> it annotates the field without
+        # closing it — each <assigni value=v result=r> adds a mapping; the finished
+        # list is attached when the <dtafld> is emitted (_attach_assignl). It is the
+        # surface syntax for an ISPF )PROC `&destvar = TRANS(&field v,'r' …)`
+        # assignment (see #55, docs/dtl-action-routing-plan.md Phase 2 PR B).
+        # Finalise an open <dtafldd> capture first so a description isn't swallowed.
+        if self._in_dtafldd and isinstance(self._dtafldd, list):
+            self._in_dtafldd, self._dtafldd = False, "".join(self._dtafldd)
+        self._assignl = {"destvar": a.get("destvar"), "pairs": []}
+        self._pending_assignl = self._assignl
+        return True
+
+    def _inline_start_assigni(self, tag, a):
+        # A VALUE with no RESULT assigns the empty string (ISPF's TRANS default);
+        # a stray <assigni> outside an <assignl> carries nowhere, so drop it.
+        if self._assignl is not None and a.get("value") is not None:
+            self._assignl["pairs"].append((a.get("value"), a.get("result", "")))
+        return True
+
     def _close_skip(self):
         """Leave the current non-rendering block. A <source>'s accumulated text is
         handed to _emit_source (ZSEL routing); the rest is discarded."""
@@ -1437,26 +1459,12 @@ class _DTLParser(HTMLParser):
             return
         if self._panel_title is not None:
             self._finalize_panel_title()
-        # Closing an inline <hp>/<rp> banks its emphasised run and keeps the
-        # enclosing text element open (it is not a block child).
-        if tag in ("hp", "rp") and self._runs is not None:
-            self._end_hp()
-            return
-        # </assignl>: closes the assignment list (no more <assigni> items) but keeps
-        # it pending for the enclosing <dtafld> to attach; the field it annotates
-        # stays open, so this must return before the implicit container flush below.
-        if tag == "assignl":
-            self._assignl = None
-            return
-        # </ps>, </chofld>, </scrfld>, </assigni>: inline/annotating children handled
-        # on their start tag. They must not close the enclosing content element (the
-        # choice/field/text they sit inside stays open), so a stray end tag is a no-op.
-        if tag in ("ps", "chofld", "scrfld", "assigni"):
-            return
-        # <varsub> is an empty tag: its text was injected on the start tag, so a
-        # (rare) explicit </varsub> is a no-op — return before the implicit flush
-        # below, which would otherwise prematurely close the enclosing <msg>.
-        if tag == "varsub":
+        # Inline/annotating end tags dispatch BEFORE the implicit flush below:
+        # they must not close the enclosing content element. A handler returns
+        # True when it consumed the tag (an </hp>/</rp> with no open runs
+        # declines and falls through to the ordinary block handling).
+        inline = self._END_INLINE.get(tag)
+        if inline is not None and inline(self, tag):
             return
         # A container closing flushes any open content child first (end tags are
         # omitted in DTL), while its context is still intact. The element's own
@@ -1677,6 +1685,67 @@ class _DTLParser(HTMLParser):
         if tag != self._tag:
             return
         self._emit_current()
+
+    # ── end handlers: inline / annotating tags ───────────────────────────────
+    # Dispatched from handle_endtag via _END_INLINE, BEFORE the implicit flush.
+    # Each returns True when it consumed the tag.
+
+    def _inline_end_hp(self, tag):
+        # Closing an inline <hp>/<rp> banks its emphasised run and keeps the
+        # enclosing text element open (it is not a block child).
+        if self._runs is None:
+            return False
+        self._end_hp()
+        return True
+
+    def _inline_end_assignl(self, tag):
+        # </assignl>: closes the assignment list (no more <assigni> items) but keeps
+        # it pending for the enclosing <dtafld> to attach; the field it annotates
+        # stays open, so this must consume the tag before the implicit flush.
+        self._assignl = None
+        return True
+
+    def _inline_end_noop(self, tag):
+        # </ps>, </chofld>, </scrfld>, </assigni>: inline/annotating children handled
+        # on their start tag. They must not close the enclosing content element (the
+        # choice/field/text they sit inside stays open), so a stray end tag is a no-op.
+        # <varsub> likewise is an empty tag whose text was injected on the start tag —
+        # a (rare) explicit </varsub> must not prematurely close the enclosing <msg>.
+        return True
+
+    # ── tag-handler registries ───────────────────────────────────────────────
+    # {tag -> handler} dispatch tables for handle_starttag / handle_endtag.
+    # The *_INLINE registries hold the inline/annotating tags dispatched before
+    # the implicit flush (handlers return True when they consume the tag).
+    # Values are plain functions (class-body references), called with an
+    # explicit ``self`` — the same registry pattern as server._SELECTION_HANDLERS.
+
+    _START_INLINE = {
+        "comment": _inline_start_skip,
+        "copyr": _inline_start_skip,
+        "compopt": _inline_start_skip,
+        "generate": _inline_start_skip,
+        "source": _inline_start_skip,
+        "hp": _inline_start_hp,
+        "rp": _inline_start_hp,
+        "varsub": _inline_start_varsub,
+        "ps": _inline_start_ps,
+        "chofld": _inline_start_chofld,
+        "scrfld": _inline_start_scrfld,
+        "assignl": _inline_start_assignl,
+        "assigni": _inline_start_assigni,
+    }
+
+    _END_INLINE = {
+        "hp": _inline_end_hp,
+        "rp": _inline_end_hp,
+        "assignl": _inline_end_assignl,
+        "ps": _inline_end_noop,
+        "chofld": _inline_end_noop,
+        "scrfld": _inline_end_noop,
+        "assigni": _inline_end_noop,
+        "varsub": _inline_end_noop,
+    }
 
     def close(self):
         """Flush at end-of-input. DTL routinely omits end tags, so a panel can
