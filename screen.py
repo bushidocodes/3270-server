@@ -26,6 +26,7 @@ from ds3270 import (
     SBA,
     SF,
     IC,
+    SessionContext,
     encode_pack_addr,
     field_attribute,
     write_control_character,
@@ -33,14 +34,16 @@ from ds3270 import (
 )
 
 
-def _display(text: str) -> bytes:
+def _display(text: str, code_page: str = None) -> bytes:
     """Encode display text to EBCDIC, replacing any character the session's code
     page can't encode with its substitute (``?``) rather than raising. Rendering a
     panel must degrade a stray non-cp037 character, not crash the whole session —
     a real host does the same (the browse path already does; see #150). All
     cp037-safe text (every bundled panel) encodes identically to strict mode, so
-    this changes no bytes."""
-    return to_ebcdic(text, errors="replace")
+    this changes no bytes. ``code_page`` is the explicit session code page
+    (:class:`ds3270.SessionContext`, #352); ``None`` falls back to the ambient
+    thread-local shim."""
+    return to_ebcdic(text, code_page, errors="replace")
 
 
 ERASE_WRITE = 0xF5
@@ -204,7 +207,8 @@ def _emit_field_start(buf: bytearray, fa: int,
 
 
 def _emit_attr_runs(buf: bytearray, runs, base_color: Optional[Color],
-                    base_highlight: Optional[Highlight]) -> None:
+                    base_highlight: Optional[Highlight],
+                    code_page: str = None) -> None:
     """Emit a field's text as a sequence of attribute runs, each preceded by
     ``SA`` orders setting the foreground colour and highlight for the characters
     that follow. A run whose colour/highlight is ``None`` falls back to the
@@ -228,7 +232,7 @@ def _emit_attr_runs(buf: bytearray, runs, base_color: Optional[Color],
         buf.append(SA)
         buf.append(XA_HIGHLIGHT)
         buf.append(last_hl)
-        buf.extend(_display(text))
+        buf.extend(_display(text, code_page))
     if last_fg != 0x00:
         buf.append(SA)
         buf.append(XA_FOREGROUND)
@@ -477,7 +481,7 @@ class Text:
                    role=role, color=color, highlight=highlight, runs=norm)
 
     def render(self, buf: bytearray, color: bool = False, cols: int = 80,
-               rows: int = 24) -> None:
+               rows: int = 24, code_page: str = None) -> None:
         _emit_sba(buf, self.row, self.col, cols)
         fa = field_attribute(display=self.intensity, protected=True,
                              detectable=self.detectable or self.designator is not None)
@@ -489,16 +493,16 @@ class Text:
         # key reads it) precedes the text.
         text = (self.designator + self.text) if self.designator else self.text
         if self.runs is not None and color:
-            _emit_attr_runs(buf, self.runs, base_color, base_highlight)
+            _emit_attr_runs(buf, self.runs, base_color, base_highlight, code_page)
         elif len(text) >= _RA_MIN_RUN and len(set(text)) == 1:
             # A long run of one character (a rule line / fill) — repeat it with a
             # single RA order instead of one byte per character. The field start
             # occupies self.col, so the run begins at self.col + 1.
             start = self.row * cols + self.col + 1
-            _emit_ra(buf, start + len(text), _display(text[0])[0],
+            _emit_ra(buf, start + len(text), _display(text[0], code_page)[0],
                      cols, rows)
         else:
-            buf.extend(_display(text))
+            buf.extend(_display(text, code_page))
 
 
 def _emit_graphic(buf: bytearray, row: int, col: int, codes: bytes,
@@ -573,7 +577,9 @@ class GraphicText:
                    + bytes([Line.BOTTOM_RIGHT.value]), **kw)
 
     def render(self, buf: bytearray, color: bool = False, cols: int = 80,
-               rows: int = 24) -> None:
+               rows: int = 24, code_page: str = None) -> None:
+        # ``code_page`` is accepted for the uniform item-render call; every glyph
+        # here comes from the graphic (GE) set, so no code page is involved.
         _emit_sba(buf, self.row, self.col, cols)
         fa = field_attribute(display=self.intensity, protected=True)
         base_color = _role_colour(self.color, self.role) if color else None
@@ -659,7 +665,7 @@ class Field:
         return self.row * cols + (self.col + 1)
 
     def render(self, buf: bytearray, color: bool = False, cols: int = 80,
-               rows: int = 24) -> None:
+               rows: int = 24, code_page: str = None) -> None:
         display = DisplayIntensity.NON_DISPLAY if self.hidden else self.intensity
         ftype = FieldType.NUMERIC if self.numeric else FieldType.ALPHANUMERIC
         _emit_sba(buf, self.row, self.col, cols)
@@ -683,7 +689,7 @@ class Field:
         # the field value.
         fill = self.pad if self.pad is not None else " "
         data = (self.designator + self.default) if self.designator else self.default
-        buf.extend(_display(data.ljust(self.length, fill)[: self.length]))
+        buf.extend(_display(data.ljust(self.length, fill)[: self.length], code_page))
         if self.terminator:
             _emit_sba(buf, self.row, self.col + 1 + self.length, cols)
             buf.append(SF)
@@ -1029,12 +1035,22 @@ class Screen:
     def field(self, row, col, length, **kw) -> "Screen":
         return self.add(Field(row, col, length, **kw))
 
-    def render(self, color: bool = False) -> bytes:
+    def render(self, color: bool = None,
+               session: "Optional[SessionContext]" = None) -> bytes:
         """Render to a 3270 data stream. When ``color`` is true, items carrying
         a colour/highlight emit Start Field Extended; otherwise (a mono terminal,
         or an item with no colour) they emit plain Start Field, so the mono data
         stream is byte-for-byte identical to before extended attributes existed.
+
+        ``session`` is the explicit per-connection context (#352): its code page
+        encodes every item's text and its colour capability is the default when
+        ``color`` is omitted — so a render is deterministic with no thread-local
+        setup. An explicit ``color`` always wins. With no ``session``, text
+        encodes through the ambient thread-local shim, exactly as before.
         """
+        if color is None:
+            color = session.color if session is not None else False
+        code_page = session.code_page if session is not None else None
         buf = bytearray()
         if self.erase:
             buf.append(ERASE_WRITE_ALTERNATE if self.alternate else ERASE_WRITE)
@@ -1051,15 +1067,17 @@ class Screen:
             # otherwise reappear on row 0 and corrupt the top of the screen.
             if not (0 <= getattr(item, "row", 0) < self.depth):
                 continue
-            item.render(buf, color=color, cols=self.width, rows=self.depth)
+            item.render(buf, color=color, cols=self.width, rows=self.depth,
+                        code_page=code_page)
         if self.cursor_at is not None:
             _emit_sba(buf, self.cursor_at[0], self.cursor_at[1], self.width)
             buf.append(IC)
         buf.extend([IAC, EOR])
         return bytes(buf)
 
-    def render_partial(self, items, color: bool = False,
-                       cursor_at: Optional[Tuple[int, int]] = None) -> bytes:
+    def render_partial(self, items, color: bool = None,
+                       cursor_at: Optional[Tuple[int, int]] = None,
+                       session: "Optional[SessionContext]" = None) -> bytes:
         """Render a plain **Write** (0xF1) that updates only ``items``, leaving
         the rest of the presentation space — and the modified-data tags — alone.
 
@@ -1068,7 +1086,11 @@ class Screen:
         Used to patch a message line or status field in place (e.g. the ISPF
         menu redisplaying "INVALID OPTION" without clobbering the typed option).
         ``cursor_at`` optionally repositions the cursor with an ``IC`` order.
+        ``session``/``color`` resolve exactly as in :meth:`render` (#352).
         """
+        if color is None:
+            color = session.color if session is not None else False
+        code_page = session.code_page if session is not None else None
         buf = bytearray([WRITE])
         buf.extend(
             write_control_character(
@@ -1078,7 +1100,8 @@ class Screen:
             )
         )
         for item in items:
-            item.render(buf, color=color, cols=self.width, rows=self.depth)
+            item.render(buf, color=color, cols=self.width, rows=self.depth,
+                        code_page=code_page)
         if cursor_at is not None:
             _emit_sba(buf, cursor_at[0], cursor_at[1], self.width)
             buf.append(IC)

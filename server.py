@@ -21,8 +21,11 @@ from ds3270 import (  # noqa: F401  (re-exported)
     MAX_ADDRESSABLE_CELLS,
     SBA,
     SF,
+    SessionContext,
     _session,
+    activate_session,
     aid_to_string,
+    current_session,
     encode_pack_addr,
     field_attribute,
     from_ebcdic,
@@ -1618,13 +1621,16 @@ def handle_client(client_socket, addr):
     # no-op under TN3270E (the Query is unanswered, so no reply-modes capability).
     model = request_reply_mode(client_socket, model)
     client_socket.settimeout(600)
-    # Record the session's colour capability so every panel renders in colour on
-    # a colour terminal (see _send_screen / _session).
-    _session.color = _wants_color(model)
-    # Pick the session's EBCDIC code page from the terminal's discovered base
-    # character set (#137), so text is encoded/decoded in the page the terminal
-    # actually uses (e.g. cp273 for a German ws3270), defaulting to US cp037.
-    _session.code_page = code_page_for_model(model)
+    # Everything discovered about this session, as one explicit value (#352):
+    # the colour capability (so every panel renders in colour on a colour
+    # terminal), the EBCDIC code page picked from the terminal's discovered base
+    # character set (#137, e.g. cp273 for a German ws3270, defaulting to US
+    # cp037), and the negotiated model. Installed on the thread-local shim too,
+    # so the ambient readers not yet migrated (the reply parser's
+    # to_ebcdic/from_ebcdic) stay in agreement.
+    ctx = SessionContext(code_page=code_page_for_model(model),
+                         color=_wants_color(model), model=model)
+    activate_session(ctx)
     # If BIND-IMAGE was negotiated, bind the LU-LU session before the first
     # screen: the client won't accept 3270-DATA until it has seen a BIND, and
     # being bound is what lets its ATTN key reach us (RFC 2355 §10.3).
@@ -1632,9 +1638,10 @@ def handle_client(client_socket, addr):
         client_socket.send_bind()
 
     # Negotiation settled: hand the connection to the application (session.py,
-    # #351). From here on the TSO/ISPF flow drives the two-method Transport port
-    # and never sees the socket, the TN3270E framing, or TLS.
-    session.run(SocketTransport(client_socket), model)
+    # #351), with the session context passed explicitly (#352). From here on the
+    # TSO/ISPF flow drives the two-method Transport port and never sees the
+    # socket, the TN3270E framing, or TLS.
+    session.run(SocketTransport(client_socket), model, ctx=ctx)
 
 
 def make_tls_context(certfile, keyfile=None):

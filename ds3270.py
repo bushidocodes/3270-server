@@ -8,6 +8,7 @@ core is importable and testable with no sockets.
 """
 
 import threading
+from dataclasses import dataclass
 from enum import Enum
 
 
@@ -25,6 +26,56 @@ _session = threading.local()
 DEFAULT_CODE_PAGE = "cp037"
 
 
+@dataclass(frozen=True)
+class SessionContext:
+    """One connection's session context as an explicit value (#352): the EBCDIC
+    code page text is encoded/decoded in, whether the terminal renders colour
+    (extended attributes), and the negotiated terminal model (a
+    ``server.TerminalModel``, held opaquely so this module stays dependency-free).
+
+    Passing one of these explicitly — ``Screen.render(session=...)``,
+    ``session.run(ctx=...)`` — makes rendering deterministic with no thread-local
+    priming. The :data:`_session` thread-local remains as the compatibility shim
+    for the not-yet-migrated ambient readers; :func:`activate_session` and
+    :func:`current_session` are its write and read halves."""
+
+    code_page: str = DEFAULT_CODE_PAGE
+    color: bool = False
+    model: object = None
+
+    def encode(self, s: str, errors: str = "strict") -> bytes:
+        """Encode text to EBCDIC in this session's code page."""
+        return s.encode(self.code_page, errors)
+
+    def decode(self, b, errors: str = "strict") -> str:
+        """Decode EBCDIC to text in this session's code page."""
+        return bytes(b).decode(self.code_page, errors)
+
+
+def current_session() -> SessionContext:
+    """This thread's ambient session state as an explicit :class:`SessionContext`
+    — the read half of the compatibility shim. Migrated code takes a
+    SessionContext parameter and falls back here only when its caller passed
+    none, so an unmigrated caller keeps today's behaviour."""
+    return SessionContext(
+        code_page=getattr(_session, "code_page", DEFAULT_CODE_PAGE),
+        color=getattr(_session, "color", False),
+        model=getattr(_session, "model", None),
+    )
+
+
+def activate_session(ctx: SessionContext) -> None:
+    """Install ``ctx`` as this thread's ambient session — the write half of the
+    compatibility shim. ``server.handle_client`` calls this once after
+    negotiation so ambient readers that are not yet migrated (the module-level
+    :func:`to_ebcdic`/:func:`from_ebcdic` in the reply parser, tests that poke
+    :data:`_session`) agree with the explicit context threaded through the
+    application."""
+    _session.code_page = ctx.code_page
+    _session.color = ctx.color
+    _session.model = ctx.model
+
+
 def _session_code_page() -> str:
     """The current session's EBCDIC code page (thread-local, see :data:`_session`),
     or the US default when none was negotiated/selected."""
@@ -32,9 +83,11 @@ def _session_code_page() -> str:
 
 
 def to_ebcdic(s: str, code_page: str = None, errors: str = "strict") -> bytes:
-    """Encode text to EBCDIC. Uses the session's code page (thread-local) unless
-    ``code_page`` is given — the explicit argument lets a caller override per field
-    (e.g. a future mixed-CCSID panel) without touching the session default."""
+    """Encode text to EBCDIC. Uses the session's code page (the thread-local
+    compatibility shim) unless ``code_page`` is given — the explicit argument
+    lets a caller override per field (e.g. a future mixed-CCSID panel) without
+    touching the session default. New code should prefer carrying an explicit
+    :class:`SessionContext` and calling :meth:`SessionContext.encode`."""
     return s.encode(code_page or _session_code_page(), errors)
 
 
