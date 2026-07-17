@@ -9,7 +9,7 @@ import time
 IAC, EOR, DO, DONT, WILL, WONT, SB, SE = 0xFF, 0xEF, 0xFD, 0xFE, 0xFB, 0xFC, 0xFA, 0xF0
 BINARY, TERMINAL_TYPE, EOR_OPT = 0, 24, 25
 
-HOST, PORT = "localhost", 2323
+HOST, PORT = "127.0.0.1", 13271
 NUM_CLIENTS = 10
 TIMEOUT = 30
 
@@ -228,5 +228,45 @@ def main():
     return failed
 
 
-if __name__ == "__main__":
-    exit(main())
+# --- pytest collection (issue #369) ---
+import pytest
+from server import run_tn3270_server
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _start_server_for_helpers():
+    """Start a dedicated server so helpers/tests do not require an external process."""
+    t = threading.Thread(
+        target=run_tn3270_server,
+        kwargs={"host": HOST, "port": PORT},
+        daemon=True,
+    )
+    t.start()
+    deadline = time.time() + 5.0
+    while time.time() < deadline:
+        try:
+            s = socket.create_connection((HOST, PORT), timeout=0.2)
+            s.close()
+            break
+        except OSError:
+            time.sleep(0.05)
+    else:
+        pytest.fail("concurrent-test server failed to bind")
+    yield
+
+
+def test_concurrent_logins():
+    """10 concurrent clients complete login -> ISPF menu (was script-only main())."""
+    results = {}
+    threads = []
+    for i in range(NUM_CLIENTS):
+        th = threading.Thread(target=run_client, args=(i, results), daemon=True)
+        threads.append(th)
+        th.start()
+    for th in threads:
+        th.join(TIMEOUT + 5)
+    assert len(results) == NUM_CLIENTS, f"incomplete results: {results}"
+    failures = {
+        k: v for k, v in results.items() if not (isinstance(v, tuple) and v[0] == "PASS")
+    }
+    assert not failures, f"client failures: {failures}"

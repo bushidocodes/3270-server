@@ -6,30 +6,38 @@ on:
   pull_request:
     branches: ["main"]
 
-permissions: read-all
+permissions:
+  contents: read
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+
     steps:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
+          cache: pip
 
-      - name: Install dependencies
-        run: pip install pytest
+      - name: Install package (dev extras)
+        run: pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check .
 
       - name: Install s3270 (3270 emulator for the real-terminal smoke test)
         run: |
           sudo apt-get update
           sudo apt-get install -y s3270
-          which s3270   # fail the job if the emulator did not install
+          which s3270
 
       - name: Run pytest
         run: pytest -v
         env:
-          # Turn a missing emulator into a failure (not a silent skip), so a
-          # broken install is caught rather than passing quietly.
           REQUIRE_EMULATOR: "1"

@@ -167,7 +167,7 @@ def _update_menu_message(transport, screen, short_msg, ctx: SessionContext = Non
     transport.send(data)
 
 
-def _dialog_vars(userid: str, model: "TerminalModel" = None):
+def _dialog_vars(userid: str, model: "TerminalModel" = None):  # noqa: F821
     """The live ISPF dialog variables shown by Dialog Test (option 7), as
     ``{vname, vvalue}`` rows for the panel's ``<lstfld>`` table. These are real
     ISPF system-variable names with this session's current values — including

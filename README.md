@@ -96,7 +96,7 @@ Lines 1-22 of 54     PF7=Up  PF8=Down  PF3=Exit
 
 ### Prerequisites
 
-- Python 3.8+
+- Python 3.9+
 - A TN3270 emulator — [wc3270](https://x3270.miraheze.org/wiki/Wc3270) (Windows) or [x3270](https://x3270.miraheze.org/wiki/X3270) (Linux/macOS) are free and work out of the box
 
 ### Run the server
