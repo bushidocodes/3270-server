@@ -1,0 +1,42 @@
+[project]
+name = "tn3270-server"
+version = "0.1.0"
+description = "Python TN3270 server with DTL/ISPF panel rendering"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Sean McBride" }]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.9"]
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v"
+# Script-style modules that start servers at import used to collect zero tests;
+# they are now proper pytest modules.
+filterwarnings = [
+  "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+src = ["."]
+extend-exclude = ["panels", "messages", "golden", "docs", "tests/dtl_examples"]
+
+[tool.ruff.lint]
+# Adoption baseline: fail only on undefined names / syntax-level issues.
+# Broader style (I001/E) can be expanded once the suite is clean.
+select = ["E9", "F821", "F822", "F823"]
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = [
+  "server", "session", "screen", "ds3270", "dtl", "goca",
+  "structured_fields", "golden_corpus",
+]
